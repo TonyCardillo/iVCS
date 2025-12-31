@@ -1,0 +1,6 @@
+capstone
+pytest
+hypothesis
+ruff
+PyQt5
+litellm

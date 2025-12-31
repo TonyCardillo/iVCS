@@ -1,0 +1,12 @@
+line-length = 120
+
+[lint]
+select = ["E", "F", "I", "N", "UP"]
+ignore = ["W191", "N801", "N802"]
+
+[lint.per-file-ignores]
+"tests/**/*.py" = ["S101"]
+"src/gui/*.py" = ["ARG002"]
+
+[format]
+indent-style = "tab"
