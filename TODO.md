@@ -19,24 +19,36 @@ Together these eliminate the two largest pieces of original work I'd expected v2
 ### Recon completed
 - [x] **MSVC toolchain reproducibility** — `widberg/msvc8.0p` works on Apple Silicon via Wine 11.0 + Rosetta. See `recon/wine-validation/`. Hello-world compiles at both `/O0` and `/O2`.
 - [x] **objdiff design for LLM integration** — `objdiff-cli diff --format json-pretty` produces a fully-structured per-function diff (instruction rows with `diff_kind`, per-argument `diff_index`, `match_percent`). x86 + MSVC demangling first-class. macOS arm64 prebuilt is 6.5 MB.
+- [x] **Cross-validation against `macabeus/mizuchi`** — a parallel project doing exactly this in TypeScript. Confirms the architecture (objdiff loop, compile-then-diff iteration, prompt-driven hill climbing). Patterns worth borrowing into iVCS:
+  - Tool-using agent (LLM calls a `compile_and_view_assembly` tool repeatedly in one conversation) over one-shot regenerate-from-scratch — much better convergence shape.
+  - Soft-timeout pattern: hard timeout T, soft timeout 0.7×T with "you're running out of time, submit best now" prompt.
+  - LLM-response cache keyed by prompt-content hash (`claude-cache.json` style).
+  - Context-file concatenation: skip `#include` resolution, just append a known-good `ctx.h` after the LLM's code at compile time.
+  - Explicit named diff-kind vocabulary in the system prompt ("INSERT / DELETE / REPLACE / OP_MISMATCH / ARG_MISMATCH") — matches objdiff enum, helps the model reason.
+
+### Built so far in v2
+- [x] **`src/xbe.py`** — MVP XBE loader: header + section table + section bytes. 16 tests. No kernel ordinal DB, no XOR descrambling yet.
+- [x] **`src/objdiff.py`** — typed Python wrapper around `objdiff-cli diff`. Pure-parse + thin-spawn split for testability. 12 tests using fixture JSON captured from the smoke test.
 
 ### Active milestones
 
-1. **Ground-truth end-to-end smoke test** *(next)* — compile the same C twice under `widberg/msvc8.0p`, run `objdiff-cli diff` on the pair, confirm 100% match. Then introduce a one-line C change, confirm a structured non-100% diff comes out. This is the dress rehearsal for the agent loop: it proves the data shape we'll be feeding the LLM is real and useful before we touch the LLM.
+1. **Ground-truth end-to-end smoke test** ✅ — `recon/objdiff-smoke/`. Confirmed objdiff sees past COFF timestamp noise (100% match across identical builds) and pinpoints per-function changes (8.6% on `sum_to_n` for `<=` → `<`, others at 100%).
 
-2. **XBE loader** — header, section table, kernel imports by ordinal (port from Cxbx-Reloaded's ordinal DB). CLI `ivcs dump <xbe>`.
+2. **XBE loader** ✅ — `src/xbe.py` (header + sections + section bytes). Kernel ordinal DB still pending.
 
-3. **Project scaffolding** — `objdiff.json` generator from a splat-style YAML describing an Xbox title (sections, known function addrs, file splits).
+3. **`xboxkrnl` ordinal database** — port the ~370 ordinal-to-signature mappings from Cxbx-Reloaded so XBE imports can be resolved to function names + signatures. Mostly mechanical translation; data not code.
 
-4. **Agent loop** — Python orchestrator over `objdiff-cli diff` + `cl.exe`:
-   - Parse JSON diff for one function
-   - Format diff into LLM prompt (structured, not raw text)
-   - LLM proposes ONE minimal C edit (hill-climb, not regenerate)
-   - Apply edit → `cmake --build` → re-diff
-   - Keep if `match_percent` improved, revert if not
-   - Repeat per function
+4. **Project scaffolding** — given an XBE path and a splat-style YAML, produce an `objdiff.json` describing target/base object pairs per function. Bridge between an Xbox title and the diff loop.
 
-5. **Target selection** — pick a real Xbox title. Constraints: small, C-heavy (not heavily templated C++), not `/GL+/LTCG`, late-era so VC8 codegen is compatible (XDK 5849+). Open question — needs scouting.
+5. **Agent loop (informed by mizuchi)** — Python orchestrator over `src/objdiff.py` + `cl.exe`:
+   - Tool-using LLM session with `compile_and_view_assembly` available (one conversation, multiple iterations within it — *not* the v0.1 regenerate-from-scratch shape).
+   - Hard / TTFT / soft timeout layering.
+   - Response cache keyed by prompt-content hash.
+   - System prompt names objdiff's diff kinds explicitly (INSERT / DELETE / REPLACE / OP_MISMATCH / ARG_MISMATCH).
+   - `ctx.h`-concatenation compile path; no `#include` resolution.
+   - LLM proposes one C edit per turn; compile + diff; keep if `match_percent` improved.
+
+6. **Target selection** — pick a real Xbox title. Small, C-heavy, not `/GL+/LTCG`, late-era so VC8 codegen is compatible (XDK 5849+). Open question — needs scouting.
 
 ### Long-running risks / deferred decisions
 
