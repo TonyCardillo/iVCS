@@ -1,0 +1,1486 @@
+{
+  "1": {
+    "name": "AvGetSavedDataAddress",
+    "mangled": "AvGetSavedDataAddress@0"
+  },
+  "2": {
+    "name": "AvSendTVEncoderOption",
+    "mangled": "AvSendTVEncoderOption@16"
+  },
+  "3": {
+    "name": "AvSetDisplayMode",
+    "mangled": "AvSetDisplayMode@24"
+  },
+  "4": {
+    "name": "AvSetSavedDataAddress",
+    "mangled": "AvSetSavedDataAddress@4"
+  },
+  "5": {
+    "name": "DbgBreakPoint",
+    "mangled": "DbgBreakPoint@0"
+  },
+  "6": {
+    "name": "DbgBreakPointWithStatus",
+    "mangled": "DbgBreakPointWithStatus@4"
+  },
+  "7": {
+    "name": "DbgLoadImageSymbols",
+    "mangled": "DbgLoadImageSymbols@12"
+  },
+  "8": {
+    "name": "DbgPrint",
+    "mangled": "DbgPrint"
+  },
+  "9": {
+    "name": "HalReadSMCTrayState",
+    "mangled": "HalReadSMCTrayState@8"
+  },
+  "10": {
+    "name": "DbgPrompt",
+    "mangled": "DbgPrompt@12"
+  },
+  "11": {
+    "name": "DbgUnLoadImageSymbols",
+    "mangled": "DbgUnLoadImageSymbols@12"
+  },
+  "12": {
+    "name": "ExAcquireReadWriteLockExclusive",
+    "mangled": "ExAcquireReadWriteLockExclusive@4"
+  },
+  "13": {
+    "name": "ExAcquireReadWriteLockShared",
+    "mangled": "ExAcquireReadWriteLockShared@4"
+  },
+  "14": {
+    "name": "ExAllocatePool",
+    "mangled": "ExAllocatePool@4"
+  },
+  "15": {
+    "name": "ExAllocatePoolWithTag",
+    "mangled": "ExAllocatePoolWithTag@8"
+  },
+  "16": {
+    "name": "ExEventObjectType",
+    "mangled": "ExEventObjectType"
+  },
+  "17": {
+    "name": "ExFreePool",
+    "mangled": "ExFreePool@4"
+  },
+  "18": {
+    "name": "ExInitializeReadWriteLock",
+    "mangled": "ExInitializeReadWriteLock@4"
+  },
+  "19": {
+    "name": "ExInterlockedAddLargeInteger",
+    "mangled": "ExInterlockedAddLargeInteger@16"
+  },
+  "20": {
+    "name": "ExInterlockedAddLargeStatistic",
+    "mangled": "@ExInterlockedAddLargeStatistic@8"
+  },
+  "21": {
+    "name": "ExInterlockedCompareExchange64",
+    "mangled": "@ExInterlockedCompareExchange64@12"
+  },
+  "22": {
+    "name": "ExMutantObjectType",
+    "mangled": "ExMutantObjectType"
+  },
+  "23": {
+    "name": "ExQueryPoolBlockSize",
+    "mangled": "ExQueryPoolBlockSize@4"
+  },
+  "24": {
+    "name": "ExQueryNonVolatileSetting",
+    "mangled": "ExQueryNonVolatileSetting@20"
+  },
+  "25": {
+    "name": "ExReadWriteRefurbInfo",
+    "mangled": "ExReadWriteRefurbInfo@12"
+  },
+  "26": {
+    "name": "ExRaiseException",
+    "mangled": "ExRaiseException@4"
+  },
+  "27": {
+    "name": "ExRaiseStatus",
+    "mangled": "ExRaiseStatus@4"
+  },
+  "28": {
+    "name": "ExReleaseReadWriteLock",
+    "mangled": "ExReleaseReadWriteLock@4"
+  },
+  "29": {
+    "name": "ExSaveNonVolatileSetting",
+    "mangled": "ExSaveNonVolatileSetting@16"
+  },
+  "30": {
+    "name": "ExSemaphoreObjectType",
+    "mangled": "ExSemaphoreObjectType"
+  },
+  "31": {
+    "name": "ExTimerObjectType",
+    "mangled": "ExTimerObjectType"
+  },
+  "32": {
+    "name": "ExfInterlockedInsertHeadList",
+    "mangled": "@ExfInterlockedInsertHeadList@8"
+  },
+  "33": {
+    "name": "ExfInterlockedInsertTailList",
+    "mangled": "@ExfInterlockedInsertTailList@8"
+  },
+  "34": {
+    "name": "ExfInterlockedRemoveHeadList",
+    "mangled": "@ExfInterlockedRemoveHeadList@4"
+  },
+  "35": {
+    "name": "FscGetCacheSize",
+    "mangled": "FscGetCacheSize@0"
+  },
+  "36": {
+    "name": "FscInvalidateIdleBlocks",
+    "mangled": "FscInvalidateIdleBlocks@0"
+  },
+  "37": {
+    "name": "FscSetCacheSize",
+    "mangled": "FscSetCacheSize@4"
+  },
+  "38": {
+    "name": "HalClearSoftwareInterrupt",
+    "mangled": "@HalClearSoftwareInterrupt@4"
+  },
+  "39": {
+    "name": "HalDisableSystemInterrupt",
+    "mangled": "HalDisableSystemInterrupt@4"
+  },
+  "40": {
+    "name": "HalDiskCachePartitionCount",
+    "mangled": "HalDiskCachePartitionCount"
+  },
+  "41": {
+    "name": "HalDiskModelNumber",
+    "mangled": "HalDiskModelNumber"
+  },
+  "42": {
+    "name": "HalDiskSerialNumber",
+    "mangled": "HalDiskSerialNumber"
+  },
+  "43": {
+    "name": "HalEnableSystemInterrupt",
+    "mangled": "HalEnableSystemInterrupt@8"
+  },
+  "44": {
+    "name": "HalGetInterruptVector",
+    "mangled": "HalGetInterruptVector@8"
+  },
+  "45": {
+    "name": "HalReadSMBusValue",
+    "mangled": "HalReadSMBusValue@16"
+  },
+  "46": {
+    "name": "HalReadWritePCISpace",
+    "mangled": "HalReadWritePCISpace@24"
+  },
+  "47": {
+    "name": "HalRegisterShutdownNotification",
+    "mangled": "HalRegisterShutdownNotification@8"
+  },
+  "48": {
+    "name": "HalRequestSoftwareInterrupt",
+    "mangled": "@HalRequestSoftwareInterrupt@4"
+  },
+  "49": {
+    "name": "HalReturnToFirmware",
+    "mangled": "HalReturnToFirmware@4"
+  },
+  "50": {
+    "name": "HalWriteSMBusValue",
+    "mangled": "HalWriteSMBusValue@16"
+  },
+  "51": {
+    "name": "InterlockedCompareExchange",
+    "mangled": "@InterlockedCompareExchange@12"
+  },
+  "52": {
+    "name": "InterlockedDecrement",
+    "mangled": "@InterlockedDecrement@4"
+  },
+  "53": {
+    "name": "InterlockedIncrement",
+    "mangled": "@InterlockedIncrement@4"
+  },
+  "54": {
+    "name": "InterlockedExchange",
+    "mangled": "@InterlockedExchange@8"
+  },
+  "55": {
+    "name": "InterlockedExchangeAdd",
+    "mangled": "@InterlockedExchangeAdd@8"
+  },
+  "56": {
+    "name": "InterlockedFlushSList",
+    "mangled": "@InterlockedFlushSList@4"
+  },
+  "57": {
+    "name": "InterlockedPopEntrySList",
+    "mangled": "@InterlockedPopEntrySList@4"
+  },
+  "58": {
+    "name": "InterlockedPushEntrySList",
+    "mangled": "@InterlockedPushEntrySList@8"
+  },
+  "59": {
+    "name": "IoAllocateIrp",
+    "mangled": "IoAllocateIrp@4"
+  },
+  "60": {
+    "name": "IoBuildAsynchronousFsdRequest",
+    "mangled": "IoBuildAsynchronousFsdRequest@24"
+  },
+  "61": {
+    "name": "IoBuildDeviceIoControlRequest",
+    "mangled": "IoBuildDeviceIoControlRequest@36"
+  },
+  "62": {
+    "name": "IoBuildSynchronousFsdRequest",
+    "mangled": "IoBuildSynchronousFsdRequest@28"
+  },
+  "63": {
+    "name": "IoCheckShareAccess",
+    "mangled": "IoCheckShareAccess@20"
+  },
+  "64": {
+    "name": "IoCompletionObjectType",
+    "mangled": "IoCompletionObjectType"
+  },
+  "65": {
+    "name": "IoCreateDevice",
+    "mangled": "IoCreateDevice@24"
+  },
+  "66": {
+    "name": "IoCreateFile",
+    "mangled": "IoCreateFile@40"
+  },
+  "67": {
+    "name": "IoCreateSymbolicLink",
+    "mangled": "IoCreateSymbolicLink@8"
+  },
+  "68": {
+    "name": "IoDeleteDevice",
+    "mangled": "IoDeleteDevice@4"
+  },
+  "69": {
+    "name": "IoDeleteSymbolicLink",
+    "mangled": "IoDeleteSymbolicLink@4"
+  },
+  "70": {
+    "name": "IoDeviceObjectType",
+    "mangled": "IoDeviceObjectType"
+  },
+  "71": {
+    "name": "IoFileObjectType",
+    "mangled": "IoFileObjectType"
+  },
+  "72": {
+    "name": "IoFreeIrp",
+    "mangled": "IoFreeIrp@4"
+  },
+  "73": {
+    "name": "IoInitializeIrp",
+    "mangled": "IoInitializeIrp@12"
+  },
+  "74": {
+    "name": "IoInvalidDeviceRequest",
+    "mangled": "IoInvalidDeviceRequest@8"
+  },
+  "75": {
+    "name": "IoQueryFileInformation",
+    "mangled": "IoQueryFileInformation@20"
+  },
+  "76": {
+    "name": "IoQueryVolumeInformation",
+    "mangled": "IoQueryVolumeInformation@20"
+  },
+  "77": {
+    "name": "IoQueueThreadIrp",
+    "mangled": "IoQueueThreadIrp@4"
+  },
+  "78": {
+    "name": "IoRemoveShareAccess",
+    "mangled": "IoRemoveShareAccess@8"
+  },
+  "79": {
+    "name": "IoSetIoCompletion",
+    "mangled": "IoSetIoCompletion@20"
+  },
+  "80": {
+    "name": "IoSetShareAccess",
+    "mangled": "IoSetShareAccess@16"
+  },
+  "81": {
+    "name": "IoStartNextPacket",
+    "mangled": "IoStartNextPacket@4"
+  },
+  "82": {
+    "name": "IoStartNextPacketByKey",
+    "mangled": "IoStartNextPacketByKey@8"
+  },
+  "83": {
+    "name": "IoStartPacket",
+    "mangled": "IoStartPacket@12"
+  },
+  "84": {
+    "name": "IoSynchronousDeviceIoControlRequest",
+    "mangled": "IoSynchronousDeviceIoControlRequest@32"
+  },
+  "85": {
+    "name": "IoSynchronousFsdRequest",
+    "mangled": "IoSynchronousFsdRequest@20"
+  },
+  "86": {
+    "name": "IofCallDriver",
+    "mangled": "@IofCallDriver@8"
+  },
+  "87": {
+    "name": "IofCompleteRequest",
+    "mangled": "@IofCompleteRequest@8"
+  },
+  "88": {
+    "name": "KdDebuggerEnabled",
+    "mangled": "KdDebuggerEnabled"
+  },
+  "89": {
+    "name": "KdDebuggerNotPresent",
+    "mangled": "KdDebuggerNotPresent"
+  },
+  "90": {
+    "name": "IoDismountVolume",
+    "mangled": "IoDismountVolume@4"
+  },
+  "91": {
+    "name": "IoDismountVolumeByName",
+    "mangled": "IoDismountVolumeByName@4"
+  },
+  "92": {
+    "name": "KeAlertResumeThread",
+    "mangled": "KeAlertResumeThread@4"
+  },
+  "93": {
+    "name": "KeAlertThread",
+    "mangled": "KeAlertThread@8"
+  },
+  "94": {
+    "name": "KeBoostPriorityThread",
+    "mangled": "KeBoostPriorityThread@8"
+  },
+  "95": {
+    "name": "KeBugCheck",
+    "mangled": "KeBugCheck@4"
+  },
+  "96": {
+    "name": "KeBugCheckEx",
+    "mangled": "KeBugCheckEx@20"
+  },
+  "97": {
+    "name": "KeCancelTimer",
+    "mangled": "KeCancelTimer@4"
+  },
+  "98": {
+    "name": "KeConnectInterrupt",
+    "mangled": "KeConnectInterrupt@4"
+  },
+  "99": {
+    "name": "KeDelayExecutionThread",
+    "mangled": "KeDelayExecutionThread@12"
+  },
+  "100": {
+    "name": "KeDisconnectInterrupt",
+    "mangled": "KeDisconnectInterrupt@4"
+  },
+  "101": {
+    "name": "KeEnterCriticalRegion",
+    "mangled": "KeEnterCriticalRegion@0"
+  },
+  "102": {
+    "name": "MmGlobalData",
+    "mangled": "MmGlobalData"
+  },
+  "103": {
+    "name": "KeGetCurrentIrql",
+    "mangled": "KeGetCurrentIrql@0"
+  },
+  "104": {
+    "name": "KeGetCurrentThread",
+    "mangled": "KeGetCurrentThread@0"
+  },
+  "105": {
+    "name": "KeInitializeApc",
+    "mangled": "KeInitializeApc@28"
+  },
+  "106": {
+    "name": "KeInitializeDeviceQueue",
+    "mangled": "KeInitializeDeviceQueue@4"
+  },
+  "107": {
+    "name": "KeInitializeDpc",
+    "mangled": "KeInitializeDpc@12"
+  },
+  "108": {
+    "name": "KeInitializeEvent",
+    "mangled": "KeInitializeEvent@12"
+  },
+  "109": {
+    "name": "KeInitializeInterrupt",
+    "mangled": "KeInitializeInterrupt@28"
+  },
+  "110": {
+    "name": "KeInitializeMutant",
+    "mangled": "KeInitializeMutant@8"
+  },
+  "111": {
+    "name": "KeInitializeQueue",
+    "mangled": "KeInitializeQueue@8"
+  },
+  "112": {
+    "name": "KeInitializeSemaphore",
+    "mangled": "KeInitializeSemaphore@12"
+  },
+  "113": {
+    "name": "KeInitializeTimerEx",
+    "mangled": "KeInitializeTimerEx@8"
+  },
+  "114": {
+    "name": "KeInsertByKeyDeviceQueue",
+    "mangled": "KeInsertByKeyDeviceQueue@12"
+  },
+  "115": {
+    "name": "KeInsertDeviceQueue",
+    "mangled": "KeInsertDeviceQueue@8"
+  },
+  "116": {
+    "name": "KeInsertHeadQueue",
+    "mangled": "KeInsertHeadQueue@8"
+  },
+  "117": {
+    "name": "KeInsertQueue",
+    "mangled": "KeInsertQueue@8"
+  },
+  "118": {
+    "name": "KeInsertQueueApc",
+    "mangled": "KeInsertQueueApc@16"
+  },
+  "119": {
+    "name": "KeInsertQueueDpc",
+    "mangled": "KeInsertQueueDpc@12"
+  },
+  "120": {
+    "name": "KeInterruptTime",
+    "mangled": "KeInterruptTime"
+  },
+  "121": {
+    "name": "KeIsExecutingDpc",
+    "mangled": "KeIsExecutingDpc@0"
+  },
+  "122": {
+    "name": "KeLeaveCriticalRegion",
+    "mangled": "KeLeaveCriticalRegion@0"
+  },
+  "123": {
+    "name": "KePulseEvent",
+    "mangled": "KePulseEvent@12"
+  },
+  "124": {
+    "name": "KeQueryBasePriorityThread",
+    "mangled": "KeQueryBasePriorityThread@4"
+  },
+  "125": {
+    "name": "KeQueryInterruptTime",
+    "mangled": "KeQueryInterruptTime@0"
+  },
+  "126": {
+    "name": "KeQueryPerformanceCounter",
+    "mangled": "KeQueryPerformanceCounter@0"
+  },
+  "127": {
+    "name": "KeQueryPerformanceFrequency",
+    "mangled": "KeQueryPerformanceFrequency@0"
+  },
+  "128": {
+    "name": "KeQuerySystemTime",
+    "mangled": "KeQuerySystemTime@4"
+  },
+  "129": {
+    "name": "KeRaiseIrqlToDpcLevel",
+    "mangled": "KeRaiseIrqlToDpcLevel@0"
+  },
+  "130": {
+    "name": "KeRaiseIrqlToSynchLevel",
+    "mangled": "KeRaiseIrqlToSynchLevel@0"
+  },
+  "131": {
+    "name": "KeReleaseMutant",
+    "mangled": "KeReleaseMutant@16"
+  },
+  "132": {
+    "name": "KeReleaseSemaphore",
+    "mangled": "KeReleaseSemaphore@16"
+  },
+  "133": {
+    "name": "KeRemoveByKeyDeviceQueue",
+    "mangled": "KeRemoveByKeyDeviceQueue@8"
+  },
+  "134": {
+    "name": "KeRemoveDeviceQueue",
+    "mangled": "KeRemoveDeviceQueue@4"
+  },
+  "135": {
+    "name": "KeRemoveEntryDeviceQueue",
+    "mangled": "KeRemoveEntryDeviceQueue@8"
+  },
+  "136": {
+    "name": "KeRemoveQueue",
+    "mangled": "KeRemoveQueue@12"
+  },
+  "137": {
+    "name": "KeRemoveQueueDpc",
+    "mangled": "KeRemoveQueueDpc@4"
+  },
+  "138": {
+    "name": "KeResetEvent",
+    "mangled": "KeResetEvent@4"
+  },
+  "139": {
+    "name": "KeRestoreFloatingPointState",
+    "mangled": "KeRestoreFloatingPointState@4"
+  },
+  "140": {
+    "name": "KeResumeThread",
+    "mangled": "KeResumeThread@4"
+  },
+  "141": {
+    "name": "KeRundownQueue",
+    "mangled": "KeRundownQueue@4"
+  },
+  "142": {
+    "name": "KeSaveFloatingPointState",
+    "mangled": "KeSaveFloatingPointState@4"
+  },
+  "143": {
+    "name": "KeSetBasePriorityThread",
+    "mangled": "KeSetBasePriorityThread@8"
+  },
+  "144": {
+    "name": "KeSetDisableBoostThread",
+    "mangled": "KeSetDisableBoostThread@8"
+  },
+  "145": {
+    "name": "KeSetEvent",
+    "mangled": "KeSetEvent@12"
+  },
+  "146": {
+    "name": "KeSetEventBoostPriority",
+    "mangled": "KeSetEventBoostPriority@8"
+  },
+  "147": {
+    "name": "KeSetPriorityProcess",
+    "mangled": "KeSetPriorityProcess@8"
+  },
+  "148": {
+    "name": "KeSetPriorityThread",
+    "mangled": "KeSetPriorityThread@8"
+  },
+  "149": {
+    "name": "KeSetTimer",
+    "mangled": "KeSetTimer@16"
+  },
+  "150": {
+    "name": "KeSetTimerEx",
+    "mangled": "KeSetTimerEx@20"
+  },
+  "151": {
+    "name": "KeStallExecutionProcessor",
+    "mangled": "KeStallExecutionProcessor@4"
+  },
+  "152": {
+    "name": "KeSuspendThread",
+    "mangled": "KeSuspendThread@4"
+  },
+  "153": {
+    "name": "KeSynchronizeExecution",
+    "mangled": "KeSynchronizeExecution@12"
+  },
+  "154": {
+    "name": "KeSystemTime",
+    "mangled": "KeSystemTime"
+  },
+  "155": {
+    "name": "KeTestAlertThread",
+    "mangled": "KeTestAlertThread@4"
+  },
+  "156": {
+    "name": "KeTickCount",
+    "mangled": "KeTickCount"
+  },
+  "157": {
+    "name": "KeTimeIncrement",
+    "mangled": "KeTimeIncrement"
+  },
+  "158": {
+    "name": "KeWaitForMultipleObjects",
+    "mangled": "KeWaitForMultipleObjects@32"
+  },
+  "159": {
+    "name": "KeWaitForSingleObject",
+    "mangled": "KeWaitForSingleObject@20"
+  },
+  "160": {
+    "name": "KfRaiseIrql",
+    "mangled": "@KfRaiseIrql@4"
+  },
+  "161": {
+    "name": "KfLowerIrql",
+    "mangled": "@KfLowerIrql@4"
+  },
+  "162": {
+    "name": "KiBugCheckData",
+    "mangled": "KiBugCheckData"
+  },
+  "163": {
+    "name": "KiUnlockDispatcherDatabase",
+    "mangled": "@KiUnlockDispatcherDatabase@4"
+  },
+  "164": {
+    "name": "LaunchDataPage",
+    "mangled": "LaunchDataPage"
+  },
+  "165": {
+    "name": "MmAllocateContiguousMemory",
+    "mangled": "MmAllocateContiguousMemory@4"
+  },
+  "166": {
+    "name": "MmAllocateContiguousMemoryEx",
+    "mangled": "MmAllocateContiguousMemoryEx@20"
+  },
+  "167": {
+    "name": "MmAllocateSystemMemory",
+    "mangled": "MmAllocateSystemMemory@8"
+  },
+  "168": {
+    "name": "MmClaimGpuInstanceMemory",
+    "mangled": "MmClaimGpuInstanceMemory@8"
+  },
+  "169": {
+    "name": "MmCreateKernelStack",
+    "mangled": "MmCreateKernelStack@8"
+  },
+  "170": {
+    "name": "MmDeleteKernelStack",
+    "mangled": "MmDeleteKernelStack@8"
+  },
+  "171": {
+    "name": "MmFreeContiguousMemory",
+    "mangled": "MmFreeContiguousMemory@4"
+  },
+  "172": {
+    "name": "MmFreeSystemMemory",
+    "mangled": "MmFreeSystemMemory@8"
+  },
+  "173": {
+    "name": "MmGetPhysicalAddress",
+    "mangled": "MmGetPhysicalAddress@4"
+  },
+  "174": {
+    "name": "MmIsAddressValid",
+    "mangled": "MmIsAddressValid@4"
+  },
+  "175": {
+    "name": "MmLockUnlockBufferPages",
+    "mangled": "MmLockUnlockBufferPages@12"
+  },
+  "176": {
+    "name": "MmLockUnlockPhysicalPage",
+    "mangled": "MmLockUnlockPhysicalPage@8"
+  },
+  "177": {
+    "name": "MmMapIoSpace",
+    "mangled": "MmMapIoSpace@12"
+  },
+  "178": {
+    "name": "MmPersistContiguousMemory",
+    "mangled": "MmPersistContiguousMemory@12"
+  },
+  "179": {
+    "name": "MmQueryAddressProtect",
+    "mangled": "MmQueryAddressProtect@4"
+  },
+  "180": {
+    "name": "MmQueryAllocationSize",
+    "mangled": "MmQueryAllocationSize@4"
+  },
+  "181": {
+    "name": "MmQueryStatistics",
+    "mangled": "MmQueryStatistics@4"
+  },
+  "182": {
+    "name": "MmSetAddressProtect",
+    "mangled": "MmSetAddressProtect@12"
+  },
+  "183": {
+    "name": "MmUnmapIoSpace",
+    "mangled": "MmUnmapIoSpace@8"
+  },
+  "184": {
+    "name": "NtAllocateVirtualMemory",
+    "mangled": "NtAllocateVirtualMemory@20"
+  },
+  "185": {
+    "name": "NtCancelTimer",
+    "mangled": "NtCancelTimer@8"
+  },
+  "186": {
+    "name": "NtClearEvent",
+    "mangled": "NtClearEvent@4"
+  },
+  "187": {
+    "name": "NtClose",
+    "mangled": "NtClose@4"
+  },
+  "188": {
+    "name": "NtCreateDirectoryObject",
+    "mangled": "NtCreateDirectoryObject@8"
+  },
+  "189": {
+    "name": "NtCreateEvent",
+    "mangled": "NtCreateEvent@16"
+  },
+  "190": {
+    "name": "NtCreateFile",
+    "mangled": "NtCreateFile@36"
+  },
+  "191": {
+    "name": "NtCreateIoCompletion",
+    "mangled": "NtCreateIoCompletion@16"
+  },
+  "192": {
+    "name": "NtCreateMutant",
+    "mangled": "NtCreateMutant@12"
+  },
+  "193": {
+    "name": "NtCreateSemaphore",
+    "mangled": "NtCreateSemaphore@16"
+  },
+  "194": {
+    "name": "NtCreateTimer",
+    "mangled": "NtCreateTimer@12"
+  },
+  "195": {
+    "name": "NtDeleteFile",
+    "mangled": "NtDeleteFile@4"
+  },
+  "196": {
+    "name": "NtDeviceIoControlFile",
+    "mangled": "NtDeviceIoControlFile@40"
+  },
+  "197": {
+    "name": "NtDuplicateObject",
+    "mangled": "NtDuplicateObject@12"
+  },
+  "198": {
+    "name": "NtFlushBuffersFile",
+    "mangled": "NtFlushBuffersFile@8"
+  },
+  "199": {
+    "name": "NtFreeVirtualMemory",
+    "mangled": "NtFreeVirtualMemory@12"
+  },
+  "200": {
+    "name": "NtFsControlFile",
+    "mangled": "NtFsControlFile@40"
+  },
+  "201": {
+    "name": "NtOpenDirectoryObject",
+    "mangled": "NtOpenDirectoryObject@8"
+  },
+  "202": {
+    "name": "NtOpenFile",
+    "mangled": "NtOpenFile@24"
+  },
+  "203": {
+    "name": "NtOpenSymbolicLinkObject",
+    "mangled": "NtOpenSymbolicLinkObject@8"
+  },
+  "204": {
+    "name": "NtProtectVirtualMemory",
+    "mangled": "NtProtectVirtualMemory@16"
+  },
+  "205": {
+    "name": "NtPulseEvent",
+    "mangled": "NtPulseEvent@8"
+  },
+  "206": {
+    "name": "NtQueueApcThread",
+    "mangled": "NtQueueApcThread@20"
+  },
+  "207": {
+    "name": "NtQueryDirectoryFile",
+    "mangled": "NtQueryDirectoryFile@40"
+  },
+  "208": {
+    "name": "NtQueryDirectoryObject",
+    "mangled": "NtQueryDirectoryObject@24"
+  },
+  "209": {
+    "name": "NtQueryEvent",
+    "mangled": "NtQueryEvent@8"
+  },
+  "210": {
+    "name": "NtQueryFullAttributesFile",
+    "mangled": "NtQueryFullAttributesFile@8"
+  },
+  "211": {
+    "name": "NtQueryInformationFile",
+    "mangled": "NtQueryInformationFile@20"
+  },
+  "212": {
+    "name": "NtQueryIoCompletion",
+    "mangled": "NtQueryIoCompletion@8"
+  },
+  "213": {
+    "name": "NtQueryMutant",
+    "mangled": "NtQueryMutant@8"
+  },
+  "214": {
+    "name": "NtQuerySemaphore",
+    "mangled": "NtQuerySemaphore@8"
+  },
+  "215": {
+    "name": "NtQuerySymbolicLinkObject",
+    "mangled": "NtQuerySymbolicLinkObject@12"
+  },
+  "216": {
+    "name": "NtQueryTimer",
+    "mangled": "NtQueryTimer@8"
+  },
+  "217": {
+    "name": "NtQueryVirtualMemory",
+    "mangled": "NtQueryVirtualMemory@8"
+  },
+  "218": {
+    "name": "NtQueryVolumeInformationFile",
+    "mangled": "NtQueryVolumeInformationFile@20"
+  },
+  "219": {
+    "name": "NtReadFile",
+    "mangled": "NtReadFile@32"
+  },
+  "220": {
+    "name": "NtReadFileScatter",
+    "mangled": "NtReadFileScatter@32"
+  },
+  "221": {
+    "name": "NtReleaseMutant",
+    "mangled": "NtReleaseMutant@8"
+  },
+  "222": {
+    "name": "NtReleaseSemaphore",
+    "mangled": "NtReleaseSemaphore@12"
+  },
+  "223": {
+    "name": "NtRemoveIoCompletion",
+    "mangled": "NtRemoveIoCompletion@20"
+  },
+  "224": {
+    "name": "NtResumeThread",
+    "mangled": "NtResumeThread@8"
+  },
+  "225": {
+    "name": "NtSetEvent",
+    "mangled": "NtSetEvent@8"
+  },
+  "226": {
+    "name": "NtSetInformationFile",
+    "mangled": "NtSetInformationFile@20"
+  },
+  "227": {
+    "name": "NtSetIoCompletion",
+    "mangled": "NtSetIoCompletion@20"
+  },
+  "228": {
+    "name": "NtSetSystemTime",
+    "mangled": "NtSetSystemTime@8"
+  },
+  "229": {
+    "name": "NtSetTimerEx",
+    "mangled": "NtSetTimerEx@32"
+  },
+  "230": {
+    "name": "NtSignalAndWaitForSingleObjectEx",
+    "mangled": "NtSignalAndWaitForSingleObjectEx@20"
+  },
+  "231": {
+    "name": "NtSuspendThread",
+    "mangled": "NtSuspendThread@8"
+  },
+  "232": {
+    "name": "NtUserIoApcDispatcher",
+    "mangled": "NtUserIoApcDispatcher@12"
+  },
+  "233": {
+    "name": "NtWaitForSingleObject",
+    "mangled": "NtWaitForSingleObject@12"
+  },
+  "234": {
+    "name": "NtWaitForSingleObjectEx",
+    "mangled": "NtWaitForSingleObjectEx@16"
+  },
+  "235": {
+    "name": "NtWaitForMultipleObjectsEx",
+    "mangled": "NtWaitForMultipleObjectsEx@24"
+  },
+  "236": {
+    "name": "NtWriteFile",
+    "mangled": "NtWriteFile@32"
+  },
+  "237": {
+    "name": "NtWriteFileGather",
+    "mangled": "NtWriteFileGather@32"
+  },
+  "238": {
+    "name": "NtYieldExecution",
+    "mangled": "NtYieldExecution@0"
+  },
+  "239": {
+    "name": "ObCreateObject",
+    "mangled": "ObCreateObject@16"
+  },
+  "240": {
+    "name": "ObDirectoryObjectType",
+    "mangled": "ObDirectoryObjectType"
+  },
+  "241": {
+    "name": "ObInsertObject",
+    "mangled": "ObInsertObject@16"
+  },
+  "242": {
+    "name": "ObMakeTemporaryObject",
+    "mangled": "ObMakeTemporaryObject@4"
+  },
+  "243": {
+    "name": "ObOpenObjectByName",
+    "mangled": "ObOpenObjectByName@16"
+  },
+  "244": {
+    "name": "ObOpenObjectByPointer",
+    "mangled": "ObOpenObjectByPointer@12"
+  },
+  "245": {
+    "name": "ObpObjectHandleTable",
+    "mangled": "ObpObjectHandleTable"
+  },
+  "246": {
+    "name": "ObReferenceObjectByHandle",
+    "mangled": "ObReferenceObjectByHandle@12"
+  },
+  "247": {
+    "name": "ObReferenceObjectByName",
+    "mangled": "ObReferenceObjectByName@20"
+  },
+  "248": {
+    "name": "ObReferenceObjectByPointer",
+    "mangled": "ObReferenceObjectByPointer@8"
+  },
+  "249": {
+    "name": "ObSymbolicLinkObjectType",
+    "mangled": "ObSymbolicLinkObjectType"
+  },
+  "250": {
+    "name": "ObfDereferenceObject",
+    "mangled": "@ObfDereferenceObject@4"
+  },
+  "251": {
+    "name": "ObfReferenceObject",
+    "mangled": "@ObfReferenceObject@4"
+  },
+  "252": {
+    "name": "PhyGetLinkState",
+    "mangled": "PhyGetLinkState@4"
+  },
+  "253": {
+    "name": "PhyInitialize",
+    "mangled": "PhyInitialize@8"
+  },
+  "254": {
+    "name": "PsCreateSystemThread",
+    "mangled": "PsCreateSystemThread@20"
+  },
+  "255": {
+    "name": "PsCreateSystemThreadEx",
+    "mangled": "PsCreateSystemThreadEx@40"
+  },
+  "256": {
+    "name": "PsQueryStatistics",
+    "mangled": "PsQueryStatistics@4"
+  },
+  "257": {
+    "name": "PsSetCreateThreadNotifyRoutine",
+    "mangled": "PsSetCreateThreadNotifyRoutine@4"
+  },
+  "258": {
+    "name": "PsTerminateSystemThread",
+    "mangled": "PsTerminateSystemThread@4"
+  },
+  "259": {
+    "name": "PsThreadObjectType",
+    "mangled": "PsThreadObjectType"
+  },
+  "260": {
+    "name": "RtlAnsiStringToUnicodeString",
+    "mangled": "RtlAnsiStringToUnicodeString@12"
+  },
+  "261": {
+    "name": "RtlAppendStringToString",
+    "mangled": "RtlAppendStringToString@8"
+  },
+  "262": {
+    "name": "RtlAppendUnicodeStringToString",
+    "mangled": "RtlAppendUnicodeStringToString@8"
+  },
+  "263": {
+    "name": "RtlAppendUnicodeToString",
+    "mangled": "RtlAppendUnicodeToString@8"
+  },
+  "264": {
+    "name": "RtlAssert",
+    "mangled": "RtlAssert@16"
+  },
+  "265": {
+    "name": "RtlCaptureContext",
+    "mangled": "RtlCaptureContext@4"
+  },
+  "266": {
+    "name": "RtlCaptureStackBackTrace",
+    "mangled": "RtlCaptureStackBackTrace@16"
+  },
+  "267": {
+    "name": "RtlCharToInteger",
+    "mangled": "RtlCharToInteger@12"
+  },
+  "268": {
+    "name": "RtlCompareMemory",
+    "mangled": "RtlCompareMemory@12"
+  },
+  "269": {
+    "name": "RtlCompareMemoryUlong",
+    "mangled": "RtlCompareMemoryUlong@12"
+  },
+  "270": {
+    "name": "RtlCompareString",
+    "mangled": "RtlCompareString@12"
+  },
+  "271": {
+    "name": "RtlCompareUnicodeString",
+    "mangled": "RtlCompareUnicodeString@12"
+  },
+  "272": {
+    "name": "RtlCopyString",
+    "mangled": "RtlCopyString@8"
+  },
+  "273": {
+    "name": "RtlCopyUnicodeString",
+    "mangled": "RtlCopyUnicodeString@8"
+  },
+  "274": {
+    "name": "RtlCreateUnicodeString",
+    "mangled": "RtlCreateUnicodeString@8"
+  },
+  "275": {
+    "name": "RtlDowncaseUnicodeChar",
+    "mangled": "RtlDowncaseUnicodeChar@4"
+  },
+  "276": {
+    "name": "RtlDowncaseUnicodeString",
+    "mangled": "RtlDowncaseUnicodeString@12"
+  },
+  "277": {
+    "name": "RtlEnterCriticalSection",
+    "mangled": "RtlEnterCriticalSection@4"
+  },
+  "278": {
+    "name": "RtlEnterCriticalSectionAndRegion",
+    "mangled": "RtlEnterCriticalSectionAndRegion@4"
+  },
+  "279": {
+    "name": "RtlEqualString",
+    "mangled": "RtlEqualString@12"
+  },
+  "280": {
+    "name": "RtlEqualUnicodeString",
+    "mangled": "RtlEqualUnicodeString@12"
+  },
+  "281": {
+    "name": "RtlExtendedIntegerMultiply",
+    "mangled": "RtlExtendedIntegerMultiply@12"
+  },
+  "282": {
+    "name": "RtlExtendedLargeIntegerDivide",
+    "mangled": "RtlExtendedLargeIntegerDivide@16"
+  },
+  "283": {
+    "name": "RtlExtendedMagicDivide",
+    "mangled": "RtlExtendedMagicDivide@20"
+  },
+  "284": {
+    "name": "RtlFillMemory",
+    "mangled": "RtlFillMemory@12"
+  },
+  "285": {
+    "name": "RtlFillMemoryUlong",
+    "mangled": "RtlFillMemoryUlong@12"
+  },
+  "286": {
+    "name": "RtlFreeAnsiString",
+    "mangled": "RtlFreeAnsiString@4"
+  },
+  "287": {
+    "name": "RtlFreeUnicodeString",
+    "mangled": "RtlFreeUnicodeString@4"
+  },
+  "288": {
+    "name": "RtlGetCallersAddress",
+    "mangled": "RtlGetCallersAddress@8"
+  },
+  "289": {
+    "name": "RtlInitAnsiString",
+    "mangled": "RtlInitAnsiString@8"
+  },
+  "290": {
+    "name": "RtlInitUnicodeString",
+    "mangled": "RtlInitUnicodeString@8"
+  },
+  "291": {
+    "name": "RtlInitializeCriticalSection",
+    "mangled": "RtlInitializeCriticalSection@4"
+  },
+  "292": {
+    "name": "RtlIntegerToChar",
+    "mangled": "RtlIntegerToChar@16"
+  },
+  "293": {
+    "name": "RtlIntegerToUnicodeString",
+    "mangled": "RtlIntegerToUnicodeString@12"
+  },
+  "294": {
+    "name": "RtlLeaveCriticalSection",
+    "mangled": "RtlLeaveCriticalSection@4"
+  },
+  "295": {
+    "name": "RtlLeaveCriticalSectionAndRegion",
+    "mangled": "RtlLeaveCriticalSectionAndRegion@4"
+  },
+  "296": {
+    "name": "RtlLowerChar",
+    "mangled": "RtlLowerChar@4"
+  },
+  "297": {
+    "name": "RtlMapGenericMask",
+    "mangled": "RtlMapGenericMask@8"
+  },
+  "298": {
+    "name": "RtlMoveMemory",
+    "mangled": "RtlMoveMemory@12"
+  },
+  "299": {
+    "name": "RtlMultiByteToUnicodeN",
+    "mangled": "RtlMultiByteToUnicodeN@20"
+  },
+  "300": {
+    "name": "RtlMultiByteToUnicodeSize",
+    "mangled": "RtlMultiByteToUnicodeSize@12"
+  },
+  "301": {
+    "name": "RtlNtStatusToDosError",
+    "mangled": "RtlNtStatusToDosError@4"
+  },
+  "302": {
+    "name": "RtlRaiseException",
+    "mangled": "RtlRaiseException@4"
+  },
+  "303": {
+    "name": "RtlRaiseStatus",
+    "mangled": "RtlRaiseStatus@4"
+  },
+  "304": {
+    "name": "RtlTimeFieldsToTime",
+    "mangled": "RtlTimeFieldsToTime@8"
+  },
+  "305": {
+    "name": "RtlTimeToTimeFields",
+    "mangled": "RtlTimeToTimeFields@8"
+  },
+  "306": {
+    "name": "RtlTryEnterCriticalSection",
+    "mangled": "RtlTryEnterCriticalSection@4"
+  },
+  "307": {
+    "name": "RtlUlongByteSwap",
+    "mangled": "@RtlUlongByteSwap@4"
+  },
+  "308": {
+    "name": "RtlUnicodeStringToAnsiString",
+    "mangled": "RtlUnicodeStringToAnsiString@12"
+  },
+  "309": {
+    "name": "RtlUnicodeStringToInteger",
+    "mangled": "RtlUnicodeStringToInteger@12"
+  },
+  "310": {
+    "name": "RtlUnicodeToMultiByteN",
+    "mangled": "RtlUnicodeToMultiByteN@20"
+  },
+  "311": {
+    "name": "RtlUnicodeToMultiByteSize",
+    "mangled": "RtlUnicodeToMultiByteSize@12"
+  },
+  "312": {
+    "name": "RtlUnwind",
+    "mangled": "RtlUnwind@16"
+  },
+  "313": {
+    "name": "RtlUpcaseUnicodeChar",
+    "mangled": "RtlUpcaseUnicodeChar@4"
+  },
+  "314": {
+    "name": "RtlUpcaseUnicodeString",
+    "mangled": "RtlUpcaseUnicodeString@12"
+  },
+  "315": {
+    "name": "RtlUpcaseUnicodeToMultiByteN",
+    "mangled": "RtlUpcaseUnicodeToMultiByteN@20"
+  },
+  "316": {
+    "name": "RtlUpperChar",
+    "mangled": "RtlUpperChar@4"
+  },
+  "317": {
+    "name": "RtlUpperString",
+    "mangled": "RtlUpperString@8"
+  },
+  "318": {
+    "name": "RtlUshortByteSwap",
+    "mangled": "@RtlUshortByteSwap@4"
+  },
+  "319": {
+    "name": "RtlWalkFrameChain",
+    "mangled": "RtlWalkFrameChain@12"
+  },
+  "320": {
+    "name": "RtlZeroMemory",
+    "mangled": "RtlZeroMemory@8"
+  },
+  "321": {
+    "name": "XboxEEPROMKey",
+    "mangled": "XboxEEPROMKey"
+  },
+  "322": {
+    "name": "XboxHardwareInfo",
+    "mangled": "XboxHardwareInfo"
+  },
+  "323": {
+    "name": "XboxHDKey",
+    "mangled": "XboxHDKey"
+  },
+  "324": {
+    "name": "XboxKrnlVersion",
+    "mangled": "XboxKrnlVersion"
+  },
+  "325": {
+    "name": "XboxSignatureKey",
+    "mangled": "XboxSignatureKey"
+  },
+  "326": {
+    "name": "XeImageFileName",
+    "mangled": "XeImageFileName"
+  },
+  "327": {
+    "name": "XeLoadSection",
+    "mangled": "XeLoadSection@4"
+  },
+  "328": {
+    "name": "XeUnloadSection",
+    "mangled": "XeUnloadSection@4"
+  },
+  "329": {
+    "name": "READ_PORT_BUFFER_UCHAR",
+    "mangled": "READ_PORT_BUFFER_UCHAR@12"
+  },
+  "330": {
+    "name": "READ_PORT_BUFFER_USHORT",
+    "mangled": "READ_PORT_BUFFER_USHORT@12"
+  },
+  "331": {
+    "name": "READ_PORT_BUFFER_ULONG",
+    "mangled": "READ_PORT_BUFFER_ULONG@12"
+  },
+  "332": {
+    "name": "WRITE_PORT_BUFFER_UCHAR",
+    "mangled": "WRITE_PORT_BUFFER_UCHAR@12"
+  },
+  "333": {
+    "name": "WRITE_PORT_BUFFER_USHORT",
+    "mangled": "WRITE_PORT_BUFFER_USHORT@12"
+  },
+  "334": {
+    "name": "WRITE_PORT_BUFFER_ULONG",
+    "mangled": "WRITE_PORT_BUFFER_ULONG@12"
+  },
+  "335": {
+    "name": "XcSHAInit",
+    "mangled": "XcSHAInit@4"
+  },
+  "336": {
+    "name": "XcSHAUpdate",
+    "mangled": "XcSHAUpdate@12"
+  },
+  "337": {
+    "name": "XcSHAFinal",
+    "mangled": "XcSHAFinal@8"
+  },
+  "338": {
+    "name": "XcRC4Key",
+    "mangled": "XcRC4Key@12"
+  },
+  "339": {
+    "name": "XcRC4Crypt",
+    "mangled": "XcRC4Crypt@12"
+  },
+  "340": {
+    "name": "XcHMAC",
+    "mangled": "XcHMAC@28"
+  },
+  "341": {
+    "name": "XcPKEncPublic",
+    "mangled": "XcPKEncPublic@12"
+  },
+  "342": {
+    "name": "XcPKDecPrivate",
+    "mangled": "XcPKDecPrivate@12"
+  },
+  "343": {
+    "name": "XcPKGetKeyLen",
+    "mangled": "XcPKGetKeyLen@4"
+  },
+  "344": {
+    "name": "XcVerifyPKCS1Signature",
+    "mangled": "XcVerifyPKCS1Signature@12"
+  },
+  "345": {
+    "name": "XcModExp",
+    "mangled": "XcModExp@20"
+  },
+  "346": {
+    "name": "XcDESKeyParity",
+    "mangled": "XcDESKeyParity@8"
+  },
+  "347": {
+    "name": "XcKeyTable",
+    "mangled": "XcKeyTable@12"
+  },
+  "348": {
+    "name": "XcBlockCrypt",
+    "mangled": "XcBlockCrypt@20"
+  },
+  "349": {
+    "name": "XcBlockCryptCBC",
+    "mangled": "XcBlockCryptCBC@28"
+  },
+  "350": {
+    "name": "XcCryptService",
+    "mangled": "XcCryptService@8"
+  },
+  "351": {
+    "name": "XcUpdateCrypto",
+    "mangled": "XcUpdateCrypto@8"
+  },
+  "352": {
+    "name": "RtlRip",
+    "mangled": "RtlRip@12"
+  },
+  "353": {
+    "name": "XboxLANKey",
+    "mangled": "XboxLANKey"
+  },
+  "354": {
+    "name": "XboxAlternateSignatureKeys",
+    "mangled": "XboxAlternateSignatureKeys"
+  },
+  "355": {
+    "name": "XePublicKeyData",
+    "mangled": "XePublicKeyData"
+  },
+  "356": {
+    "name": "HalBootSMCVideoMode",
+    "mangled": "HalBootSMCVideoMode"
+  },
+  "357": {
+    "name": "IdexChannelObject",
+    "mangled": "IdexChannelObject"
+  },
+  "358": {
+    "name": "HalIsResetOrShutdownPending",
+    "mangled": "HalIsResetOrShutdownPending@0"
+  },
+  "359": {
+    "name": "IoMarkIrpMustComplete",
+    "mangled": "IoMarkIrpMustComplete@4"
+  },
+  "360": {
+    "name": "HalInitiateShutdown",
+    "mangled": "HalInitiateShutdown@0"
+  },
+  "361": {
+    "name": "RtlSnprintf",
+    "mangled": "RtlSnprintf"
+  },
+  "362": {
+    "name": "RtlSprintf",
+    "mangled": "RtlSprintf"
+  },
+  "363": {
+    "name": "RtlVsnprintf",
+    "mangled": "RtlVsnprintf"
+  },
+  "364": {
+    "name": "RtlVsprintf",
+    "mangled": "RtlVsprintf"
+  },
+  "365": {
+    "name": "HalEnableSecureTrayEject",
+    "mangled": "HalEnableSecureTrayEject@0"
+  },
+  "366": {
+    "name": "HalWriteSMCScratchRegister",
+    "mangled": "HalWriteSMCScratchRegister@4"
+  },
+  "374": {
+    "name": "MmDbgAllocateMemory",
+    "mangled": "MmDbgAllocateMemory@8"
+  },
+  "375": {
+    "name": "MmDbgFreeMemory",
+    "mangled": "MmDbgFreeMemory@8"
+  },
+  "376": {
+    "name": "MmDbgQueryAvailablePages",
+    "mangled": "MmDbgQueryAvailablePages@0"
+  },
+  "377": {
+    "name": "MmDbgReleaseAddress",
+    "mangled": "MmDbgReleaseAddress@8"
+  },
+  "378": {
+    "name": "MmDbgWriteCheck",
+    "mangled": "MmDbgWriteCheck@8"
+  }
+}
