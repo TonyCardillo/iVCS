@@ -156,17 +156,23 @@ Borrowing mizuchi's structure, with substitutions:
 
 `src/agent.py` and `src/verifier.py` from v0.1 are obsoleted by this design and should be deleted in the same commit that lands the new loop. The shape is incompatible; keeping them around invites confusion.
 
-## Open questions (decisions deferred)
+## Decisions (locked in)
 
-1. **LLM client: LiteLLM (current) or Anthropic SDK directly?** LiteLLM supports tool use across providers (Claude, OpenAI, local models via Ollama/LM Studio), but the tool-use schema has provider-specific quirks. Anthropic SDK is the well-trodden path for Claude tool use and gets new features first. **Lean: Anthropic SDK directly for v2.** Local models can be a follow-on once the loop is solid.
+1. **LLM client: LiteLLM against local OpenAI-compatible endpoints. Claude/cloud APIs are out of scope.** Rationale: no API costs, no source-of-the-game-assembly leaving the machine, fully self-contained iteration. Practical implication: tool use depends on the local model's native tool-calling ability. Qwen2.5-Coder, Qwen3-Coder, Llama 3.1+, and DeepSeek-Coder all emit OpenAI-style `tool_calls`; older or distilled models may not. Recommended default: Qwen3-Coder-30B or similar via LM Studio / Ollama / vLLM at `http://127.0.0.1:1234/v1`.
 
-2. **Local-model fallback?** v0.1 targeted Qwen3-4B via LM Studio. Qwen handles tool calls but worse than Claude at this kind of structured reasoning. **Lean: ship Claude-first; if the agent loop works well, evaluate Qwen-coder-30B as a free tier later.** Don't bottleneck v2 design on the weakest model.
+2. **Exactly one tool: `compile_and_view_assembly`.** No `read_neighboring_function`, no `read_ctx_h`, no filesystem access. The full target assembly and full `ctx.h` go in the initial prompt. Mizuchi gets by with this; we will too.
 
-3. **Concurrency.** Many functions can be attempted in parallel (independent workspaces, independent Claude conversations). **Lean: design the loop as a single-function function (`agent_match(fn_workspace) -> Result`) and let an orchestrator parallelize.** Don't bake parallelism into the inner loop.
+3. **Best-so-far persistence, not every-iteration revert.** The loop tracks `best.c` (highest `match_percent` seen). Score regressions are *not* auto-reverted — the model is free to take temporary drops to escape local optima. If we end without a match, we hand back `best`, not last.
 
-4. **What to do when budget runs out without a match.** Options: (a) leave `best.c` and move on; (b) hand off to `decomp-permuter`-style mutation search; (c) flag for human review. **Lean: (a) for v2; (b) is a Phase 4 milestone.**
+4. **CLI shape: `ivcs match --xbe ... --address ... --output ...`** — one function per invocation. Project-wide orchestration is layered above (a separate `ivcs run-project` or shell `xargs` over a function list).
 
-5. **Token budget per function.** Mizuchi defaults to 10 min hard / 7 min soft. That's a *lot* of Claude budget per function. **Lean: start cheap — 5 min hard / 3 min soft / max 15 tool calls — and adjust based on observed convergence rate.**
+## Single-function focus, deferred concerns
+
+These were noted earlier as "open questions" but reduce to *out of scope for v2.0*:
+
+- **Concurrency.** Inner loop is a single-function function; orchestrator handles parallelism. Not in the inner loop's design.
+- **Budget exhaustion.** Persist `best`, exit non-success. Permuter is a Phase 4 milestone.
+- **Token budget.** Start with 15 tool calls / 5 min hard / 3 min soft; tune by observation. Less critical than for cloud APIs since local-LLM tokens are free.
 
 ## What we're explicitly NOT building in the first cut
 
