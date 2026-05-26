@@ -1,72 +1,37 @@
 # TODO
 
-## Current Status (v0.1.0 - MVP)
+## v2 reset — Xbox matching decomp
 
-iVCS is a **proof-of-concept** for LLM-based decompilation. Core functionality is complete and working.
+v0.1 (single-function x86-32 GCC `-O0`, PyQt5 GUI) has been stripped. The engine pieces worth keeping (decoder, CFG, verifier shell, agent loop scaffold) remain. Everything compiler-specific or GUI-specific has been deleted.
 
-**What works:**
-- ✅ x86-32 disassembly (Capstone)
-- ✅ Sound CFG extraction (basic blocks + edges)
-- ✅ Local LLM integration (LiteLLM)
-- ✅ Binary verification (GCC compilation + byte comparison)
-- ✅ Iterative refinement (LLM feedback loop)
-- ✅ GUI (PyQt5 with tactical theme)
-- ✅ Tests (25 passing)
+### Reset completed
+- [x] Delete PyQt5 GUI (`src/gui/`, `main.py`)
+- [x] Delete `src/loader.py` (placeholder stub)
+- [x] Delete `src/session.py` (wrong shape for multi-function projects)
+- [x] Drop PyQt5 from requirements
+- [x] Tests still pass after reset (25 passing, 1 skipped — unchanged from baseline)
 
-**Scope:**
-- Single functions only (not whole programs)
-- x86-32 architecture
-- GCC compiler (not MSVC/Clang)
-- Simple optimization levels (-O0 primarily)
+### Recon needed before next code (no work yet)
+- [ ] **MSVC toolchain reproducibility** — can XDK `cl.exe` 13.10 + `link.exe` run reproducibly under Wine on macOS, or is a Windows VM required? Look at `wibo`, `mwccdecompiler`, any existing Xbox decomp projects.
+- [ ] **`asm-differ` for x86 MSVC** — port from the MIPS version; design the instruction alignment + scoring approach (Myers or Hunt-McIlroy over decoded instructions, register-aware coloring).
 
-## Potential Future Work
+### v2 milestones (high level)
+1. **XBE loader** — header, section table, kernel imports by ordinal; CLI `ivcs dump <xbe>`.
+2. **Kernel ordinal database** — port from Cxbx-Reloaded.
+3. **MSVC toolchain harness** — reproducible `cl.exe` + `link.exe` from source → object file → byte-extractable function.
+4. **Bootstrap with ground truth** — compile a hand-written C function with the XDK, prove the loop end-to-end before any LLM call.
+5. **Instruction-aware differ + score** — replace byte-position match% with edit distance over decoded instructions.
+6. **Diff-driven agent loop** — retarget prompts from "write C from asm" to "read this diff, propose one C edit."
+7. **Project layout** — splat-style YAML, per-function asm/src split, `progress.json`.
+8. **Pick a target game** — small early title, C-heavy, ideally not `/GL+/LTCG`.
 
-### Nice-to-Have Improvements
+### Out of scope for v2
+- C++ class recovery (vtables → classes) — Phase 4, after a single function matches reliably
+- Whole-program optimization (`/GL+/LTCG`) — pick targets that don't use it
+- Other consoles (N64, GameCube) — different toolchain
+- Re-introduction of a GUI — CLI/library first; if a UI returns later, it'll be a web frontend over a daemon
 
-1. **Example Binaries**
-   - Add `examples/` directory with sample .bin files
-   - Include expected C output for comparison
-   - Document how to create test cases
-
-2. **Better Documentation**
-   - Screenshot of GUI in README
-   - Video demo/walkthrough
-   - Common issues troubleshooting guide
-
-3. **Code Quality**
-   - Add type hints to all functions (`mypy --strict`)
-   - Increase test coverage
-   - Run `ruff check` and fix all issues
-
-### Research Questions (Out of Scope for MVP)
-
-These are interesting directions but not planned:
-
-- **Multi-function support** - Decompile entire programs
-- **Architecture support** - ARM, MIPS, x86-64
-- **Compiler support** - MSVC, Clang verification
-- **Optimization levels** - Handle -O2, -O3 code
-- **Advanced CFG** - Loop detection, dominators
-- **Diff visualization** - Show instruction-level differences
-- **Context handling** - External symbols, function calls
-- **Caching** - Store successful decompilations
-
-### Non-Goals
-
-Explicitly out of scope:
-
-- ❌ Production-ready decompiler (this is a proof-of-concept)
-- ❌ Obfuscation handling
-- ❌ Anti-debugging detection
-- ❌ Custom IR/optimization passes
-- ❌ Commercial support
-
-## Recently Completed ✅
-
-- [x] Integrate Local LLM via LiteLLM
-- [x] Create minimal foundation (Decoder, CFG, Verifier, Agent)
-- [x] Build GUI with decompilation workflow
-- [x] Write comprehensive tests
-- [x] Improve CFG formatting (sound, more helpful)
-- [x] Allow LLM chain-of-thought (reasoning before code)
-- [x] Clean up documentation
+### Non-goals (unchanged)
+- Production-ready general-purpose decompiler (Ghidra/IDA exist)
+- Obfuscation / anti-debug handling
+- Commercial support
