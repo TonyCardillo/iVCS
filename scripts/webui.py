@@ -969,6 +969,9 @@ def _workspace_function_name(workspace_root: Path) -> str | None:
     result = _load_json_or_none(workspace_root / "result.json")
     if result and result.get("function_name"):
         return result["function_name"]
+    job = _job_for(workspace_root)
+    if job is not None:
+        return job.function_name
     return _guess_function_name(workspace_root)
 
 
@@ -1143,16 +1146,25 @@ def view_decomp_run(root_str: str, current_path: str | None) -> str:
 <div class="muted tight" style="margin-top: 8px;">match % across attempts</div>
 """
 
+    last_n = attempts[-1]["n"] if attempts else 0
+    job_active = bool(job and job.is_active())
+
     timeline_rows = []
     for a in attempts:
-        mp = a["match_percent"]
-        if mp is None:
-            mp_html = '<span class="muted">compile error</span>' if not a["compiled"] else '<span class="muted">no symbol</span>'
-            status_html = '<span class="badge failed">compile</span>' if not a["compiled"] else '<span class="badge pending">no symbol</span>'
+        is_in_flight = job_active and a["n"] == last_n
+        label, badge_cls, badge_text = _attempt_status_labels(a, is_in_flight=is_in_flight)
+        if label is not None:
+            mp_html = f'<span class="muted">{label}</span>'
+            status_html = f'<span class="badge {badge_cls}">{badge_text}</span>'
         else:
+            mp = a["match_percent"]
             cls = "" if mp > 0 else "zero"
             mp_html = f'<span class="mp {cls}">{mp:.2f}%</span>'
-            status_html = '<span class="badge matched">100%</span>' if mp == 100.0 else '<span class="badge partial">partial</span>'
+            status_html = (
+                '<span class="badge matched">100%</span>'
+                if mp == 100.0
+                else '<span class="badge partial">partial</span>'
+            )
         timeline_rows.append(
             f'<div class="attempt-row">'
             f'<span class="n">#{a["n"]:04d}</span>'
@@ -1420,6 +1432,31 @@ def _load_json_or_none(path: Path) -> dict | None:
         return json.loads(path.read_text())
     except (json.JSONDecodeError, OSError):
         return None
+
+
+def _attempt_status_labels(
+    attempt: dict, *, is_in_flight: bool
+) -> tuple[str | None, str, str]:
+    """Pick (mp_label, badge_class, badge_text) for one attempt row.
+
+    Returns (None, _, _) when match_percent is set and the caller should
+    render the percentage normally. Otherwise the label distinguishes
+    transient mid-iteration states (compiling/diffing) from terminal
+    failures (compile failed, diff failed, symbol mismatch).
+    """
+    if attempt["match_percent"] is not None:
+        return None, "", ""
+    if not attempt["compiled"]:
+        return (
+            ("compiling…", "pending", "compiling") if is_in_flight
+            else ("compile failed", "failed", "compile")
+        )
+    if not attempt["diff_path"].is_file():
+        return (
+            ("diffing…", "pending", "diffing") if is_in_flight
+            else ("diff failed", "failed", "diff")
+        )
+    return "symbol mismatch", "failed", "no match"
 
 
 def _guess_function_name(root: Path) -> str | None:
