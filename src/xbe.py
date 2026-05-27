@@ -11,6 +11,8 @@ import struct
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import capstone
+
 XBE_MAGIC = b"XBEH"
 HEADER_SIZE = 0x178
 SECTION_HEADER_SIZE = 0x38
@@ -178,6 +180,148 @@ def xbe_kernel_thunk_address_get(parsed: ParsedXbe) -> int:
 
 def xbe_load(path: Path | str) -> ParsedXbe:
     return xbe_parse(Path(path).read_bytes())
+
+
+# Function enumeration ──────────────────────────────────────────────────────
+# Padding bytes MSVC emits between functions for alignment. Used to detect
+# function boundaries: a `ret` followed by one of these is the end of a
+# function; a `ret` followed by anything else is an early return.
+FUNCTION_PADDING_BYTES = frozenset({0xCC, 0x90})
+
+# Cap on a single function's size during enumeration. Real MSVC /O2 functions
+# rarely exceed a few hundred bytes; anything past this is almost certainly
+# capstone scanning into data (a jump table, an embedded constant pool, etc.)
+# and we'd rather under-count than emit a 64KB monstrosity.
+MAX_FUNCTION_SIZE = 16384
+
+
+@dataclass(frozen=True)
+class XbeFunction:
+    name: str
+    va: int
+    size: int
+
+
+def xbe_functions_enumerate(parsed: ParsedXbe) -> tuple[XbeFunction, ...]:
+    """Linear-sweep every executable section, emitting (name, va, size) per
+    detected function. Names follow `sub_VVVVVVVV` (8 hex digits uppercase).
+
+    Two-pass per section:
+      1. Disassemble the whole section, recording every direct `call`
+         target that lands within the section. Each is a guaranteed
+         function start.
+      2. Walk the instruction stream. A `ret` closes the current function
+         iff the byte after it is padding (0xCC/0x90), the section ends,
+         the next decoded instruction is a recognized MSVC /O2 prologue,
+         or its VA is in the call-target set.
+    """
+    md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
+    md.detail = False
+    found: list[XbeFunction] = []
+
+    for section in parsed.sections:
+        if not section.is_executable:
+            continue
+        body = xbe_section_read(parsed, section)
+        n = section.raw_size
+        section_va = section.virtual_address
+        section_end_va = section_va + n
+
+        instrs = _disassemble_with_resync(md, body, section_va)
+        call_targets = _collect_call_targets(instrs, section_va, section_end_va)
+
+        fn_start_off: int | None = None
+        for i, (addr, size, mnem, _op) in enumerate(instrs):
+            offset = addr - section_va
+            end_off = offset + size
+
+            if fn_start_off is None:
+                if mnem in ("int3", "nop"):
+                    continue
+                fn_start_off = offset
+
+            if mnem == "ret" or mnem.startswith("retn") or mnem.startswith("retf"):
+                next_va = section_va + end_off
+                is_boundary = (
+                    end_off >= n
+                    or body[end_off] in FUNCTION_PADDING_BYTES
+                    or next_va in call_targets
+                    or _next_instr_is_prologue(instrs, i + 1)
+                )
+                if is_boundary:
+                    fn_va = section_va + fn_start_off
+                    fn_size = end_off - fn_start_off
+                    if 1 <= fn_size <= MAX_FUNCTION_SIZE:
+                        found.append(XbeFunction(
+                            name=f"sub_{fn_va:08X}", va=fn_va, size=fn_size,
+                        ))
+                    fn_start_off = None
+
+    return tuple(found)
+
+
+def _collect_call_targets(
+    instrs: list[tuple[int, int, str, str]],
+    section_va: int,
+    section_end_va: int,
+) -> set[int]:
+    """VAs of direct `call <imm>` targets that land inside [section_va, section_end_va)."""
+    targets: set[int] = set()
+    for _, _, mnem, op in instrs:
+        if mnem != "call" or not op.startswith("0x"):
+            continue
+        try:
+            tgt = int(op, 16)
+        except ValueError:
+            continue
+        if section_va <= tgt < section_end_va:
+            targets.add(tgt)
+    return targets
+
+
+_PUSH_PROLOGUE_REGS = frozenset({"ebp", "esi", "edi", "ebx"})
+
+
+def _next_instr_is_prologue(
+    instrs: list[tuple[int, int, str, str]], idx: int
+) -> bool:
+    """Does the instruction at `idx` (skipping any padding) look like a
+    function prologue? Pattern set is the common MSVC /O2 entries."""
+    while idx < len(instrs):
+        _, _, mnem, op = instrs[idx]
+        if mnem in ("int3", "nop"):
+            idx += 1
+            continue
+        if mnem == "push" and op in _PUSH_PROLOGUE_REGS:
+            return True
+        if mnem == "sub" and op.startswith("esp,"):
+            return True
+        if mnem == "mov" and op == "edi, edi":
+            return True
+        if mnem == "enter":
+            return True
+        return False
+    return False
+
+
+def _disassemble_with_resync(
+    md: capstone.Cs, body: bytes, base_va: int
+) -> list[tuple[int, int, str, str]]:
+    """Linear disasm of `body`, advancing 1 byte past any capstone desync."""
+    n = len(body)
+    instrs: list[tuple[int, int, str, str]] = []
+    offset = 0
+    while offset < n:
+        batch = list(md.disasm_lite(body[offset:], base_va + offset))
+        if not batch:
+            offset += 1
+            continue
+        instrs.extend(batch)
+        last_addr, last_size, _, _ = batch[-1]
+        offset = (last_addr + last_size) - base_va
+        if offset < n:
+            offset += 1
+    return instrs
 
 
 def _xbe_header_parse(data: bytes) -> XbeHeader:

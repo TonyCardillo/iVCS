@@ -25,10 +25,12 @@ from src.xbe import (
     XBE_KT_KEY_CHIHIRO,
     XBE_KT_KEY_DEBUG,
     XbeFormatError,
+    XbeFunction,
     is_xbe_magic_valid,
     xbe_build_flavor_detect,
     xbe_entry_point_get,
     xbe_function_carve,
+    xbe_functions_enumerate,
     xbe_kernel_thunk_address_get,
     xbe_parse,
     xbe_section_containing_va,
@@ -484,3 +486,214 @@ class TestHalo2RetailRegression:
         assert xbe_build_flavor_detect(parsed).name == "retail"
         assert xbe_entry_point_get(parsed) == 0x002D0AEE
         assert xbe_kernel_thunk_address_get(parsed) == 0x00411520
+
+
+# Building blocks for synthetic .text sections used by enumeration tests.
+# Each leaf is a real x86-32 instruction stream that ends in `ret` (C3) or
+# `ret imm16` (C2). Comments document the assembled bytes.
+
+# push ebp; mov ebp, esp; pop ebp; ret   (6 bytes, stdcall-ish frame)
+FN_FRAME_NOOP = b"\x55\x8b\xec\x5d\xc3"  # actually 5 bytes
+# mov eax, 0; ret   (6 bytes, leaf returning 0)
+FN_LEAF_RET0 = b"\xb8\x00\x00\x00\x00\xc3"
+# push esi; mov esi, ecx; xor eax, eax; pop esi; ret 4   (8 bytes, stdcall@4)
+FN_STDCALL = b"\x56\x8b\xf1\x33\xc0\x5e\xc2\x04\x00"  # 9 bytes
+# Single ret, "skeleton" function (1 byte)
+FN_RET_ONLY = b"\xc3"
+# Two-ret function: test eax, eax; jz +2; ret; xor eax, eax; ret  (early return then real return)
+FN_TWO_RETS = b"\x85\xc0\x74\x02\xc3\x33\xc0\xc3"  # 8 bytes; first ret at offset 4 not boundary
+
+
+class TestEnumerateFunctions:
+    def test_returns_empty_when_no_executable_sections(self):
+        parsed = xbe_parse(
+            build_minimal_xbe(
+                base_addr=0x00010000,
+                size_of_image=0x00100000,
+                sections=[(".data", SECTION_FLAG_WRITABLE, b"\x90" * 32, 0x00011000)],
+            )
+        )
+        assert xbe_functions_enumerate(parsed) == ()
+
+    def test_single_function_in_text_section(self):
+        text = FN_LEAF_RET0  # 6 bytes
+        parsed = xbe_parse(
+            build_minimal_xbe(
+                base_addr=0x00010000,
+                size_of_image=0x00100000,
+                sections=[(".text", SECTION_FLAG_EXECUTABLE, text, 0x00011000)],
+            )
+        )
+        fns = xbe_functions_enumerate(parsed)
+        assert fns == (XbeFunction(name="sub_00011000", va=0x00011000, size=6),)
+
+    def test_two_functions_separated_by_int3_padding(self):
+        text = FN_LEAF_RET0 + b"\xcc\xcc\xcc" + FN_FRAME_NOOP
+        parsed = xbe_parse(
+            build_minimal_xbe(
+                base_addr=0x00010000,
+                size_of_image=0x00100000,
+                sections=[(".text", SECTION_FLAG_EXECUTABLE, text, 0x00011000)],
+            )
+        )
+        fns = xbe_functions_enumerate(parsed)
+        assert len(fns) == 2
+        assert fns[0] == XbeFunction(name="sub_00011000", va=0x00011000, size=6)
+        assert fns[1] == XbeFunction(name="sub_00011009", va=0x00011009, size=5)
+
+    def test_nop_padding_between_functions(self):
+        text = FN_LEAF_RET0 + b"\x90\x90" + FN_RET_ONLY
+        parsed = xbe_parse(
+            build_minimal_xbe(
+                base_addr=0x00010000,
+                size_of_image=0x00100000,
+                sections=[(".text", SECTION_FLAG_EXECUTABLE, text, 0x00011000)],
+            )
+        )
+        fns = xbe_functions_enumerate(parsed)
+        assert len(fns) == 2
+
+    def test_stdcall_ret_imm16_recognized_as_boundary(self):
+        text = FN_STDCALL + b"\xcc" + FN_LEAF_RET0
+        parsed = xbe_parse(
+            build_minimal_xbe(
+                base_addr=0x00010000,
+                size_of_image=0x00100000,
+                sections=[(".text", SECTION_FLAG_EXECUTABLE, text, 0x00011000)],
+            )
+        )
+        fns = xbe_functions_enumerate(parsed)
+        assert len(fns) == 2
+        assert fns[0].size == 9  # FN_STDCALL is 9 bytes including ret 4
+
+    def test_early_ret_inside_function_does_not_split(self):
+        # FN_TWO_RETS has a `ret` mid-stream that's immediately followed by
+        # another instruction (no padding). It must NOT split the function.
+        text = FN_TWO_RETS + b"\xcc"  # trailing pad so the final ret is recognized
+        parsed = xbe_parse(
+            build_minimal_xbe(
+                base_addr=0x00010000,
+                size_of_image=0x00100000,
+                sections=[(".text", SECTION_FLAG_EXECUTABLE, text, 0x00011000)],
+            )
+        )
+        fns = xbe_functions_enumerate(parsed)
+        assert len(fns) == 1
+        assert fns[0].size == 8  # whole FN_TWO_RETS
+
+    def test_function_at_section_end_terminates_without_padding(self):
+        # A `ret` immediately followed by section-end is still a boundary.
+        text = FN_RET_ONLY  # one byte
+        parsed = xbe_parse(
+            build_minimal_xbe(
+                base_addr=0x00010000,
+                size_of_image=0x00100000,
+                sections=[(".text", SECTION_FLAG_EXECUTABLE, text, 0x00011000)],
+            )
+        )
+        fns = xbe_functions_enumerate(parsed)
+        assert fns == (XbeFunction(name="sub_00011000", va=0x00011000, size=1),)
+
+    def test_skips_leading_padding(self):
+        text = b"\xcc\xcc\xcc\xcc" + FN_LEAF_RET0
+        parsed = xbe_parse(
+            build_minimal_xbe(
+                base_addr=0x00010000,
+                size_of_image=0x00100000,
+                sections=[(".text", SECTION_FLAG_EXECUTABLE, text, 0x00011000)],
+            )
+        )
+        fns = xbe_functions_enumerate(parsed)
+        assert len(fns) == 1
+        assert fns[0].va == 0x00011004
+
+    def test_names_use_8_hex_digits_uppercase(self):
+        parsed = xbe_parse(
+            build_minimal_xbe(
+                base_addr=0x00010000,
+                size_of_image=0x00100000,
+                sections=[(".text", SECTION_FLAG_EXECUTABLE, FN_LEAF_RET0, 0x002D1D94)],
+            )
+        )
+        fns = xbe_functions_enumerate(parsed)
+        assert fns[0].name == "sub_002D1D94"
+
+    def test_multi_section_enumeration(self):
+        text1 = FN_LEAF_RET0
+        text2 = FN_FRAME_NOOP
+        parsed = xbe_parse(
+            build_minimal_xbe(
+                base_addr=0x00010000,
+                size_of_image=0x00100000,
+                sections=[
+                    (".text",  SECTION_FLAG_EXECUTABLE, text1, 0x00011000),
+                    (".text2", SECTION_FLAG_EXECUTABLE, text2, 0x00020000),
+                ],
+            )
+        )
+        fns = xbe_functions_enumerate(parsed)
+        names = {f.name for f in fns}
+        assert names == {"sub_00011000", "sub_00020000"}
+
+    def test_back_to_back_functions_split_on_prologue(self):
+        # Two functions with NO padding between them. The first ends in `ret`
+        # and the second immediately starts with `push ebp` (a prologue).
+        # Without prologue detection these would be merged; with it, split.
+        text = FN_LEAF_RET0 + FN_FRAME_NOOP + b"\xcc"
+        parsed = xbe_parse(
+            build_minimal_xbe(
+                base_addr=0x00010000,
+                size_of_image=0x00100000,
+                sections=[(".text", SECTION_FLAG_EXECUTABLE, text, 0x00011000)],
+            )
+        )
+        fns = xbe_functions_enumerate(parsed)
+        assert len(fns) == 2
+        assert fns[0] == XbeFunction(name="sub_00011000", va=0x00011000, size=6)
+        assert fns[1] == XbeFunction(name="sub_00011006", va=0x00011006, size=5)
+
+    def test_back_to_back_split_when_target_of_internal_call(self):
+        # Function A at 0x11000 makes a self-referential call to 0x11006
+        # (where function B begins) and then rets. B starts with `mov eax,
+        # 0` (NOT a recognized prologue). Without call-target tracking,
+        # A's ret would not be a boundary and B would be merged in. With
+        # it, 0x11006 being a known call target makes A's ret a boundary.
+        #
+        # call rel32 (E8 + 4-byte offset). For call at 0x11000:
+        #   target = next_instr_addr + rel32 = 0x11005 + rel32
+        #   want target = 0x11006, so rel32 = 1
+        a = b"\xe8\x01\x00\x00\x00\xc3"  # call 0x11006; ret
+        b = b"\xb8\x00\x00\x00\x00\xc3"  # mov eax, 0; ret
+        text = a + b + b"\xcc"
+        parsed = xbe_parse(
+            build_minimal_xbe(
+                base_addr=0x00010000,
+                size_of_image=0x00100000,
+                sections=[(".text", SECTION_FLAG_EXECUTABLE, text, 0x00011000)],
+            )
+        )
+        fns = xbe_functions_enumerate(parsed)
+        assert len(fns) == 2
+        assert fns[0] == XbeFunction(name="sub_00011000", va=0x00011000, size=6)
+        assert fns[1] == XbeFunction(name="sub_00011006", va=0x00011006, size=6)
+
+    def test_back_to_back_not_split_when_no_prologue(self):
+        # Two consecutive `ret` instructions with no padding and no prologue
+        # after. The first ret is not a boundary (treated as early return).
+        text = b"\xc3\x90\x90" + FN_LEAF_RET0  # one early ret, then padding, then leaf
+        # Actually: the early ret IS followed by padding (0x90), so it IS a
+        # boundary. Construct a cleaner case: ret, then another non-prologue
+        # instruction that itself ends in ret with padding.
+        text = b"\xc3" + b"\x33\xc0\xc3" + b"\xcc"  # ret; xor eax,eax; ret; pad
+        parsed = xbe_parse(
+            build_minimal_xbe(
+                base_addr=0x00010000,
+                size_of_image=0x00100000,
+                sections=[(".text", SECTION_FLAG_EXECUTABLE, text, 0x00011000)],
+            )
+        )
+        fns = xbe_functions_enumerate(parsed)
+        # The first ret is not followed by padding or a prologue (`xor eax,
+        # eax` is not in the prologue set), so it doesn't close the function.
+        assert len(fns) == 1
+        assert fns[0].size == 4
