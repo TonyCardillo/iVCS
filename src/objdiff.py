@@ -1,16 +1,10 @@
 """Typed Python wrapper around `objdiff-cli diff`.
 
-Designed for the iVCS agent loop. Two halves:
-- objdiff_parse(): pure function from JSON dict to typed DiffResult. Testable
-  with fixture JSON; no subprocess.
-- objdiff_run(): spawns objdiff-cli, returns parsed DiffResult.
+Split into a pure parser (objdiff_parse, testable from fixture JSON) and
+a subprocess runner (objdiff_run) so tests stay offline.
 
-We mirror the diff.proto schema only for the fields the agent loop will
-actually consume — match_percent per symbol, per-instruction diff_kind,
-formatted instruction text, branch_dest. Full schema is in
-objdiff-core/protos/diff.proto if more fields are needed later.
-
-Reference: https://github.com/encounter/objdiff/blob/main/objdiff-core/protos/diff.proto
+We mirror only the diff.proto fields the agent loop consumes. Full schema:
+https://github.com/encounter/objdiff/blob/main/objdiff-core/protos/diff.proto
 """
 
 import json
@@ -21,8 +15,6 @@ from pathlib import Path
 
 
 class DiffKind(str, Enum):
-    """Per-instruction diff classification (mirrors objdiff's DiffKind enum)."""
-
     NONE = "DIFF_NONE"
     REPLACE = "DIFF_REPLACE"
     DELETE = "DIFF_DELETE"
@@ -43,8 +35,6 @@ class DiffInstruction:
 class DiffInstructionRow:
     diff_kind: DiffKind
     instruction: DiffInstruction | None = None
-    # Indices of arguments that differ from the other side. Empty if no arg diffs
-    # or no instruction (e.g., on INSERT/DELETE rows the instruction may be absent).
     arg_diff_indices: tuple[int, ...] = ()
 
 
@@ -61,7 +51,7 @@ class DiffSymbol:
 
 @dataclass(frozen=True)
 class DiffSide:
-    """One side of a diff (left = target, right = base)."""
+    """left = target, right = base."""
 
     symbols: tuple[DiffSymbol, ...] = ()
 
@@ -72,12 +62,7 @@ class DiffResult:
     right: DiffSide | None = None
 
     def function_symbols(self, side: str = "left") -> tuple[DiffSymbol, ...]:
-        """Convenience: return only SYMBOL_FUNCTION symbols from one side.
-
-        Real objdiff output includes section markers like [.drectve], [.text]
-        and metadata objects like @feat.00 mixed in with function symbols;
-        the agent loop only cares about functions.
-        """
+        """objdiff also emits section markers ([.drectve], [.text]) and metadata (@feat.00); filter those out."""
         s = self.left if side == "left" else self.right
         if s is None:
             return ()
@@ -85,7 +70,6 @@ class DiffResult:
 
 
 def objdiff_parse(raw: dict) -> DiffResult:
-    """Convert objdiff-cli's JSON dict into a typed DiffResult."""
     return DiffResult(
         left=_diff_side_parse(raw.get("left")),
         right=_diff_side_parse(raw.get("right")),
@@ -99,10 +83,7 @@ def objdiff_run(
     cli_path: Path | str = "objdiff-cli",
     timeout_seconds: float = 30.0,
 ) -> DiffResult:
-    """Spawn objdiff-cli to diff two object files; return parsed result.
-
-    Raises CalledProcessError if the CLI returns non-zero.
-    """
+    """Raises CalledProcessError if the CLI returns non-zero."""
     cmd: list[str] = [
         str(cli_path),
         "diff",
@@ -192,7 +173,6 @@ def _diff_instruction_parse(instr: dict | None) -> DiffInstruction | None:
 
 
 def _arg_diff_parse(args: list) -> tuple[int, ...]:
-    """Return indices of arguments that have a non-null diff_index."""
     indices: list[int] = []
     for i, arg in enumerate(args):
         if not arg:

@@ -27,17 +27,15 @@ XBOXKRNL_ORDINAL_MAX: int = max(_ORDINALS)
 
 
 def xboxkrnl_name_get(ordinal: int) -> str | None:
-    """Return the clean export name for an ordinal, or None if unknown."""
     entry = _ORDINALS.get(ordinal)
     return entry["name"] if entry is not None else None
 
 
 def xboxkrnl_mangled_get(ordinal: int) -> str | None:
-    """Return the MSVC stdcall-mangled export name (e.g. `Foo@8`), or None."""
+    """Returns the MSVC stdcall mangling, e.g. `Foo@8`."""
     entry = _ORDINALS.get(ordinal)
     return entry["mangled"] if entry is not None else None
 
 
 def xboxkrnl_ordinals_known() -> frozenset[int]:
-    """Return the set of all ordinals in the database."""
     return frozenset(_ORDINALS)

@@ -1,11 +1,8 @@
 """Matching-decomp agent loop for one function.
 
-Drives a local LLM (via LiteLLM against an OpenAI-compatible endpoint)
-to iteratively produce C code that matches a target function. The model
-gets one tool: compile_and_view_assembly. Best-so-far is tracked across
-the conversation; score regressions don't auto-revert.
-
-See docs/agent-loop.md for the full design.
+Drives an LLM through repeated calls to compile_and_view_assembly, keeping
+the highest match_percent seen. Exits on 100% match, iteration budget, or
+hard timeout.
 """
 
 import json
@@ -73,12 +70,12 @@ class AgentResult:
 
 class LLMClient(Protocol):
     def complete(self, messages: list[dict], tools: list[dict]) -> dict:
-        """Return an assistant message dict (OpenAI/LiteLLM shape)."""
+        """Returns an assistant message dict in OpenAI tool-call shape."""
 
 
 @dataclass
 class FakeLLMClient:
-    """Test double: returns scripted responses in order, then errors out."""
+    """Test double: returns scripted responses in order, raises when exhausted."""
 
     scripted: list[dict]
     _index: int = 0
@@ -94,7 +91,6 @@ class FakeLLMClient:
 
 
 def assistant_tool_call(tool_name: str, arguments: dict, tool_call_id: str = "call_1") -> dict:
-    """Build an OpenAI-shape assistant message that invokes a tool."""
     return {
         "role": "assistant",
         "content": None,
@@ -124,7 +120,6 @@ def agent_loop_run(
     compile_fn: CompileFn,
     diff_fn: DiffFn,
 ) -> AgentResult:
-    """Run the matching-decomp loop for one function. See docs/agent-loop.md."""
     workspace.validate_inputs()
 
     messages: list[dict] = [
@@ -173,15 +168,18 @@ def agent_loop_run(
         if result.match_percent == 100.0:
             return _finalize(workspace, "matched", best_match, iterations, best_c_code)
 
-        # Feed the tool result back to the model.
         tool_call_id = _tool_call_id(response)
-        messages.append(
-            {
+        rendered = _render_tool_result(result, workspace.function_name)
+        if tool_call_id is None:
+            # Code came from a markdown fence, not a tool call — can't reply
+            # with a tool message (no tool_use to pair with). Use a user msg.
+            messages.append({"role": "user", "content": rendered})
+        else:
+            messages.append({
                 "role": "tool",
                 "tool_call_id": tool_call_id,
-                "content": _render_tool_result(result, workspace.function_name),
-            }
-        )
+                "content": rendered,
+            })
 
     return _finalize(workspace, "budget_exhausted", best_match, iterations)
 
@@ -231,7 +229,7 @@ Symbol: {workspace.function_name}
 
 
 def _extract_c_code(response: dict) -> str | None:
-    """Return the proposed C source from an assistant response, or None."""
+    """Falls back to ```c fence in text content when a model skips the tool call."""
     for tool_call in response.get("tool_calls") or []:
         if tool_call.get("function", {}).get("name") != COMPILE_TOOL_NAME:
             continue
@@ -254,10 +252,10 @@ def _extract_c_code(response: dict) -> str | None:
     return None
 
 
-def _tool_call_id(response: dict) -> str:
+def _tool_call_id(response: dict) -> str | None:
     for tool_call in response.get("tool_calls") or []:
         return tool_call.get("id", "call_unknown")
-    return "call_unknown"
+    return None
 
 
 def _render_tool_result(result: CompileAndViewResult, function_name: str) -> str:

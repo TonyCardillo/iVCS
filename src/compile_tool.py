@@ -1,16 +1,8 @@
 """compile_and_view_assembly: the only tool the LLM agent gets.
 
-Orchestrates one compile-and-diff cycle:
-  1. Concatenate ctx.h + LLM-proposed C source (mizuchi pattern — no
-     #include resolution; flat append at compile time).
-  2. Compile via the supplied compile_fn (default: wine cl.exe).
-  3. If compile failed, return the error to the LLM and skip diffing.
-  4. Else, run objdiff via diff_fn (default: subprocess to objdiff-cli).
-  5. Return structured CompileAndViewResult with match_percent etc.
-
-compile_fn and diff_fn are parameters (not hardcoded) so tests can inject
-fakes. The defaults in default_compile_fn / default_diff_fn shell out to
-real binaries and are exercised in the recon scripts and end-to-end tests.
+compile_fn and diff_fn are injected so tests can run without spawning Wine
+or objdiff-cli; default_compile_fn / default_diff_fn bind to the real
+binaries via the IVCS_* environment variables documented below.
 """
 
 import os
@@ -53,7 +45,7 @@ def compile_and_view_assembly(
     compile_fn: CompileFn,
     diff_fn: DiffFn,
 ) -> CompileAndViewResult:
-    """Run one compile+diff cycle. Persists artifacts under workspace/history/."""
+    """Persists per-attempt artifacts under workspace.history_dir."""
     attempt_n = workspace.next_attempt_number()
     paths = workspace.attempt_paths(attempt_n)
 
@@ -92,10 +84,8 @@ def _function_match_percent(diff: DiffResult, function_name: str) -> float | Non
 def default_compile_fn(c_source: Path, out_obj: Path, workspace_root: Path) -> CompileOutput:
     """Spawn widberg/msvc8.0p cl.exe under Wine.
 
-    Configured by environment variables:
-      IVCS_MSVC_DIR  — root of the widberg toolchain (default
-                       /Users/entmoot/Code/msvc8.0p, matches recon setup)
-      IVCS_WINE      — wine binary (default "wine")
+    IVCS_MSVC_DIR (default /Users/entmoot/Code/msvc8.0p) and IVCS_WINE
+    (default "wine") override the toolchain location.
     """
     msvc_dir = Path(os.environ.get("IVCS_MSVC_DIR", "/Users/entmoot/Code/msvc8.0p"))
     wine = os.environ.get("IVCS_WINE", "wine")
@@ -134,16 +124,12 @@ def default_compile_fn(c_source: Path, out_obj: Path, workspace_root: Path) -> C
 
 
 def default_diff_fn(target: Path, base: Path, symbol: str) -> DiffResult:
-    """Spawn objdiff-cli via the wrapper in src/objdiff.py.
-
-    Configured by IVCS_OBJDIFF_CLI (default "objdiff-cli" — must be on PATH).
-    """
+    """IVCS_OBJDIFF_CLI (default "objdiff-cli", expected on PATH) overrides the binary."""
     cli = os.environ.get("IVCS_OBJDIFF_CLI", "objdiff-cli")
     return objdiff_run(target_obj=target, base_obj=base, symbol=symbol, cli_path=cli)
 
 
 def _winepath(wine: str, unix_path: str) -> str:
-    """Convert a unix path to a wine-style path (Z:\\... or similar)."""
     result = subprocess.run(
         [wine, "winepath", "-w", unix_path],
         capture_output=True,
