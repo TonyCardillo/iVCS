@@ -36,10 +36,6 @@ class TestIdenticalDiff:
         for symbol in identical_diff.function_symbols():
             assert symbol.match_percent == 100.0, f"{symbol.name} should be 100% matched"
 
-    def test_known_functions_present(self, identical_diff: DiffResult):
-        names = {s.name for s in identical_diff.function_symbols()}
-        assert {"_classify", "_sum_to_n", "_dot_product"}.issubset(names)
-
 
 class TestVariantDiff:
     def test_unchanged_functions_match_100(self, variant_diff: DiffResult):

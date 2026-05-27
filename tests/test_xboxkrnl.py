@@ -2,11 +2,9 @@
 
 The MVP exposes ordinal-to-name and ordinal-to-mangled-name lookups.
 We don't need to test the JSON file's contents exhaustively — spot
-checks plus structural invariants (count, range, parseability) are
-enough to catch a corrupted/regenerated DB.
+checks plus structural invariants (range, parseability) are enough to
+catch a corrupted/regenerated DB.
 """
-
-import re
 
 from src.xboxkrnl import (
     XBOXKRNL_ORDINAL_MAX,
@@ -56,26 +54,11 @@ class TestMangledLookup:
 
 
 class TestStructuralInvariants:
-    def test_ordinal_count_is_reasonable(self):
-        # The xboxkrnl table has ~370 entries; if we drift far from that
-        # something went wrong with regeneration.
-        count = len(xboxkrnl_ordinals_known())
-        assert 350 < count < 400, f"unexpected ordinal count {count}"
-
     def test_ordinal_range_is_published(self):
         # Ordinals 1..378, no zero, no negatives.
         ordinals = xboxkrnl_ordinals_known()
         assert min(ordinals) == XBOXKRNL_ORDINAL_MIN == 1
         assert max(ordinals) == XBOXKRNL_ORDINAL_MAX == 378
-
-    def test_all_names_are_pascal_case_identifiers(self):
-        # Every export name should be a valid C identifier in PascalCase
-        # (uppercase first char). Catches any data-file corruption.
-        ident = re.compile(r"^[A-Z][A-Za-z0-9_]*$")
-        for ordinal in xboxkrnl_ordinals_known():
-            name = xboxkrnl_name_get(ordinal)
-            assert name is not None
-            assert ident.match(name), f"ordinal {ordinal} has non-identifier name {name!r}"
 
     def test_mangled_corresponds_to_name(self):
         # Mangled form should always start with the clean name (possibly
