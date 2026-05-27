@@ -99,7 +99,7 @@ def launch_decomp_job(
     workspace.initialize()
     workspace.target_obj.write_bytes(obj_bytes)
     if not workspace.ctx_h.is_file():
-        workspace.ctx_h.write_text(_DEFAULT_CTX_H)
+        workspace.ctx_h.write_text(_compose_ctx_h(fn.name, mangled))
 
     job = JobInfo(
         workspace_path=workspace_path,
@@ -164,6 +164,53 @@ def _infer_mangled_name(body: bytes, base: str) -> str:
                     return f"_{base}"
             return f"_{base}"
     return f"_{base}"
+
+
+def _format_target_forward_decl(name: str, mangled: str) -> str | None:
+    """Forward decl that pins the target's calling convention for MSVC.
+
+    Returns None when no decl is needed: cdecl is MSVC's default, so a
+    plain `int <name>(...)` definition already produces the matching
+    `_<name>` symbol. For stdcall we MUST declare the function before
+    the body, otherwise MSVC won't emit the `@N` suffix and the symbol
+    won't pair with target.obj in objdiff.
+
+    Uses `int` placeholders sized to the popped byte count (typically
+    one int per 4 bytes). The LLM may swap to a more specific type in
+    both the decl and the definition (they must agree), but the byte
+    sizing must remain.
+    """
+    if "@" not in mangled:
+        return None
+    suffix = mangled.rsplit("@", 1)[1]
+    try:
+        byte_count = int(suffix)
+    except ValueError:
+        return None
+    if byte_count == 0:
+        return f"int __stdcall {name}(void);"
+    if byte_count % 4 != 0:
+        return (
+            f"/* WARNING: target pops {byte_count} bytes — non-32-bit args. */\n"
+            f"int __stdcall {name}(int);"
+        )
+    args = ", ".join(["int"] * (byte_count // 4))
+    return f"int __stdcall {name}({args});"
+
+
+def _compose_ctx_h(name: str, mangled: str) -> str:
+    """Build the auto-stub ctx.h: typedefs plus the target's forward decl."""
+    forward = _format_target_forward_decl(name, mangled)
+    if forward is None:
+        return _DEFAULT_CTX_H
+    return (
+        _DEFAULT_CTX_H
+        + "\n"
+        + "/* Forward decl pins the target's calling convention so MSVC emits the\n"
+        + " * matching mangled symbol. Edit the param types here AND in your\n"
+        + " * definition if you want concrete types; keep the byte sizing intact. */\n"
+        + forward + "\n"
+    )
 
 
 def _disassemble_listing(parsed: ParsedXbe, fn_va: int, size: int) -> str:
