@@ -1,6 +1,6 @@
 # Wine + widberg/msvc8.0p validation
 
-One-off validation that the MSVC 8 toolchain (`widberg/msvc8.0` branch `msvc8.0p`) compiles a C file on macOS via Wine. This is the gate for every downstream toolchain decision in iVCS v2.
+One-off validation that the MSVC 8 toolchain (`widberg/msvc8.0` branch `msvc8.0p`) compiles a C file on macOS via Wine. This is the gate for every downstream toolchain decision in iVCS.
 
 ## Result (run on 2026-05-25)
 
@@ -17,7 +17,7 @@ One-off validation that the MSVC 8 toolchain (`widberg/msvc8.0` branch `msvc8.0p
   xattr -dr com.apple.quarantine "/Applications/Wine Stable.app"
   ```
 - **wine-stable is deprecated on 2026-09-01.** Plan to migrate to Whisky / Apple GPTK before then.
-- **COFF timestamps are non-deterministic** across builds (MSVC 8 has no `/Brepro` flag). Diffing at the byte level needs a post-process step to zero out the timestamp field. (objdiff parses COFF structurally, so this likely doesn't matter for the diff path — verify in next milestone.)
+- **COFF timestamps are non-deterministic** across builds (MSVC 8 has no `/Brepro` flag). objdiff parses COFF structurally rather than byte-comparing, so this turns out not to matter for the diff path. Verified in `recon/objdiff-smoke/`.
 
 ## Files
 

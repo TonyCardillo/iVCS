@@ -1,50 +1,162 @@
-# iVCS
+# iVCS - intelligent Visual Code System
 
 LLM-driven matching decompilation, targeting the original Xbox.
 
-**Status: v2 in progress.** v0.1 (single-function x86-32 GCC `-O0` PoC, PyQt5 GUI) has been stripped down. v2 reorients toward real game decomp: MSVC 7.1/8.0 toolchain via the Xbox XDK, XBE binaries, instruction-aware diffing, and a diff-driven LLM nudging loop.
+The pipeline currently functions end-to-end. See [Roadmap](#roadmap) for next steps.
+
+## Pipeline
+
+```
+default.xbe (4.6 MB)
+   │
+   ├─ xbe_load + xbe_function_carve(va, size)        ← src/xbe.py
+   ├─ relocs_resolve                                  ← src/relocs.py
+   │     ├─ REL32  call rel32/jmp rel32/jcc rel32  →  _sub_*   or  _data_*
+   │     └─ DIR32  call/jmp [imm32]                →  __imp__<mangled>  for kernel-thunk slots
+   ├─ coff_object_build → target.obj                  ← src/coff.py
+   │     (one .text section + IMAGE_REL_I386_{REL32,DIR32} relocs +
+   │      static .text section symbol + external per unique reloc target)
+   │
+   ▼
+FunctionWorkspace                                     ← src/workspace.py
+   target.obj          (ground truth)
+   ctx.h               (typedefs + __declspec(dllimport) externs)
+   history/NNNN.{c,obj,diff.json}
+   best.c, result.json
+   │
+   ▼
+agent_loop_run                                        ← src/agent_loop.py
+   ↻ LLM proposes C → compile_and_view_assembly
+                       │
+                       ├─ cl.exe /c /O2 (Wine)        ← src/compile_tool.py
+                       └─ objdiff-cli diff JSON        ← src/objdiff.py
+   exit on 100% match, budget exhausted, or LLM gives up
+```
+
+## What it does today
+
+- Parses XBE: header, sections, XOR-decoded entry-point + kernel-thunk
+  table, kernel-ordinal-to-name resolution
+- Carves real functions from arbitrary virtual addresses in real shipped XBEs
+- Discovers relocations in carved bytes via Capstone
+- Synthesizes valid Microsoft COFF/i386 `.obj` files that
+  `objdiff-cli` parses cleanly and lines up against MSVC-emitted base objects
+- Runs a matching-decomp agent loop via LiteLLM (tested with Anthropic Claude Haiku)
+
+## Quickstart
+
+```bash
+# 1. Set up
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+
+# 2. Run the test suite
+pytest
+
+# 3. End-to-end demo on a real Halo 2 function (requires Wine + msvc8.0p + ANTHROPIC_API_KEY)
+# Place a Halo 2 default.xbe at /tmp/halo2_default.xbe first.
+IVCS_MSVC_DIR=/path/to/widberg/msvc8.0p \
+IVCS_WINE=wine \
+IVCS_OBJDIFF_CLI=$(pwd)/recon/objdiff-smoke/objdiff-cli \
+ANTHROPIC_API_KEY=sk-ant-... \
+python scripts/halo2_demo.py
+```
+
+Environment:
+
+| variable | purpose | default |
+|---|---|---|
+| `IVCS_MSVC_DIR` | Root of the widberg/msvc8.0p toolchain (must contain `bin/cl.exe`). | `/Users/entmoot/Code/msvc8.0p` |
+| `IVCS_WINE` | Wine binary to invoke `cl.exe` with. | `wine` (on PATH) |
+| `IVCS_OBJDIFF_CLI` | Path to the `objdiff-cli` binary. | `objdiff-cli` (on PATH) |
+
+## Repo layout
+
+```
+src/
+  xbe.py            XBE format parser, function carving, XOR-decoded addresses
+  xboxkrnl.py       371-entry ordinal → name table (ports abaire/xbdm_gdb_bridge data)
+  relocs.py         REL32 + DIR32 discovery via Capstone; __imp__ resolution
+  coff.py           Microsoft COFF/i386 .obj emitter
+  carver.py         Three-line orchestrator: carve → resolve → coff
+  workspace.py      Per-function filesystem layout
+  compile_tool.py   The single tool the LLM agent gets; wraps cl.exe + objdiff
+  agent_loop.py     LLM loop policy (budget, soft/hard timeouts, best tracking)
+  llm_clients.py    LiteLLM client adapter (works with local/cloud providers)
+  objdiff.py        objdiff-cli wrapper + typed JSON parser
+
+tests/
+scripts/
+  smoke_run.py      End-to-end agent loop against the bundled objdiff-smoke fixture (no XBE needed)
+  halo2_sanity.py   End-to-end pipeline diagnostic against a real Halo 2 XBE
+  halo2_demo.py     Full carve → workspace → agent loop run
+  webui.py          Local web UI for inspecting an XBE (sections, hex, disassembly, kernel ordinals)
+recon/objdiff-smoke/
+                    Real MSVC-emitted .obj fixtures + a bundled objdiff-cli
+data/xboxkrnl_ordinals.json
+                    Source of xboxkrnl exports
+```
 
 ## Why Xbox
 
-- x86-32 with SSE/MMX — Capstone already handles it
-- MSVC `cl.exe` 13.10/14 from the XDK is obtainable as a binary (no compiler port required, unlike IDO for N64)
-- XBE format is PE-derived and well-documented
-- Cxbx-Reloaded has already enumerated ~370 `xboxkrnl.exe` exports by ordinal — symbol resolution for free
-- Mostly-uncharted territory compared to the N64/GameCube decomp scenes
+A mix of nostalgia and more greenfield decomp scene!
 
-## Carried over from v0.1
+## Roadmap
 
-- `src/decoder.py` — Capstone x86-32 wrapper
-- `src/cfg.py` — basic-block / edge extraction
-- `src/agent.py` — LLM iteration scaffold and prompt skeleton (will be retargeted to diff-driven prompts)
-- `src/verifier.py` — compile-and-compare shape (GCC/ELF specifics will be replaced with MSVC/PE)
+In rough order of leverage:
 
-## Removed in the v2 reset
+1. **Calling-convention inference for internal callees** — disassemble the
+   first/last bytes of each REL32 target, detect `ret imm16` → emit
+   `_sub_*@N` symbol name. Fixes a real chunk of the current 68% gap.
+2. **Auto-`ctx.h` synthesis** — from the `__imp__*` symbol set, look up each
+   kernel function's signature from a bundled table and emit
+   `__declspec(dllimport)` declarations automatically.
+3. **Function-size discovery** — promote the linear-sweep "scan-until-ret"
+   heuristic from the demo into `src/xbe.py`.
+4. **Warm-start decompiler** — pipe carved bytes through Ghidra headless (or
+   RetDec) for a pseudo-C first draft. The LLM "fixes" instead of "writes
+   from scratch" — drastically higher first-attempt match rates per
+   [mizuchi](https://github.com/macabeus/mizuchi)'s experience with `m2c`.
+5. **Source-tree integrator** — splat-style YAML project layout, with the
+   matched C committed back per-function.
+6. **Codebase index + embeddings** — once we have ≥5 matched functions,
+   embed them and retrieve similar examples as few-shot prompt context.
+7. **x86 permuter** — non-LLM C-source mutation engine (swap commutative ops,
+   reorder local declarations, equivalent idioms) to brute-force the
+   last-mile register-allocation gap without spending LLM tokens. Original
+   `decomp-permuter` is MIPS-focused; an x86 port is real work but pays off
+   forever.
 
-- PyQt5 GUI (`src/gui/`, `main.py`)
-- `src/loader.py` — placeholder stub, will be replaced by a real XBE parser
-- `src/session.py` — per-binary comment store; not the right shape for a multi-function project
+## Known constraints
 
-## What's still needed (recon-pending)
+- **Wine-stable deprecation (2026-09-01).** Migrate to Whisky before then.
+- **VC8 only.** `widberg/msvc8.0p` packages MSVC 8.0 (XDK 5849+). Earlier
+  Xbox titles need VC 7.1.
+- Unclear whether Stock VC80 will have perfect byte-matching versus XDK VC80.
 
-- XBE format parser + kernel-ordinal table (port from Cxbx-Reloaded)
-- MSVC `cl.exe` / `link.exe` toolchain harness (under Wine or a Windows VM — TBD)
-- Instruction-aware asm differ (no off-the-shelf x86 MSVC version exists)
-- Project-layout convention (splat-style YAML, per-function asm/src split)
-- CLI entry point
+## Out of scope
 
-## Development
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-pytest
-```
+- C++ class recovery (vtables → classes)
+- Whole-program optimization (`/GL` + `/LTCG`)
+- Other consoles
+- General-purpose decompilation (not trying to be Ghidra/IDA)
+- Obfuscation / anti-debug handling
 
 ## Acknowledgments
 
 - [Capstone](http://www.capstone-engine.org/) — disassembly
-- [Cxbx-Reloaded](https://github.com/Cxbx-Reloaded/Cxbx-Reloaded) — XBE format reference, kernel ordinal table
-- The matching-decomp community at [decomp.me](https://decomp.me)
-- Chris Lewis, [The Unexpected Effectiveness of One-Shot Decompilation with Claude](https://blog.chrislewis.au/the-unexpected-effectiveness-of-one-shot-decompilation-with-claude/)
+- [Cxbx-Reloaded](https://github.com/Cxbx-Reloaded/Cxbx-Reloaded) — XBE format
+  reference
+- [abaire/xbdm_gdb_bridge](https://github.com/abaire/xbdm_gdb_bridge) —
+  `xboxkrnl.exe` ordinal table (`src/dyndxt_loader/xboxkrnl_exports.def.h`)
+- [objdiff](https://github.com/encounter/objdiff) — instruction-aware .obj
+  diffing
+- [decomp.me](https://decomp.me) — scratch model + the `ctx.h` + extern
+  pattern this project mirrors
+- [mizuchi](https://github.com/macabeus/mizuchi) — pipeline-stage architecture
+  ideas (m2c → permuter → LLM → compiler → objdiff → integrator)
+- [widberg/msvc8.0p](https://github.com/widberg/msvc8.0p) — packaged
+  MSVC 8.0 toolchain that runs under Wine
+- Chris Lewis, [The Unexpected Effectiveness of One-Shot Decompilation
+  with Claude](https://blog.chrislewis.au/the-unexpected-effectiveness-of-one-shot-decompilation-with-claude/)
+- The matching-decomp community at decomp.me
