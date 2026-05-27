@@ -1,0 +1,12 @@
+{
+  "name": "halo2-default-tiny",
+  "xbe_path": "/tmp/halo2_default.xbe",
+  "workspace_root": "/tmp",
+  "functions": [
+    {
+      "name": "halo2_demo_sub_002D1D94",
+      "va": "0x002D1D94",
+      "size": 23
+    }
+  ]
+}

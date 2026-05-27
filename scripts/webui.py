@@ -36,6 +36,12 @@ from src.xbe import (  # noqa: E402
     xbe_section_read,
 )
 from src.objdiff import DiffKind, objdiff_parse  # noqa: E402
+from src.project import (  # noqa: E402
+    Project,
+    ProjectStats,
+    project_aggregate,
+    project_load,
+)
 
 
 # ── Tiny XBE cache (parsing a 5 MB XBE is cheap, but redundant) ─────────────
@@ -427,6 +433,50 @@ pre.code .ascii  { color: var(--violet); }
 .asm-row.arg_mismatch                              { background: rgba(199, 146, 234, 0.06); }
 .asm-row.arg_mismatch .args,
 .asm-row.arg_mismatch .marker                      { color: var(--violet); }
+
+.stacked-bar {
+  display: flex;
+  height: 22px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  margin: 8px 0 4px 0;
+  font-size: 10px;
+  letter-spacing: 0.15em;
+}
+.stacked-bar > div {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-right: 1px solid var(--line);
+  color: var(--bg);
+  font-weight: 600;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.stacked-bar > div:last-child { border-right: none; }
+.stacked-bar .seg-matched   { background: var(--green); }
+.stacked-bar .seg-partial   { background: var(--amber); }
+.stacked-bar .seg-untouched { background: var(--bg-row); color: var(--fg-faint); border-right-color: var(--line-strong); }
+
+.legend { display: flex; gap: 18px; font-size: 10px; letter-spacing: 0.15em; text-transform: uppercase; color: var(--fg-dim); margin-top: 6px; }
+.legend .swatch { display: inline-block; width: 10px; height: 10px; margin-right: 6px; vertical-align: middle; border: 1px solid var(--line); }
+.legend .swatch.matched   { background: var(--green); }
+.legend .swatch.partial   { background: var(--amber); }
+.legend .swatch.untouched { background: var(--bg-row); }
+
+.hist {
+  display: block;
+  width: 100%;
+  height: 160px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  margin-top: 4px;
+}
+
+.fn-state { font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase; }
+.fn-state.matched   { color: var(--green); }
+.fn-state.partial   { color: var(--amber); }
+.fn-state.untouched { color: var(--fg-faint); }
 """
 
 
@@ -436,6 +486,7 @@ def page(title: str, body: str, current_path: str | None, active: str = "") -> s
         ("overview", "/"),
         ("sections", "/xbe" + (f"?path={html.escape(current_path)}" if current_path else "")),
         ("decomp",   "/decomp"),
+        ("progress", "/progress"),
     ]
     nav_html = "".join(
         f'<a class="{"active" if active == name else ""}" href="{href}">{name}</a>'
@@ -1172,6 +1223,205 @@ def _guess_function_name(root: Path) -> str | None:
     return None
 
 
+# ── Whole-game progress views ──────────────────────────────────────────────
+def view_progress_index(current_path: str | None) -> str:
+    body = (
+        crumbs(("home", "/"), ("progress", None))
+        + panel(
+            "Open project",
+            '''
+<form class="inline" action="/progress" method="get">
+  <input type="text" name="path" placeholder="/path/to/project.json" autofocus>
+  <button type="submit">Aggregate →</button>
+</form>
+<p class="muted" style="margin-top: 12px;">
+  Point at a <span style="color: var(--cyan);">project.json</span> manifest.
+  See <span style="color: var(--cyan);">examples/halo2_default.project.json</span> for the schema.
+</p>
+''',
+        )
+    )
+    return page("progress", body, current_path=current_path, active="progress")
+
+
+def view_progress(project_path_str: str, current_path: str | None) -> str:
+    project = project_load(project_path_str)
+    stats = project_aggregate(project)
+
+    summary = _progress_summary(project, stats)
+    histogram = _progress_histogram(stats)
+    table = _progress_function_table(stats, project_path_str)
+
+    body = (
+        crumbs(("home", "/"), ("progress", "/progress"), (project.name, None))
+        + panel("Project", summary, meta=f"{stats.total_functions} functions · {stats.total_bytes:,} bytes")
+        + panel("Match distribution", histogram, meta="function count per 10% bucket")
+        + panel("Functions", table, meta=f"{stats.total_functions} entries")
+    )
+    return page(f"progress · {project.name}", body, current_path=current_path, active="progress")
+
+
+def _progress_summary(project: Project, stats: ProjectStats) -> str:
+    m = stats.matched_functions
+    p = stats.partial_functions
+    u = stats.untouched_functions
+    total = stats.total_functions or 1
+    m_pct = m / total * 100
+    p_pct = p / total * 100
+    u_pct = u / total * 100
+
+    seg_html = []
+    for label, count, pct, cls in (
+        ("matched", m, m_pct, "seg-matched"),
+        ("partial", p, p_pct, "seg-partial"),
+        ("untouched", u, u_pct, "seg-untouched"),
+    ):
+        if pct <= 0:
+            continue
+        text = f"{label} {count}" if pct > 7 else ""
+        seg_html.append(f'<div class="{cls}" style="flex: {pct:.4f};">{text}</div>')
+
+    bar = '<div class="stacked-bar">' + "".join(seg_html) + '</div>'
+    legend = (
+        '<div class="legend">'
+        f'<span><span class="swatch matched"></span>matched · {m} ({m_pct:.1f}%)</span>'
+        f'<span><span class="swatch partial"></span>partial · {p} ({p_pct:.1f}%)</span>'
+        f'<span><span class="swatch untouched"></span>untouched · {u} ({u_pct:.1f}%)</span>'
+        '</div>'
+    )
+
+    return f"""
+<div class="kv">
+  <div class="k">name</div>           <div class="v amber">{html.escape(project.name)}</div>
+  <div class="k">xbe</div>            <div class="v">{html.escape(str(project.xbe_path))}</div>
+  <div class="k">workspaces</div>     <div class="v">{html.escape(str(project.workspace_root))}</div>
+  <div class="k">functions matched</div><div class="v green">{m} / {stats.total_functions}  ({stats.matched_function_percent:.2f}%)</div>
+  <div class="k">bytes matched</div>  <div class="v green">{stats.matched_bytes:,} / {stats.total_bytes:,}  ({stats.matched_byte_percent:.2f}%)</div>
+</div>
+{bar}
+{legend}
+"""
+
+
+def _progress_histogram(stats: ProjectStats) -> str:
+    if stats.total_functions == 0:
+        return '<div class="muted center" style="padding: 18px;">empty project</div>'
+
+    # 11 buckets: 0% (untouched), 1-10, 11-20, ..., 91-100
+    buckets = [0] * 11
+    for s in stats.function_statuses:
+        bp = s.best_match_percent
+        if bp is None or bp <= 0.0:
+            buckets[0] += 1
+        elif bp >= 100.0:
+            buckets[10] += 1
+        else:
+            idx = int(bp // 10) + 1
+            buckets[min(idx, 10)] += 1
+
+    max_count = max(buckets) or 1
+    width = 800
+    height = 160
+    pad_l = 36
+    pad_b = 28
+    pad_t = 8
+    pad_r = 8
+    bar_area_w = width - pad_l - pad_r
+    bar_area_h = height - pad_t - pad_b
+    n_buckets = len(buckets)
+    bar_w = bar_area_w / n_buckets
+
+    bars = []
+    labels = []
+    for i, count in enumerate(buckets):
+        if count == 0:
+            continue
+        h = (count / max_count) * bar_area_h
+        x = pad_l + i * bar_w + 2
+        y = pad_t + (bar_area_h - h)
+        if i == 0:
+            color = "var(--fg-faint)"
+        elif i == 10:
+            color = "var(--green)"
+        elif i >= 7:
+            color = "var(--amber)"
+        else:
+            color = "var(--cyan)"
+        bars.append(
+            f'<rect x="{x:.1f}" y="{y:.1f}" width="{bar_w - 4:.1f}" height="{h:.1f}" '
+            f'fill="{color}" opacity="0.85"/>'
+        )
+        bars.append(
+            f'<text x="{x + (bar_w - 4) / 2:.1f}" y="{y - 4:.1f}" '
+            f'fill="var(--fg)" font-size="10" text-anchor="middle">{count}</text>'
+        )
+
+    bucket_labels = ["0", "1-10", "11-20", "21-30", "31-40", "41-50", "51-60", "61-70", "71-80", "81-90", "91-100"]
+    for i, lbl in enumerate(bucket_labels):
+        cx = pad_l + i * bar_w + bar_w / 2
+        labels.append(
+            f'<text x="{cx:.1f}" y="{height - 10:.1f}" '
+            f'fill="var(--fg-faint)" font-size="9" text-anchor="middle">{lbl}</text>'
+        )
+
+    # Y-axis ticks at 0, max/2, max
+    y_ticks = []
+    for v in (0, max_count // 2, max_count):
+        y = pad_t + bar_area_h - (v / max_count * bar_area_h)
+        y_ticks.append(
+            f'<text x="{pad_l - 6:.1f}" y="{y + 3:.1f}" '
+            f'fill="var(--fg-faint)" font-size="9" text-anchor="end">{v}</text>'
+        )
+        y_ticks.append(
+            f'<line x1="{pad_l:.1f}" y1="{y:.1f}" x2="{width - pad_r:.1f}" y2="{y:.1f}" '
+            f'stroke="rgba(180,196,212,0.06)"/>'
+        )
+
+    return (
+        f'<svg class="hist" viewBox="0 0 {width} {height}" preserveAspectRatio="none">'
+        + "".join(y_ticks)
+        + "".join(bars)
+        + "".join(labels)
+        + '<text x="' + str(pad_l) + '" y="' + str(height - 2) + '" '
+          'fill="var(--fg-faint)" font-size="9">match %</text>'
+        + '</svg>'
+    )
+
+
+def _progress_function_table(stats: ProjectStats, project_path_str: str) -> str:
+    rows = []
+    for s in stats.function_statuses:
+        best_str = f"{s.best_match_percent:.2f}%" if isinstance(s.best_match_percent, (int, float)) else "—"
+        link = (
+            f'<a href="/decomp/run?root={html.escape(str(s.workspace_path))}">view →</a>'
+            if s.state != "untouched" or s.iterations > 0
+            else '<span class="muted">—</span>'
+        )
+        reason = s.termination_reason or ""
+        rows.append(
+            f'<tr>'
+            f'<td>{html.escape(s.name)}</td>'
+            f'<td class="num">0x{s.va:08x}</td>'
+            f'<td class="size">{s.size}</td>'
+            f'<td><span class="fn-state {s.state}">{s.state}</span></td>'
+            f'<td>{best_str}</td>'
+            f'<td class="num">{s.iterations}</td>'
+            f'<td class="muted">{html.escape(reason)}</td>'
+            f'<td>{link}</td>'
+            f'</tr>'
+        )
+
+    return (
+        '<table>'
+        '<thead><tr>'
+        '<th>name</th><th>VA</th><th>size</th><th>state</th>'
+        '<th>best</th><th>iters</th><th>reason</th><th></th>'
+        '</tr></thead>'
+        f'<tbody>{"".join(rows) or "<tr><td colspan=8 class=\"muted center\">empty project</td></tr>"}</tbody>'
+        '</table>'
+    )
+
+
 def view_error(message: str, current_path: str | None = None) -> str:
     body = (
         crumbs(("home", "/"), ("error", None))
@@ -1209,6 +1459,12 @@ class Handler(BaseHTTPRequestHandler):
                 html_out = view_decomp_run(q["root"], current_path=q.get("path") or None)
             elif route == "/decomp/attempt":
                 html_out = view_decomp_attempt(q["root"], int(q["n"]), current_path=q.get("path") or None)
+            elif route == "/progress":
+                project_path = q.get("path", "").strip()
+                if not project_path:
+                    html_out = view_progress_index(current_path=None)
+                else:
+                    html_out = view_progress(project_path, current_path=None)
             elif route == "/healthz":
                 self._send_json(200, {"ok": True})
                 return
