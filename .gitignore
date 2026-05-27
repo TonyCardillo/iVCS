@@ -98,17 +98,8 @@ logs/
 .env.local
 .env.*.local
 
-# Benchmark results
-benchmarks/*.o
-benchmarks/*.obj
-benchmarks/results/
-
 # Recon downloads and build artifacts (vendored tools and per-run outputs)
 recon/objdiff-smoke/objdiff-cli
 recon/**/*.json
 recon/**/*.pdb
 recon/**/*.ilk
-
-# Documentation builds
-docs/_build/
-site/
