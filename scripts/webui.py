@@ -13,6 +13,8 @@ import json
 import os
 import subprocess
 import sys
+import threading
+import time
 import traceback
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -21,6 +23,13 @@ from urllib.parse import parse_qs, quote, urlsplit
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
+
+# Point default_diff_fn at the bundled objdiff-cli unless the user already
+# pinned one. Without this, launching a decomp run from the UI dies with
+# FileNotFoundError when the agent loop tries to diff the first attempt.
+_BUNDLED_OBJDIFF = REPO_ROOT / "recon" / "objdiff-smoke" / "objdiff-cli"
+if "IVCS_OBJDIFF_CLI" not in os.environ and _BUNDLED_OBJDIFF.is_file():
+    os.environ["IVCS_OBJDIFF_CLI"] = str(_BUNDLED_OBJDIFF)
 
 import capstone  # noqa: E402
 
@@ -35,8 +44,10 @@ from src.xbe import (  # noqa: E402
     xbe_section_find,
     xbe_section_read,
 )
+from src.launcher import JobInfo, launch_decomp_job  # noqa: E402
 from src.objdiff import DiffKind, objdiff_parse  # noqa: E402
 from src.project import (  # noqa: E402
+    FunctionEntry,
     Project,
     ProjectStats,
     project_aggregate,
@@ -52,6 +63,31 @@ def xbe_cached_load(path: str) -> ParsedXbe:
     if path not in _PARSE_CACHE:
         _PARSE_CACHE[path] = xbe_load(path)
     return _PARSE_CACHE[path]
+
+
+# ── Decomp job registry (in-memory, lives for the server's lifetime) ────────
+_JOBS_LOCK = threading.Lock()
+_JOBS: dict[Path, JobInfo] = {}
+_MAX_CONCURRENT_JOBS = int(os.environ.get("IVCS_MAX_CONCURRENT_JOBS", "2"))
+
+
+def _job_for(workspace_path: Path) -> JobInfo | None:
+    with _JOBS_LOCK:
+        return _JOBS.get(workspace_path.resolve())
+
+
+def _active_jobs() -> list[JobInfo]:
+    with _JOBS_LOCK:
+        return [j for j in _JOBS.values() if j.is_active()]
+
+
+def _register_job(job: JobInfo) -> None:
+    with _JOBS_LOCK:
+        _JOBS[job.workspace_path.resolve()] = job
+
+
+class JobsAtCapacity(Exception):
+    """Raised when launching would exceed IVCS_MAX_CONCURRENT_JOBS."""
 
 
 # ── Styling ─────────────────────────────────────────────────────────────────
@@ -510,11 +546,78 @@ pre.code .ascii  { color: var(--violet); }
   padding: 3px 6px;
   font: inherit;
 }
+
+.run-banner {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  background: var(--bg-soft);
+  margin: 0 0 14px 0;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+}
+.run-banner.running { border-color: var(--line-strong); }
+.run-banner.failed  { border-color: rgba(255, 122, 122, 0.55); }
+.run-banner.done    { border-color: rgba(149, 230, 203, 0.45); }
+.run-banner .amber  { color: var(--amber); }
+.run-banner .cyan   { color: var(--cyan); }
+.run-banner .green  { color: var(--green); }
+
+button, input[type=number], select {
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--line);
+  padding: 4px 10px;
+  font: inherit;
+}
+button { cursor: pointer; letter-spacing: 0.1em; }
+button:hover { border-color: var(--cyan); color: var(--cyan); }
+button:disabled { opacity: 0.35; cursor: not-allowed; }
+button:disabled:hover { border-color: var(--line); color: var(--fg); }
+
+.proj-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 10px;
+}
+.proj-card {
+  display: block;
+  text-decoration: none;
+  color: var(--fg);
+  border: 1px solid var(--line);
+  background: var(--bg);
+  padding: 12px 14px;
+  position: relative;
+}
+.proj-card:hover { border-color: var(--cyan); }
+.proj-card::before {
+  content: '';
+  position: absolute; left: -1px; top: -1px; width: 8px; height: 8px;
+  border-top: 1px solid var(--cyan);
+  border-left: 1px solid var(--cyan);
+}
+.proj-card::after {
+  content: '';
+  position: absolute; right: -1px; bottom: -1px; width: 8px; height: 8px;
+  border-bottom: 1px solid var(--cyan);
+  border-right: 1px solid var(--cyan);
+}
+.proj-card .proj-name { color: var(--amber); font-weight: 600; }
+.proj-card .proj-meta { color: var(--cyan); font-size: 11px; margin: 2px 0 4px 0; }
+.proj-card .proj-path { font-size: 10px; word-break: break-all; }
 """
 
 
 # ── HTML scaffold ───────────────────────────────────────────────────────────
-def page(title: str, body: str, current_path: str | None, active: str = "") -> str:
+def page(
+    title: str,
+    body: str,
+    current_path: str | None,
+    active: str = "",
+    refresh_seconds: int | None = None,
+) -> str:
     nav_items = [
         ("overview", "/"),
         ("sections", "/xbe" + (f"?path={html.escape(current_path)}" if current_path else "")),
@@ -530,9 +633,14 @@ def page(title: str, body: str, current_path: str | None, active: str = "") -> s
         f'<span style="color: var(--amber);">{html.escape(current_path)}</span>'
         if current_path else ''
     )
+    refresh_tag = (
+        f'<meta http-equiv="refresh" content="{refresh_seconds}">'
+        if refresh_seconds else ''
+    )
     return f"""<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8">
+{refresh_tag}
 <title>{html.escape(title)} · iVCS</title>
 <style>{CSS}</style>
 </head><body>
@@ -575,11 +683,30 @@ LOGO = """\
 
 
 def view_index(default_path: str = "") -> str:
+    projects = _discover_projects()
+    if projects:
+        proj_rows = "".join(
+            f'<a class="proj-card" href="/progress?path={quote(path)}">'
+            f'<div class="proj-name">{html.escape(name)}</div>'
+            f'<div class="proj-meta">{count:,} functions</div>'
+            f'<div class="proj-path muted">{html.escape(path.replace(str(REPO_ROOT) + "/", ""))}</div>'
+            f'</a>'
+            for path, name, count in projects
+        )
+        proj_panel = panel(
+            "Projects",
+            f'<div class="proj-grid">{proj_rows}</div>',
+            meta=f"{len(projects)} detected · click to open dashboard",
+        )
+    else:
+        proj_panel = ""
+
     body = f"""
 <div class="ascii-logo">{LOGO}</div>
+{proj_panel}
 {panel("Load XBE", f'''
 <form class="inline" action="/xbe" method="get">
-  <input type="text" name="path" placeholder="/path/to/default.xbe" value="{html.escape(default_path)}" autofocus>
+  <input type="text" name="path" placeholder="/path/to/default.xbe" value="{html.escape(default_path)}"{" autofocus" if not projects else ""}>
   <button type="submit">Parse →</button>
 </form>
 <p class="muted" style="margin-top: 12px;">
@@ -990,12 +1117,18 @@ def view_decomp_run(root_str: str, current_path: str | None) -> str:
     if not root.is_dir():
         raise FileNotFoundError(f"workspace not a directory: {root}")
 
+    job = _job_for(root)
     result = _load_json_or_none(root / "result.json")
     attempts = _attempts_listing(root)
     best = (result or {}).get("best_match_percent")
     if best is None:
         best = max((a["match_percent"] or 0 for a in attempts), default=None)
-    fn_name = (result or {}).get("function_name") or _guess_function_name(root) or "?"
+    fn_name = (
+        (result or {}).get("function_name")
+        or (job.function_name if job else None)
+        or _guess_function_name(root)
+        or "?"
+    )
 
     header_body = f"""
 <div class="kv">
@@ -1033,8 +1166,43 @@ def view_decomp_run(root_str: str, current_path: str | None) -> str:
     ctx_h = (root / "ctx.h").read_text() if (root / "ctx.h").is_file() else "(missing)"
     best_c = (root / "best.c").read_text() if (root / "best.c").is_file() else "(no best.c yet)"
 
+    banner = ""
+    refresh = None
+    if job:
+        if job.is_active():
+            refresh = 3
+            elapsed = int((time.time() if job.started_at else 0) - job.started_at) if job.started_at else 0
+            banner = (
+                f'<div class="run-banner running">'
+                f'<span class="badge pending">{job.state.upper()}</span>'
+                f'<span>iter <span class="amber">{job.iterations_completed}</span>/{job.max_iterations}'
+                f' · elapsed {elapsed}s / {int(job.hard_timeout_seconds)}s'
+                f' · model <span class="cyan">{html.escape(job.model)}</span></span>'
+                f'<span class="muted">auto-refreshing every 3s</span>'
+                f'</div>'
+            )
+        elif job.state == "error":
+            banner = (
+                f'<div class="run-banner failed">'
+                f'<span class="badge failed">ERROR</span>'
+                f'<span class="muted">{html.escape(job.error or "")}</span>'
+                f'</div>'
+            )
+        else:
+            reason = job.termination_reason or "done"
+            best_str = f"{job.best_match_percent:.2f}%" if isinstance(job.best_match_percent, (int, float)) else "—"
+            banner = (
+                f'<div class="run-banner done">'
+                f'<span class="badge matched">FINISHED</span>'
+                f'<span>reason <span class="amber">{html.escape(reason)}</span>'
+                f' · best <span class="green">{best_str}</span>'
+                f' · iter {job.iterations_completed}/{job.max_iterations}</span>'
+                f'</div>'
+            )
+
     body = (
         crumbs(("home", "/"), ("decomp", "/decomp"), (root.name, None))
+        + banner
         + panel("Run", header_body, meta=fn_name)
         + panel("Attempts", timeline, meta=f"{len(attempts)} total")
         + f'<div class="split">'
@@ -1046,7 +1214,13 @@ def view_decomp_run(root_str: str, current_path: str | None) -> str:
         + panel("best.c", f'<pre class="code">{html.escape(best_c)}</pre>', meta="highest-match attempt so far")
         + '</div>'
     )
-    return page(f"decomp · {root.name}", body, current_path=current_path, active="decomp")
+    return page(
+        f"decomp · {root.name}",
+        body,
+        current_path=current_path,
+        active="decomp",
+        refresh_seconds=refresh,
+    )
 
 
 def view_decomp_attempt(root_str: str, n: int, current_path: str | None) -> str:
@@ -1257,23 +1431,65 @@ def _guess_function_name(root: Path) -> str | None:
 
 
 # ── Whole-game progress views ──────────────────────────────────────────────
+def _discover_projects() -> list[tuple[str, str, int]]:
+    """Find project manifests under projects/ and examples/.
+
+    Returns a list of (manifest_path_str, project_name, function_count)
+    tuples. Skips manifests that fail to load. Cheap enough to redo on
+    every index render — there will rarely be more than a handful.
+    """
+    found: list[tuple[str, str, int]] = []
+    seen: set[Path] = set()
+    for root in (REPO_ROOT / "projects", REPO_ROOT / "examples"):
+        if not root.is_dir():
+            continue
+        for manifest in sorted(root.glob("*/project.json")):
+            seen.add(manifest)
+        for manifest in sorted(root.glob("*.project.json")):
+            seen.add(manifest)
+    for manifest in sorted(seen):
+        try:
+            project = project_load(manifest)
+            found.append((str(manifest), project.name, len(project.functions)))
+        except Exception:  # noqa: BLE001 — malformed manifests just get skipped
+            continue
+    return found
+
+
 def view_progress_index(current_path: str | None) -> str:
-    body = (
-        crumbs(("home", "/"), ("progress", None))
-        + panel(
-            "Open project",
-            '''
+    projects = _discover_projects()
+    if projects:
+        rows = "".join(
+            f'<tr>'
+            f'<td><a href="/progress?path={quote(path)}">{html.escape(name)}</a></td>'
+            f'<td class="num">{count:,} fns</td>'
+            f'<td class="muted">{html.escape(path)}</td>'
+            f'</tr>'
+            for path, name, count in projects
+        )
+        recent = panel(
+            "Detected projects",
+            f'<table><thead><tr><th>name</th><th>size</th><th>path</th></tr></thead>'
+            f'<tbody>{rows}</tbody></table>',
+            meta=f"{len(projects)} found · scans projects/ and examples/",
+        )
+    else:
+        recent = ""
+
+    open_form = panel(
+        "Open project",
+        '''
 <form class="inline" action="/progress" method="get">
-  <input type="text" name="path" placeholder="/path/to/project.json" autofocus>
+  <input type="text" name="path" placeholder="/path/to/project.json"{autofocus}>
   <button type="submit">Aggregate →</button>
 </form>
 <p class="muted" style="margin-top: 12px;">
   Point at a <span style="color: var(--cyan);">project.json</span> manifest.
   See <span style="color: var(--cyan);">examples/halo2_default.project.json</span> for the schema.
 </p>
-''',
-        )
+'''.replace("{autofocus}", " autofocus" if not projects else ""),
     )
+    body = crumbs(("home", "/"), ("progress", None)) + recent + open_form
     return page("progress", body, current_path=current_path, active="progress")
 
 
@@ -1453,22 +1669,36 @@ def _progress_function_table(
     rows = []
     for s in page_slice:
         best_str = f"{s.best_match_percent:.2f}%" if isinstance(s.best_match_percent, (int, float)) else "—"
-        link = (
-            f'<a href="/decomp/run?root={html.escape(str(s.workspace_path))}">view →</a>'
-            if s.state != "untouched" or s.iterations > 0
-            else '<span class="muted">—</span>'
-        )
+        job = _job_for(s.workspace_path)
+        if job and job.is_active():
+            state_label = f'<span class="fn-state partial">running</span>'
+            action = (
+                f'<a href="/decomp/run?root={html.escape(str(s.workspace_path))}'
+                f'&amp;path={quote(project_path_str)}">iter {job.iterations_completed}/{job.max_iterations} →</a>'
+            )
+        else:
+            state_label = f'<span class="fn-state {s.state}">{s.state}</span>'
+            if s.state != "untouched" or s.iterations > 0:
+                action = (
+                    f'<a href="/decomp/run?root={html.escape(str(s.workspace_path))}'
+                    f'&amp;path={quote(project_path_str)}">view →</a>'
+                )
+            else:
+                action = (
+                    f'<a href="/decomp/launch?path={quote(project_path_str)}'
+                    f'&amp;va={s.va:#x}">▶ run</a>'
+                )
         reason = s.termination_reason or ""
         rows.append(
             f'<tr>'
             f'<td>{html.escape(s.name)}</td>'
             f'<td class="num">0x{s.va:08x}</td>'
             f'<td class="size">{s.size}</td>'
-            f'<td><span class="fn-state {s.state}">{s.state}</span></td>'
+            f'<td>{state_label}</td>'
             f'<td>{best_str}</td>'
             f'<td class="num">{s.iterations}</td>'
             f'<td class="muted">{html.escape(reason)}</td>'
-            f'<td>{link}</td>'
+            f'<td>{action}</td>'
             f'</tr>'
         )
 
@@ -1564,6 +1794,123 @@ def _pager_window(page: int, total_pages: int, radius: int = 2) -> list[int]:
     return sorted(pages)
 
 
+def view_launch_form(project_path_str: str, va_str: str) -> str:
+    project = project_load(project_path_str)
+    va = int(va_str, 0)
+    fn = next((f for f in project.functions if f.va == va), None)
+    if fn is None:
+        return view_error(f"function VA {va:#x} not in {project.name}")
+
+    workspace_path = project.workspace_for(fn)
+    existing_job = _job_for(workspace_path)
+    api_key_set = bool(os.environ.get("ANTHROPIC_API_KEY"))
+    active = len(_active_jobs())
+
+    warnings = []
+    if not api_key_set:
+        warnings.append(
+            '<div class="error">ANTHROPIC_API_KEY is not set in the server\'s '
+            'environment. Restart the web UI with it exported.</div>'
+        )
+    if active >= _MAX_CONCURRENT_JOBS:
+        warnings.append(
+            f'<div class="error">already at capacity: {active}/'
+            f'{_MAX_CONCURRENT_JOBS} concurrent jobs. Wait for one to finish '
+            f'or raise IVCS_MAX_CONCURRENT_JOBS.</div>'
+        )
+    if existing_job and existing_job.is_active():
+        warnings.append(
+            f'<div class="error">a job is already running for this workspace '
+            f'(state: {existing_job.state}, iter {existing_job.iterations_completed}'
+            f'/{existing_job.max_iterations}).</div>'
+        )
+
+    can_launch = api_key_set and active < _MAX_CONCURRENT_JOBS and not (
+        existing_job and existing_job.is_active()
+    )
+
+    model_options = "".join(
+        f'<option value="{m}"{" selected" if m == "claude-haiku-4-5" else ""}>{m}</option>'
+        for m in ("claude-haiku-4-5", "claude-sonnet-4-6", "claude-opus-4-7")
+    )
+
+    form = f"""
+<form method="post" action="/decomp/launch?path={quote(project_path_str)}&amp;va={va:#x}">
+  <div class="kv">
+    <div class="k">function</div>         <div class="v amber">{html.escape(fn.name)}</div>
+    <div class="k">virtual address</div>  <div class="v num">0x{fn.va:08x}</div>
+    <div class="k">size</div>             <div class="v">{fn.size} bytes</div>
+    <div class="k">workspace</div>        <div class="v">{html.escape(str(workspace_path))}</div>
+    <div class="k">model</div>            <div class="v">
+      <select name="model">{model_options}</select>
+    </div>
+    <div class="k">max iterations</div>   <div class="v">
+      <input type="number" name="max_iterations" value="8" min="1" max="50">
+    </div>
+    <div class="k">hard timeout (s)</div> <div class="v">
+      <input type="number" name="hard_timeout_seconds" value="180" min="10" max="3600">
+    </div>
+  </div>
+  <div style="margin-top: 14px;">
+    <button type="submit"{' disabled' if not can_launch else ''}>▶ launch</button>
+    <a href="/progress?path={quote(project_path_str)}" style="margin-left: 12px;">cancel</a>
+  </div>
+</form>
+"""
+    body = (
+        crumbs(
+            ("home", "/"),
+            ("progress", "/progress"),
+            (project.name, f"/progress?path={quote(project_path_str)}"),
+            ("launch", None),
+        )
+        + "".join(warnings)
+        + panel("Launch decomp run", form, meta=f"active jobs: {active}/{_MAX_CONCURRENT_JOBS}")
+    )
+    return page(f"launch · {fn.name}", body, current_path=None, active="progress")
+
+
+def launch_job_from_form(
+    project_path_str: str, va_str: str, form: dict[str, str]
+) -> tuple[str, JobInfo]:
+    """Validate caps and form fields, then spawn a job. Returns (redirect_url, job)."""
+    if len(_active_jobs()) >= _MAX_CONCURRENT_JOBS:
+        raise JobsAtCapacity(
+            f"{_MAX_CONCURRENT_JOBS} concurrent jobs already running"
+        )
+
+    project = project_load(project_path_str)
+    va = int(va_str, 0)
+    fn = next((f for f in project.functions if f.va == va), None)
+    if fn is None:
+        raise ValueError(f"function VA {va:#x} not in {project.name}")
+
+    existing_job = _job_for(project.workspace_for(fn))
+    if existing_job and existing_job.is_active():
+        raise RuntimeError(
+            f"already running for this workspace (state={existing_job.state})"
+        )
+
+    model = form.get("model", "claude-haiku-4-5").strip() or "claude-haiku-4-5"
+    max_iter = max(1, min(50, int(form.get("max_iterations", "8") or "8")))
+    timeout = max(10.0, min(3600.0, float(form.get("hard_timeout_seconds", "180") or "180")))
+
+    parsed = xbe_cached_load(str(project.xbe_path))
+    job = launch_decomp_job(
+        project, fn,
+        model=model,
+        max_iterations=max_iter,
+        hard_timeout_seconds=timeout,
+        parsed_xbe=parsed,
+    )
+    _register_job(job)
+    redirect = (
+        f"/decomp/run?root={quote(str(job.workspace_path))}"
+        f"&path={quote(project_path_str)}"
+    )
+    return redirect, job
+
+
 def view_error(message: str, current_path: str | None = None) -> str:
     body = (
         crumbs(("home", "/"), ("error", None))
@@ -1577,6 +1924,32 @@ def view_error(message: str, current_path: str | None = None) -> str:
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         sys.stderr.write(f"  {self.command} {self.path}\n")
+
+    def do_POST(self):
+        parts = urlsplit(self.path)
+        q = {k: v[0] for k, v in parse_qs(parts.query).items()}
+        route = parts.path
+
+        length = int(self.headers.get("Content-Length", "0") or "0")
+        raw = self.rfile.read(length).decode("utf-8") if length else ""
+        form = {k: v[0] for k, v in parse_qs(raw).items()}
+
+        try:
+            if route == "/decomp/launch":
+                redirect, _job = launch_job_from_form(
+                    q.get("path", ""), q.get("va", "0"), form,
+                )
+                self._redirect(redirect)
+                return
+            self._send(404, view_error(f"unknown POST route: {route}"))
+        except JobsAtCapacity as e:
+            self._send(429, view_error(f"jobs at capacity: {e}"))
+        except (FileNotFoundError, KeyError, ValueError) as e:
+            self._send(400, view_error(f"{type(e).__name__}: {e}"))
+        except Exception:  # noqa: BLE001
+            tb = traceback.format_exc()
+            sys.stderr.write(tb)
+            self._send(500, view_error(tb))
 
     def do_GET(self):
         parts = urlsplit(self.path)
@@ -1601,6 +1974,8 @@ class Handler(BaseHTTPRequestHandler):
                 html_out = view_decomp_run(q["root"], current_path=q.get("path") or None)
             elif route == "/decomp/attempt":
                 html_out = view_decomp_attempt(q["root"], int(q["n"]), current_path=q.get("path") or None)
+            elif route == "/decomp/launch":
+                html_out = view_launch_form(q.get("path", ""), q.get("va", "0"))
             elif route == "/progress":
                 project_path = q.get("path", "").strip()
                 if not project_path:
@@ -1634,6 +2009,12 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(encoded)))
         self.end_headers()
         self.wfile.write(encoded)
+
+    def _redirect(self, location: str) -> None:
+        self.send_response(302)
+        self.send_header("Location", location)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
 
     def _send_json(self, status: int, obj) -> None:
         encoded = json.dumps(obj).encode("utf-8")
