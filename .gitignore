@@ -103,3 +103,6 @@ recon/objdiff-smoke/objdiff-cli
 recon/**/*.json
 recon/**/*.pdb
 recon/**/*.ilk
+
+# Per-user project workspaces (manifest + decomp attempts derived from a user's XBE)
+projects/

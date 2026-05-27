@@ -17,7 +17,7 @@ import traceback
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, quote, urlsplit
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
@@ -477,6 +477,39 @@ pre.code .ascii  { color: var(--violet); }
 .fn-state.matched   { color: var(--green); }
 .fn-state.partial   { color: var(--amber); }
 .fn-state.untouched { color: var(--fg-faint); }
+
+.pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  padding: 8px 2px;
+  border-top: 1px solid var(--line);
+  margin-top: 6px;
+}
+.pager .pages { display: flex; gap: 6px; align-items: center; }
+.pager a, .pager span.pg-cur, .pager span.pg-disabled {
+  display: inline-block;
+  padding: 3px 9px;
+  border: 1px solid var(--line);
+  color: var(--fg-dim);
+  text-decoration: none;
+}
+.pager a:hover { color: var(--cyan); border-color: var(--cyan); }
+.pager span.pg-cur { color: var(--bg); background: var(--cyan); border-color: var(--cyan); }
+.pager span.pg-disabled { opacity: 0.35; }
+.pager span.pg-ellipsis { padding: 3px 4px; color: var(--fg-faint); border: none; }
+.pager form.pg-jump { display: inline-flex; align-items: center; gap: 6px; }
+.pager form.pg-jump input[type=number] {
+  width: 64px;
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--line);
+  padding: 3px 6px;
+  font: inherit;
+}
 """
 
 
@@ -1244,19 +1277,39 @@ def view_progress_index(current_path: str | None) -> str:
     return page("progress", body, current_path=current_path, active="progress")
 
 
-def view_progress(project_path_str: str, current_path: str | None) -> str:
+def view_progress(
+    project_path_str: str,
+    current_path: str | None,
+    *,
+    page_n: int = 1,
+    page_size: int = 100,
+) -> str:
     project = project_load(project_path_str)
     stats = project_aggregate(project)
 
+    total = stats.total_functions
+    total_pages = max(1, (total + page_size - 1) // page_size)
+    page_n = max(1, min(page_n, total_pages))
+    start = (page_n - 1) * page_size
+    page_slice = stats.function_statuses[start : start + page_size]
+
     summary = _progress_summary(project, stats)
     histogram = _progress_histogram(stats)
-    table = _progress_function_table(stats, project_path_str)
+    table = _progress_function_table(
+        page_slice, project_path_str,
+        page=page_n, total_pages=total_pages, total=total, page_size=page_size,
+    )
 
+    rng = (
+        f"{start + 1}–{min(start + page_size, total)} of {total}"
+        if total
+        else "0 of 0"
+    )
     body = (
         crumbs(("home", "/"), ("progress", "/progress"), (project.name, None))
-        + panel("Project", summary, meta=f"{stats.total_functions} functions · {stats.total_bytes:,} bytes")
+        + panel("Project", summary, meta=f"{total} functions · {stats.total_bytes:,} bytes")
         + panel("Match distribution", histogram, meta="function count per 10% bucket")
-        + panel("Functions", table, meta=f"{stats.total_functions} entries")
+        + panel("Functions", table, meta=f"{rng} · page {page_n}/{total_pages}")
     )
     return page(f"progress · {project.name}", body, current_path=current_path, active="progress")
 
@@ -1388,9 +1441,17 @@ def _progress_histogram(stats: ProjectStats) -> str:
     )
 
 
-def _progress_function_table(stats: ProjectStats, project_path_str: str) -> str:
+def _progress_function_table(
+    page_slice,
+    project_path_str: str,
+    *,
+    page: int,
+    total_pages: int,
+    total: int,
+    page_size: int,
+) -> str:
     rows = []
-    for s in stats.function_statuses:
+    for s in page_slice:
         best_str = f"{s.best_match_percent:.2f}%" if isinstance(s.best_match_percent, (int, float)) else "—"
         link = (
             f'<a href="/decomp/run?root={html.escape(str(s.workspace_path))}">view →</a>'
@@ -1411,6 +1472,10 @@ def _progress_function_table(stats: ProjectStats, project_path_str: str) -> str:
             f'</tr>'
         )
 
+    pager = _progress_pager(
+        project_path_str, page=page, total_pages=total_pages,
+        total=total, page_size=page_size,
+    )
     return (
         '<table>'
         '<thead><tr>'
@@ -1419,7 +1484,84 @@ def _progress_function_table(stats: ProjectStats, project_path_str: str) -> str:
         '</tr></thead>'
         f'<tbody>{"".join(rows) or "<tr><td colspan=8 class=\"muted center\">empty project</td></tr>"}</tbody>'
         '</table>'
+        + pager
     )
+
+
+def _progress_pager(
+    project_path_str: str,
+    *,
+    page: int,
+    total_pages: int,
+    total: int,
+    page_size: int,
+) -> str:
+    if total_pages <= 1:
+        return ""
+
+    def link(p: int, label: str, cls: str = "") -> str:
+        qs = (
+            f"path={quote(project_path_str)}"
+            f"&page={p}"
+            f"&page_size={page_size}"
+        )
+        if cls:
+            return f'<a href="/progress?{qs}" class="{cls}">{label}</a>'
+        return f'<a href="/progress?{qs}">{label}</a>'
+
+    pages: list[str] = []
+    if page > 1:
+        pages.append(link(1, "« first"))
+        pages.append(link(page - 1, "‹ prev"))
+    else:
+        pages.append('<span class="pg-disabled">« first</span>')
+        pages.append('<span class="pg-disabled">‹ prev</span>')
+
+    window = _pager_window(page, total_pages)
+    last = 0
+    for p in window:
+        if last and p > last + 1:
+            pages.append('<span class="pg-ellipsis">…</span>')
+        if p == page:
+            pages.append(f'<span class="pg-cur">{p}</span>')
+        else:
+            pages.append(link(p, str(p)))
+        last = p
+
+    if page < total_pages:
+        pages.append(link(page + 1, "next ›"))
+        pages.append(link(total_pages, f"last »"))
+    else:
+        pages.append('<span class="pg-disabled">next ›</span>')
+        pages.append('<span class="pg-disabled">last »</span>')
+
+    jump = (
+        f'<form class="pg-jump" method="get" action="/progress">'
+        f'<input type="hidden" name="path" value="{html.escape(project_path_str)}">'
+        f'<input type="hidden" name="page_size" value="{page_size}">'
+        f'<span class="muted">jump</span>'
+        f'<input type="number" name="page" min="1" max="{total_pages}" value="{page}">'
+        f'</form>'
+    )
+
+    return (
+        f'<div class="pager">'
+        f'<span class="muted">{total:,} entries · page {page}/{total_pages} · {page_size}/page</span>'
+        f'<div class="pages">{"".join(pages)}</div>'
+        f'{jump}'
+        f'</div>'
+    )
+
+
+def _pager_window(page: int, total_pages: int, radius: int = 2) -> list[int]:
+    """Return sorted page numbers to display: always first/last plus a window around current."""
+    pages = {1, total_pages, page}
+    for d in range(1, radius + 1):
+        if page - d >= 1:
+            pages.add(page - d)
+        if page + d <= total_pages:
+            pages.add(page + d)
+    return sorted(pages)
 
 
 def view_error(message: str, current_path: str | None = None) -> str:
@@ -1464,7 +1606,11 @@ class Handler(BaseHTTPRequestHandler):
                 if not project_path:
                     html_out = view_progress_index(current_path=None)
                 else:
-                    html_out = view_progress(project_path, current_path=None)
+                    page_n = max(1, int(q.get("page", "1") or "1"))
+                    size_n = max(10, min(500, int(q.get("page_size", "100") or "100")))
+                    html_out = view_progress(
+                        project_path, current_path=None, page_n=page_n, page_size=size_n,
+                    )
             elif route == "/healthz":
                 self._send_json(200, {"ok": True})
                 return
