@@ -19,9 +19,19 @@ import pytest
 from src.xbe import (
     SECTION_FLAG_EXECUTABLE,
     SECTION_FLAG_WRITABLE,
+    XBE_EP_KEY_CHIHIRO,
+    XBE_EP_KEY_DEBUG,
+    XBE_EP_KEY_RETAIL,
+    XBE_KT_KEY_CHIHIRO,
+    XBE_KT_KEY_DEBUG,
     XbeFormatError,
     is_xbe_magic_valid,
+    xbe_build_flavor_detect,
+    xbe_entry_point_get,
+    xbe_function_carve,
+    xbe_kernel_thunk_address_get,
     xbe_parse,
+    xbe_section_containing_va,
     xbe_section_find,
     xbe_section_read,
 )
@@ -29,14 +39,26 @@ from src.xbe import (
 
 def build_minimal_xbe(
     base_addr: int = 0x00010000,
-    sections: list[tuple[str, int, bytes]] | None = None,
+    sections: list[tuple[str, int, bytes] | tuple[str, int, bytes, int]] | None = None,
+    size_of_image: int = 0,
+    entry_point_xor: int = 0,
+    kernel_thunk_address_xor: int = 0,
 ) -> bytes:
     """Construct a syntactically-valid XBE byte stream for tests.
 
-    sections: list of (name, flags, raw_data) tuples. Section raw addresses
-    pack contiguously after the section name table.
+    sections: list of (name, flags, raw_data) or (name, flags, raw_data,
+    virtual_address). Raw addresses pack contiguously after the name table;
+    virtual_address defaults to 0 when omitted.
     """
     sections = sections or []
+    normalized: list[tuple[str, int, bytes, int]] = []
+    for entry in sections:
+        if len(entry) == 4:
+            normalized.append(entry)  # type: ignore[arg-type]
+        else:
+            name, flags, data = entry
+            normalized.append((name, flags, data, 0))
+    sections = normalized
     header_size = 0x178
     section_header_size = 56
     section_table_offset = header_size
@@ -45,30 +67,30 @@ def build_minimal_xbe(
     name_table_offset = section_table_offset + section_table_size
     name_bytes = b""
     name_offsets: list[int] = []
-    for name, _, _ in sections:
+    for name, _, _, _ in sections:
         name_offsets.append(len(name_bytes))
         name_bytes += name.encode("ascii") + b"\x00"
 
     raw_data_offset = name_table_offset + len(name_bytes)
 
+    header = bytearray(header_size)
+    header[0:4] = b"XBEH"
+    struct.pack_into("<I", header, 0x104, base_addr)
+    struct.pack_into("<I", header, 0x108, raw_data_offset)
+    struct.pack_into("<I", header, 0x10C, size_of_image)
+    struct.pack_into("<I", header, 0x110, header_size)
+    struct.pack_into("<I", header, 0x11C, len(sections))
+    struct.pack_into("<I", header, 0x120, base_addr + section_table_offset)
+    struct.pack_into("<I", header, 0x128, entry_point_xor)
+    struct.pack_into("<I", header, 0x158, kernel_thunk_address_xor)
+
     out = BytesIO()
-    out.write(b"XBEH")
-    out.write(b"\x00" * 256)  # digital signature
-    out.write(struct.pack("<I", base_addr))
-    out.write(struct.pack("<I", raw_data_offset))  # size of headers
-    out.write(struct.pack("<I", 0))  # size of image
-    out.write(struct.pack("<I", header_size))  # size of image header
-    out.write(struct.pack("<I", 0))  # timedate
-    out.write(struct.pack("<I", 0))  # certificate addr
-    out.write(struct.pack("<I", len(sections)))
-    out.write(struct.pack("<I", base_addr + section_table_offset))
-    # The rest of the 0x178-byte header isn't read by the MVP parser; pad zero.
-    out.write(b"\x00" * (header_size - out.tell()))
+    out.write(bytes(header))
 
     raw_cursor = raw_data_offset
-    for (name, flags, data), name_off in zip(sections, name_offsets, strict=True):
+    for (name, flags, data, virtual_address), name_off in zip(sections, name_offsets, strict=True):
         out.write(struct.pack("<I", flags))
-        out.write(struct.pack("<I", 0))  # virtual address (not exercised here)
+        out.write(struct.pack("<I", virtual_address))
         out.write(struct.pack("<I", len(data)))  # virtual size
         out.write(struct.pack("<I", raw_cursor))  # raw addr
         out.write(struct.pack("<I", len(data)))  # raw size
@@ -80,7 +102,7 @@ def build_minimal_xbe(
         raw_cursor += len(data)
 
     out.write(name_bytes)
-    for _, _, data in sections:
+    for _, _, data, _ in sections:
         out.write(data)
 
     return out.getvalue()
@@ -205,3 +227,260 @@ class TestSectionRead:
         truncated = dataclasses.replace(parsed, data=data[: section.raw_address + 4])
         with pytest.raises(XbeFormatError, match="truncated"):
             xbe_section_read(truncated, section)
+
+
+class TestSectionContainingVa:
+    def test_finds_section_at_start_address(self):
+        parsed = xbe_parse(
+            build_minimal_xbe(
+                sections=[
+                    (".text", SECTION_FLAG_EXECUTABLE, b"\x90" * 16, 0x00011000),
+                ]
+            )
+        )
+        section = xbe_section_containing_va(parsed, 0x00011000)
+        assert section is not None and section.name == ".text"
+
+    def test_finds_section_at_interior_address(self):
+        parsed = xbe_parse(
+            build_minimal_xbe(
+                sections=[
+                    (".text", SECTION_FLAG_EXECUTABLE, b"\x90" * 16, 0x00011000),
+                ]
+            )
+        )
+        section = xbe_section_containing_va(parsed, 0x00011008)
+        assert section is not None and section.name == ".text"
+
+    def test_address_at_section_end_is_outside(self):
+        parsed = xbe_parse(
+            build_minimal_xbe(
+                sections=[
+                    (".text", SECTION_FLAG_EXECUTABLE, b"\x90" * 16, 0x00011000),
+                ]
+            )
+        )
+        assert xbe_section_containing_va(parsed, 0x00011010) is None
+
+    def test_distinguishes_between_sections(self):
+        parsed = xbe_parse(
+            build_minimal_xbe(
+                sections=[
+                    (".text", SECTION_FLAG_EXECUTABLE, b"\x90" * 16, 0x00011000),
+                    (".data", SECTION_FLAG_WRITABLE, b"\x42" * 16, 0x00012000),
+                ]
+            )
+        )
+        assert xbe_section_containing_va(parsed, 0x00011004).name == ".text"
+        assert xbe_section_containing_va(parsed, 0x00012004).name == ".data"
+
+    def test_address_outside_all_sections_returns_none(self):
+        parsed = xbe_parse(
+            build_minimal_xbe(
+                sections=[
+                    (".text", SECTION_FLAG_EXECUTABLE, b"\x90" * 16, 0x00011000),
+                ]
+            )
+        )
+        assert xbe_section_containing_va(parsed, 0x00099000) is None
+
+
+class TestFunctionCarve:
+    """Carving extracts raw bytes from the file at a given VA + size.
+
+    The contract: VA must be inside an executable section, and [VA, VA+size)
+    must fit within the section's raw_size (BSS-style virtual padding past
+    raw bytes is undefined for carving).
+    """
+
+    def test_carves_function_bytes_at_section_start(self):
+        text_bytes = b"\x55\x8b\xec\x33\xc0\x5d\xc3"  # push ebp; mov ebp,esp; xor eax,eax; pop ebp; ret
+        parsed = xbe_parse(
+            build_minimal_xbe(
+                sections=[(".text", SECTION_FLAG_EXECUTABLE, text_bytes, 0x00011000)]
+            )
+        )
+        assert xbe_function_carve(parsed, 0x00011000, len(text_bytes)) == text_bytes
+
+    def test_carves_function_bytes_at_interior_offset(self):
+        prefix = b"\x90\x90\x90"
+        function = b"\x55\x8b\xec\x5d\xc3"
+        suffix = b"\xcc\xcc"
+        parsed = xbe_parse(
+            build_minimal_xbe(
+                sections=[
+                    (".text", SECTION_FLAG_EXECUTABLE, prefix + function + suffix, 0x00011000)
+                ]
+            )
+        )
+        assert (
+            xbe_function_carve(parsed, 0x00011000 + len(prefix), len(function)) == function
+        )
+
+    def test_carve_up_to_section_end_is_allowed(self):
+        text_bytes = b"\xc3" * 8
+        parsed = xbe_parse(
+            build_minimal_xbe(
+                sections=[(".text", SECTION_FLAG_EXECUTABLE, text_bytes, 0x00011000)]
+            )
+        )
+        assert xbe_function_carve(parsed, 0x00011000, 8) == text_bytes
+
+    def test_carve_past_raw_size_raises(self):
+        text_bytes = b"\xc3" * 8
+        parsed = xbe_parse(
+            build_minimal_xbe(
+                sections=[(".text", SECTION_FLAG_EXECUTABLE, text_bytes, 0x00011000)]
+            )
+        )
+        with pytest.raises(XbeFormatError, match="past"):
+            xbe_function_carve(parsed, 0x00011000, 9)
+
+    def test_carve_va_not_in_any_section_raises(self):
+        parsed = xbe_parse(
+            build_minimal_xbe(
+                sections=[(".text", SECTION_FLAG_EXECUTABLE, b"\xc3" * 4, 0x00011000)]
+            )
+        )
+        with pytest.raises(XbeFormatError, match="no section"):
+            xbe_function_carve(parsed, 0x99999999, 4)
+
+    def test_carve_in_non_executable_section_raises(self):
+        parsed = xbe_parse(
+            build_minimal_xbe(
+                sections=[
+                    (".data", SECTION_FLAG_WRITABLE, b"\x42" * 16, 0x00012000),
+                ]
+            )
+        )
+        with pytest.raises(XbeFormatError, match="executable"):
+            xbe_function_carve(parsed, 0x00012000, 4)
+
+    def test_carve_zero_size_raises(self):
+        parsed = xbe_parse(
+            build_minimal_xbe(
+                sections=[(".text", SECTION_FLAG_EXECUTABLE, b"\xc3" * 4, 0x00011000)]
+            )
+        )
+        with pytest.raises(ValueError, match="size"):
+            xbe_function_carve(parsed, 0x00011000, 0)
+
+    def test_carve_negative_size_raises(self):
+        parsed = xbe_parse(
+            build_minimal_xbe(
+                sections=[(".text", SECTION_FLAG_EXECUTABLE, b"\xc3" * 4, 0x00011000)]
+            )
+        )
+        with pytest.raises(ValueError, match="size"):
+            xbe_function_carve(parsed, 0x00011000, -1)
+
+
+class TestBuildFlavorDetect:
+    """Entry-point and kernel-thunk fields are XOR-encoded with DIFFERENT
+    per-build keys; the EP and KT keys are paired by build flavor. We
+    detect the flavor by trying each EP key against [base, base+size).
+    """
+
+    BASE = 0x00010000
+    IMAGE_SIZE = 0x00100000
+    ENTRY_VA = 0x00012000
+
+    def _xbe_with_entry(self, ep_key: int) -> bytes:
+        return build_minimal_xbe(
+            base_addr=self.BASE,
+            size_of_image=self.IMAGE_SIZE,
+            entry_point_xor=self.ENTRY_VA ^ ep_key,
+        )
+
+    def test_detects_retail_flavor(self):
+        parsed = xbe_parse(self._xbe_with_entry(XBE_EP_KEY_RETAIL))
+        assert xbe_build_flavor_detect(parsed).name == "retail"
+
+    def test_detects_debug_flavor(self):
+        parsed = xbe_parse(self._xbe_with_entry(XBE_EP_KEY_DEBUG))
+        assert xbe_build_flavor_detect(parsed).name == "debug"
+
+    def test_detects_chihiro_flavor(self):
+        parsed = xbe_parse(self._xbe_with_entry(XBE_EP_KEY_CHIHIRO))
+        assert xbe_build_flavor_detect(parsed).name == "chihiro"
+
+    def test_no_matching_flavor_raises(self):
+        parsed = xbe_parse(
+            build_minimal_xbe(
+                base_addr=self.BASE,
+                size_of_image=0x10,  # tiny image, no decoded value will fit
+                entry_point_xor=0xDEADBEEF,
+            )
+        )
+        with pytest.raises(XbeFormatError, match="build flavor"):
+            xbe_build_flavor_detect(parsed)
+
+
+class TestEntryPointDecode:
+    def test_returns_decoded_va(self):
+        parsed = xbe_parse(
+            build_minimal_xbe(
+                base_addr=0x00010000,
+                size_of_image=0x00100000,
+                entry_point_xor=0x00012000 ^ XBE_EP_KEY_RETAIL,
+            )
+        )
+        assert xbe_entry_point_get(parsed) == 0x00012000
+
+
+class TestKernelThunkAddressDecode:
+    def test_uses_paired_kt_key_for_debug_flavor(self):
+        parsed = xbe_parse(
+            build_minimal_xbe(
+                base_addr=0x00010000,
+                size_of_image=0x00100000,
+                entry_point_xor=0x00012000 ^ XBE_EP_KEY_DEBUG,
+                kernel_thunk_address_xor=0x00013000 ^ XBE_KT_KEY_DEBUG,
+            )
+        )
+        assert xbe_kernel_thunk_address_get(parsed) == 0x00013000
+
+    def test_uses_paired_kt_key_for_chihiro_flavor(self):
+        parsed = xbe_parse(
+            build_minimal_xbe(
+                base_addr=0x00010000,
+                size_of_image=0x00100000,
+                entry_point_xor=0x00012000 ^ XBE_EP_KEY_CHIHIRO,
+                kernel_thunk_address_xor=0x00013000 ^ XBE_KT_KEY_CHIHIRO,
+            )
+        )
+        assert xbe_kernel_thunk_address_get(parsed) == 0x00013000
+
+    def test_propagates_no_flavor_match(self):
+        parsed = xbe_parse(
+            build_minimal_xbe(
+                base_addr=0x00010000,
+                size_of_image=0x10,
+                entry_point_xor=0xDEADBEEF,
+                kernel_thunk_address_xor=0xCAFEBABE,
+            )
+        )
+        with pytest.raises(XbeFormatError, match="build flavor"):
+            xbe_kernel_thunk_address_get(parsed)
+
+
+class TestHalo2RetailRegression:
+    """Regression test pinned to real bytes from Halo 2 retail default.xbe.
+
+    The raw header words at 0x128 and 0x158 are reproduced verbatim; the
+    decoded VAs are documented (entry 0x002D0AEE per mbox/doc/xbe-format.md,
+    thunk 0x00411520 which lands at the start of the .rdata section).
+    """
+
+    def test_decodes_known_retail_entry_and_thunk(self):
+        parsed = xbe_parse(
+            build_minimal_xbe(
+                base_addr=0x00010000,
+                size_of_image=0x005754C0,
+                entry_point_xor=0xA8D15D45,
+                kernel_thunk_address_xor=0x5B2C5596,
+            )
+        )
+        assert xbe_build_flavor_detect(parsed).name == "retail"
+        assert xbe_entry_point_get(parsed) == 0x002D0AEE
+        assert xbe_kernel_thunk_address_get(parsed) == 0x00411520

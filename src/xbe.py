@@ -1,8 +1,10 @@
 """XBE (Xbox Executable) loader.
 
-MVP: parse the header, enumerate sections, extract section bytes. No
-kernel-thunk descrambling, no library version table, no certificate
-parsing — those come later. Reference: Cxbx-Reloaded's src/common/xbe/Xbe.h.
+Parses the XBE header and section table, carves function bytes by virtual
+address, and decodes the XOR-scrambled entry point and kernel-thunk
+addresses for all three build flavors (retail, debug, Chihiro).
+
+Reference: Cxbx-Reloaded's src/common/xbe/Xbe.h.
 """
 
 import struct
@@ -19,6 +21,16 @@ SECTION_FLAG_EXECUTABLE = 0x00000004
 SECTION_FLAG_INSERTED_FILE = 0x00000008
 SECTION_FLAG_HEAD_PAGE_RO = 0x00000010
 SECTION_FLAG_TAIL_PAGE_RO = 0x00000020
+
+# Per-build XOR keys. Entry-point and kernel-thunk addresses use DIFFERENT
+# keys; the pairing is fixed by build flavor. Verified against Cxbx-Reloaded
+# and Halo 2 retail default.xbe (entry=0x002D0AEE, thunk=0x00411520).
+XBE_EP_KEY_RETAIL = 0xA8FC57AB
+XBE_EP_KEY_DEBUG = 0x94859D4B
+XBE_EP_KEY_CHIHIRO = 0x40B5C16E
+XBE_KT_KEY_RETAIL = 0x5B6D40B6
+XBE_KT_KEY_DEBUG = 0xEFB1F152
+XBE_KT_KEY_CHIHIRO = 0x2290059D
 
 
 class XbeFormatError(ValueError):
@@ -62,12 +74,25 @@ class ParsedXbe:
     data: bytes = b""
 
 
+@dataclass(frozen=True)
+class XbeBuildFlavor:
+    name: str
+    ep_key: int
+    kt_key: int
+
+
+XBE_BUILD_FLAVORS: tuple[XbeBuildFlavor, ...] = (
+    XbeBuildFlavor("retail", XBE_EP_KEY_RETAIL, XBE_KT_KEY_RETAIL),
+    XbeBuildFlavor("debug", XBE_EP_KEY_DEBUG, XBE_KT_KEY_DEBUG),
+    XbeBuildFlavor("chihiro", XBE_EP_KEY_CHIHIRO, XBE_KT_KEY_CHIHIRO),
+)
+
+
 def is_xbe_magic_valid(data: bytes) -> bool:
     return len(data) >= 4 and data[:4] == XBE_MAGIC
 
 
 def xbe_parse(data: bytes) -> ParsedXbe:
-    """Parse an XBE byte stream into a ParsedXbe."""
     if not is_xbe_magic_valid(data):
         raise XbeFormatError(f"bad magic (expected {XBE_MAGIC!r}, got {data[:4]!r})")
     if len(data) < HEADER_SIZE:
@@ -86,7 +111,6 @@ def xbe_section_find(parsed: ParsedXbe, name: str) -> XbeSection | None:
 
 
 def xbe_section_read(parsed: ParsedXbe, section: XbeSection) -> bytes:
-    """Return the raw bytes of a section from its file offset."""
     start = section.raw_address
     end = start + section.raw_size
     if end > len(parsed.data):
@@ -95,6 +119,61 @@ def xbe_section_read(parsed: ParsedXbe, section: XbeSection) -> bytes:
             f"(needs bytes [{start:#x}..{end:#x}], file is {len(parsed.data):#x} bytes)"
         )
     return parsed.data[start:end]
+
+
+def xbe_section_containing_va(parsed: ParsedXbe, virtual_address: int) -> XbeSection | None:
+    for section in parsed.sections:
+        start = section.virtual_address
+        if start <= virtual_address < start + section.virtual_size:
+            return section
+    return None
+
+
+def xbe_function_carve(parsed: ParsedXbe, virtual_address: int, size: int) -> bytes:
+    if size <= 0:
+        raise ValueError(f"size must be positive, got {size}")
+
+    section = xbe_section_containing_va(parsed, virtual_address)
+    if section is None:
+        raise XbeFormatError(f"no section contains virtual address {virtual_address:#x}")
+    if not section.is_executable:
+        raise XbeFormatError(
+            f"section {section.name!r} containing {virtual_address:#x} is not executable "
+            f"(flags={section.flags:#x})"
+        )
+
+    # virtual_size may exceed raw_size for BSS-style zero-fill tails; carving
+    # past raw bytes would read zeros that aren't really code.
+    offset = virtual_address - section.virtual_address
+    if offset + size > section.raw_size:
+        raise XbeFormatError(
+            f"function at {virtual_address:#x} (size {size}) extends past raw bytes of "
+            f"section {section.name!r} (raw_size={section.raw_size})"
+        )
+
+    file_start = section.raw_address + offset
+    return parsed.data[file_start : file_start + size]
+
+
+def xbe_build_flavor_detect(parsed: ParsedXbe) -> XbeBuildFlavor:
+    base = parsed.header.base_address
+    end = base + parsed.header.size_of_image
+    encoded = parsed.header.entry_point_xor
+    for flavor in XBE_BUILD_FLAVORS:
+        if base <= encoded ^ flavor.ep_key < end:
+            return flavor
+    raise XbeFormatError(
+        f"entry point {encoded:#x} does not decode to a VA inside "
+        f"[{base:#x}..{end:#x}) with any known build flavor"
+    )
+
+
+def xbe_entry_point_get(parsed: ParsedXbe) -> int:
+    return parsed.header.entry_point_xor ^ xbe_build_flavor_detect(parsed).ep_key
+
+
+def xbe_kernel_thunk_address_get(parsed: ParsedXbe) -> int:
+    return parsed.header.kernel_thunk_address_xor ^ xbe_build_flavor_detect(parsed).kt_key
 
 
 def xbe_load(path: Path | str) -> ParsedXbe:
@@ -161,7 +240,6 @@ def _xbe_sections_parse(data: bytes, header: XbeHeader) -> tuple[XbeSection, ...
 
 
 def _xbe_section_name_read(data: bytes, header: XbeHeader, virtual_address: int) -> str:
-    """Read a null-terminated ASCII name from the header region."""
     file_offset = virtual_address - header.base_address
     if file_offset < 0 or file_offset >= len(data):
         return ""
