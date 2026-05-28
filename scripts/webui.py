@@ -2053,7 +2053,8 @@ def view_launch_form(project_path_str: str, va_str: str) -> str:
         )
     existing_result = _load_json_or_none(workspace_path / "result.json")
     existing_state_html = ""
-    if existing_attempts or existing_result:
+    ctx_h_exists = (workspace_path / "ctx.h").is_file()
+    if existing_attempts or existing_result or ctx_h_exists:
         best = (existing_result or {}).get("best_match_percent")
         best_str = f"{best:.2f}%" if isinstance(best, (int, float)) else "—"
         reason = (existing_result or {}).get("termination_reason") or "no result.json"
@@ -2067,6 +2068,10 @@ def view_launch_form(project_path_str: str, va_str: str) -> str:
 <label class="kv-checkbox">
   <input type="checkbox" name="wipe_history" value="1">
   wipe history before running (clears attempts, result.json, best.c; keeps ctx.h)
+</label>
+<label class="kv-checkbox">
+  <input type="checkbox" name="reset_ctx_h" value="1"{' disabled' if not ctx_h_exists else ''}>
+  regenerate ctx.h from auto-stub (discards hand-edits; uses current launcher rules)
 </label>
 """
 
@@ -2139,6 +2144,7 @@ def launch_job_from_form(
     max_iter = max(1, min(50, int(form.get("max_iterations", "8") or "8")))
     timeout = max(10.0, min(3600.0, float(form.get("hard_timeout_seconds", "180") or "180")))
     wipe = form.get("wipe_history", "").lower() in ("1", "on", "true", "yes")
+    reset_ctx = form.get("reset_ctx_h", "").lower() in ("1", "on", "true", "yes")
 
     parsed = xbe_cached_load(str(project.xbe_path))
     job = launch_decomp_job(
@@ -2148,6 +2154,7 @@ def launch_job_from_form(
         hard_timeout_seconds=timeout,
         parsed_xbe=parsed,
         wipe_history=wipe,
+        reset_ctx_h=reset_ctx,
     )
     _register_job(job)
     redirect = (

@@ -112,3 +112,17 @@ def test_wipe_workspace_history_is_idempotent_on_empty(tmp_path):
     ws.initialize()
     _wipe_workspace_history(ws)  # nothing to delete; must not raise
     assert ws.history_dir.is_dir()
+
+
+def test_wipe_preserves_ctx_h_even_when_caller_wants_history_gone(tmp_path):
+    """The wipe helper itself never touches ctx.h — that's a separate axis
+    (reset_ctx_h on launch_decomp_job). Locks the contract in place."""
+    ws = FunctionWorkspace(root=tmp_path / "fn", function_name="_sub_X")
+    ws.initialize()
+    ws.ctx_h.write_text("/* hand-edited typedefs */")
+    (ws.history_dir / "0001.c").write_text("// attempt")
+
+    _wipe_workspace_history(ws)
+
+    assert ws.ctx_h.read_text() == "/* hand-edited typedefs */"
+    assert not (ws.history_dir / "0001.c").exists()

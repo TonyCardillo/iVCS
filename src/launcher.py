@@ -77,6 +77,7 @@ def launch_decomp_job(
     api_key: str | None = None,
     parsed_xbe: ParsedXbe | None = None,
     wipe_history: bool = False,
+    reset_ctx_h: bool = False,
 ) -> JobInfo:
     """Carve, prepare workspace, and spawn the agent loop in a daemon thread.
 
@@ -101,7 +102,7 @@ def launch_decomp_job(
     if wipe_history:
         _wipe_workspace_history(workspace)
     workspace.target_obj.write_bytes(obj_bytes)
-    if not workspace.ctx_h.is_file():
+    if reset_ctx_h or not workspace.ctx_h.is_file():
         workspace.ctx_h.write_text(_compose_ctx_h(fn.name, mangled))
 
     job = JobInfo(
