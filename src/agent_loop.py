@@ -137,7 +137,7 @@ def agent_loop_run(
     for _ in range(config.max_iterations):
         elapsed = time.monotonic() - start_time
         if elapsed > config.hard_timeout_seconds:
-            return _finalize(workspace, "hard_timeout", best_match, iterations)
+            return _finalize(workspace, "hard_timeout", best_match, iterations, model=config.model)
 
         soft_threshold = config.hard_timeout_seconds * config.soft_timeout_fraction
         if not soft_timeout_injected and elapsed > soft_threshold:
@@ -149,7 +149,7 @@ def agent_loop_run(
 
         c_code = _extract_c_code(response)
         if c_code is None:
-            return _finalize(workspace, "llm_no_progress", best_match, iterations)
+            return _finalize(workspace, "llm_no_progress", best_match, iterations, model=config.model)
 
         iterations += 1
         result = compile_and_view_assembly(
@@ -166,7 +166,7 @@ def agent_loop_run(
                 workspace.best_c.write_text(c_code)
 
         if result.match_percent == 100.0:
-            return _finalize(workspace, "matched", best_match, iterations, best_c_code)
+            return _finalize(workspace, "matched", best_match, iterations, best_c_code, model=config.model)
 
         tool_call_id = _tool_call_id(response)
         rendered = _render_tool_result(result, workspace.function_name)
@@ -181,7 +181,7 @@ def agent_loop_run(
                 "content": rendered,
             })
 
-    return _finalize(workspace, "budget_exhausted", best_match, iterations)
+    return _finalize(workspace, "budget_exhausted", best_match, iterations, model=config.model)
 
 
 def _system_prompt_build(workspace: FunctionWorkspace, target_asm: str) -> str:
@@ -296,6 +296,8 @@ def _finalize(
     best_match: float | None,
     iterations: int,
     best_c_code: str | None = None,
+    *,
+    model: str,
 ) -> AgentResult:
     success = reason == "matched"
     result = AgentResult(
@@ -312,6 +314,7 @@ def _finalize(
                 "iterations": iterations,
                 "termination_reason": reason,
                 "function_name": workspace.function_name,
+                "model": model,
             },
             indent=2,
         )

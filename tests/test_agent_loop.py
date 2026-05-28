@@ -140,6 +140,7 @@ class TestImmediateMatch:
         data = json.loads(ws.result_json.read_text())
         assert data["success"] is True
         assert data["best_match_percent"] == 100.0
+        assert data["model"] == "fake/local"
 
 
 class TestCompileError:
