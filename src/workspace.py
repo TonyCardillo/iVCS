@@ -54,6 +54,10 @@ class FunctionWorkspace:
     def result_json(self) -> Path:
         return self.root / "result.json"
 
+    @property
+    def ghidra_warmstart(self) -> Path:
+        return self.root / "ghidra_warmstart.c"
+
     def attempt_paths(self, n: int) -> AttemptPaths:
         if n < 1:
             raise ValueError(f"attempt number must be >= 1, got {n}")

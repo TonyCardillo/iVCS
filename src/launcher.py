@@ -20,6 +20,12 @@ import capstone
 from src.agent_loop import AgentConfig, agent_loop_run
 from src.carver import carver_target_obj_build
 from src.compile_tool import default_compile_fn, default_diff_fn
+from src.ghidra_decompile import (
+    GhidraError,
+    ghidra_config_from_env,
+    ghidra_decompile_function,
+    ghidra_project_ensure,
+)
 from src.llm_clients import LiteLLMClient
 from src.project import FunctionEntry, Project
 from src.relocs import RelocKind, RelocSite, relocs_discover, relocs_kernel_ordinal_at
@@ -97,6 +103,7 @@ def launch_decomp_job(
     parsed_xbe: ParsedXbe | None = None,
     wipe_history: bool = False,
     reset_ctx_h: bool = False,
+    use_ghidra_warmstart: bool = False,
 ) -> JobInfo:
     """Carve, prepare workspace, and spawn the agent loop in a daemon thread.
 
@@ -127,6 +134,17 @@ def launch_decomp_job(
         workspace.ctx_h.write_text(
             _compose_ctx_h(fn.name, mangled, callee_names, kernel_imports)
         )
+
+    if use_ghidra_warmstart and not workspace.ghidra_warmstart.is_file():
+        try:
+            cfg = ghidra_config_from_env(project.xbe_path)
+            ghidra_project_ensure(cfg)
+            draft = ghidra_decompile_function(fn.va, cfg)
+            workspace.ghidra_warmstart.write_text(draft)
+        except GhidraError as e:
+            # Best-effort: log and continue without the draft.
+            import sys
+            print(f"[launcher] Ghidra warm-start failed for {fn.name}: {e}", file=sys.stderr)
 
     job = JobInfo(
         workspace_path=workspace_path,

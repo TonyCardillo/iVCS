@@ -233,6 +233,35 @@ class TestBestSoFar:
         assert ws.best_c.read_text() == c_codes[0]
 
 
+class TestGhidraWarmstartInSystemPrompt:
+    def test_section_omitted_when_warmstart_absent(self, tmp_path):
+        from src.agent_loop import _system_prompt_build
+        ws = _make_workspace(tmp_path)
+        prompt = _system_prompt_build(ws, "ret")
+        assert "Ghidra warm-start" not in prompt
+
+    def test_section_included_when_warmstart_present(self, tmp_path):
+        from src.agent_loop import _system_prompt_build
+        ws = _make_workspace(tmp_path)
+        ws.ghidra_warmstart.write_text(
+            "void FUN_002d0cf5(int param_1) { return; }\n"
+        )
+        prompt = _system_prompt_build(ws, "ret")
+        assert "Ghidra warm-start draft" in prompt
+        assert "FUN_002d0cf5" in prompt
+        # Fenced as C so the model treats it as code.
+        assert "```c" in prompt
+
+    def test_warmstart_appears_after_ctx_h(self, tmp_path):
+        from src.agent_loop import _system_prompt_build
+        ws = _make_workspace(tmp_path)
+        ws.ctx_h.write_text("// CTX_MARKER\n")
+        ws.ghidra_warmstart.write_text("// WARMSTART_MARKER\n")
+        prompt = _system_prompt_build(ws, "ret")
+        # ctx.h before warm-start: model sees types before the draft that uses them.
+        assert prompt.index("CTX_MARKER") < prompt.index("WARMSTART_MARKER")
+
+
 class TestToollessResponse:
     def test_text_only_with_c_block_is_treated_as_tool_call(self, tmp_path):
         ws = _make_workspace(tmp_path)

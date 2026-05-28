@@ -2080,6 +2080,19 @@ def view_launch_form(project_path_str: str, va_str: str) -> str:
         for m in ("claude-haiku-4-5", "claude-sonnet-4-6", "claude-opus-4-7")
     )
 
+    warmstart_exists = (workspace_path / "ghidra_warmstart.c").is_file()
+    warmstart_label = (
+        "use Ghidra warm-start (cached)"
+        if warmstart_exists
+        else "use Ghidra warm-start (adds ~3s; first XBE bootstrap costs ~100s)"
+    )
+    warmstart_html = f"""
+<label class="kv-checkbox">
+  <input type="checkbox" name="use_ghidra_warmstart" value="1">
+  {warmstart_label}
+</label>
+"""
+
     launch_label = "▶ re-run" if existing_attempts else "▶ launch"
 
     form = f"""
@@ -2100,6 +2113,7 @@ def view_launch_form(project_path_str: str, va_str: str) -> str:
     </div>
   </div>
   {existing_state_html}
+  {warmstart_html}
   <div style="margin-top: 14px;">
     <button type="submit"{' disabled' if not can_launch else ''}>{launch_label}</button>
     <a href="/progress?path={quote(project_path_str)}" style="margin-left: 12px;">cancel</a>
@@ -2145,6 +2159,7 @@ def launch_job_from_form(
     timeout = max(10.0, min(3600.0, float(form.get("hard_timeout_seconds", "180") or "180")))
     wipe = form.get("wipe_history", "").lower() in ("1", "on", "true", "yes")
     reset_ctx = form.get("reset_ctx_h", "").lower() in ("1", "on", "true", "yes")
+    use_ghidra = form.get("use_ghidra_warmstart", "").lower() in ("1", "on", "true", "yes")
 
     parsed = xbe_cached_load(str(project.xbe_path))
     job = launch_decomp_job(
@@ -2155,6 +2170,7 @@ def launch_job_from_form(
         parsed_xbe=parsed,
         wipe_history=wipe,
         reset_ctx_h=reset_ctx,
+        use_ghidra_warmstart=use_ghidra,
     )
     _register_job(job)
     redirect = (

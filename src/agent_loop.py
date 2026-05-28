@@ -186,6 +186,7 @@ def agent_loop_run(
 
 def _system_prompt_build(workspace: FunctionWorkspace, target_asm: str) -> str:
     ctx_h = workspace.ctx_h.read_text()
+    warmstart = _warmstart_section(workspace)
     return f"""You are an automated matching-decompilation system targeting the original Xbox \
 (x86, MSVC 8.0, /O2). You receive an assembly listing and write C code that, when compiled, \
 produces byte-identical machine code.
@@ -225,6 +226,22 @@ Symbol: {workspace.function_name}
 
 # Context header (ctx.h)
 {ctx_h}
+{warmstart}"""
+
+
+def _warmstart_section(workspace: FunctionWorkspace) -> str:
+    if not workspace.ghidra_warmstart.is_file():
+        return ""
+    draft = workspace.ghidra_warmstart.read_text()
+    return f"""
+# Ghidra warm-start draft (machine-generated; may be wrong)
+A Ghidra headless decompile of the target function. Use it as a starting point: \
+the control flow and called names are usually plausible, but variable types are \
+often `undefined4` and locals are over-decomposed. Rewrite freely, but the \
+identified callees (kernel imports, helper functions) are reliable.
+
+```c
+{draft}```
 """
 
 
