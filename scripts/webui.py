@@ -1885,7 +1885,7 @@ def _progress_function_table(
                     f'<a href="/decomp/launch?path={quote(project_path_str)}'
                     f'&amp;va={s.va:#x}">▶ run</a>'
                 )
-        reason = s.termination_reason or ""
+        model = s.model or ""
         rows.append(
             f'<tr>'
             f'<td>{html.escape(s.name)}</td>'
@@ -1894,7 +1894,7 @@ def _progress_function_table(
             f'<td>{state_label}</td>'
             f'<td>{best_str}</td>'
             f'<td class="num">{s.iterations}</td>'
-            f'<td class="muted">{html.escape(reason)}</td>'
+            f'<td class="muted">{html.escape(model)}</td>'
             f'<td>{action}</td>'
             f'</tr>'
         )
@@ -1908,7 +1908,7 @@ def _progress_function_table(
         '<table>'
         '<thead><tr>'
         '<th>name</th><th>VA</th><th>size</th><th>state</th>'
-        '<th>best</th><th>iters</th><th>reason</th><th></th>'
+        '<th>best</th><th>iters</th><th>model</th><th></th>'
         '</tr></thead>'
         f'<tbody>{"".join(rows) or f"<tr><td colspan=8 class=\"muted center\">{empty_msg}</td></tr>"}</tbody>'
         '</table>'

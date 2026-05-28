@@ -40,6 +40,7 @@ class FunctionStatus:
     iterations: int
     workspace_path: Path
     termination_reason: str | None
+    model: str | None = None
 
 
 @dataclass(frozen=True)
@@ -120,6 +121,7 @@ def project_aggregate(project: Project) -> ProjectStats:
         iters = int(result.get("iterations") or 0)
         success = bool(result.get("success"))
         reason = result.get("termination_reason")
+        model = result.get("model")
 
         if success or (isinstance(best, (int, float)) and best >= 100.0):
             state = "matched"
@@ -141,6 +143,7 @@ def project_aggregate(project: Project) -> ProjectStats:
                 iterations=iters,
                 workspace_path=ws_path,
                 termination_reason=reason if isinstance(reason, str) else None,
+                model=model if isinstance(model, str) else None,
             )
         )
 
