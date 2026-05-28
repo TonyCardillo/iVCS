@@ -7,12 +7,14 @@ smoke-testing through the web UI, not the test suite.
 
 from src.launcher import (
     _compose_ctx_h,
-    _extract_rel32_callee_names,
+    _extract_rel32_callee_decls,
+    _format_callee_decl,
     _format_kernel_decl,
     _format_target_forward_decl,
+    _infer_convention_from_bytes,
     _infer_mangled_name,
     _mirror_warmstart_as_attempt_zero,
-    _rel32_callee_names_from_sites,
+    _rel32_callee_vas_from_sites,
     _wipe_workspace_history,
 )
 from src.relocs import RelocKind, RelocSite
@@ -126,7 +128,7 @@ def test_callee_filter_keeps_executable_rel32_only():
         RelocSite(imm_offset=11, kind=RelocKind.DIR32, target_va=0x00020000), # not REL32
     ]
     is_exec = lambda va: 0x00010000 <= va < 0x00100000
-    assert _rel32_callee_names_from_sites(sites, is_exec) == ("fn_00020000",)
+    assert _rel32_callee_vas_from_sites(sites, is_exec, self_va=0) == (0x00020000,)
 
 
 def test_callee_filter_dedupes_and_sorts():
@@ -136,40 +138,51 @@ def test_callee_filter_dedupes_and_sorts():
         RelocSite(imm_offset=11, kind=RelocKind.REL32, target_va=0x00030000),  # dup
     ]
     is_exec = lambda va: True
-    assert _rel32_callee_names_from_sites(sites, is_exec) == (
-        "fn_00020000",
-        "fn_00030000",
+    assert _rel32_callee_vas_from_sites(sites, is_exec, self_va=0) == (
+        0x00020000,
+        0x00030000,
+    )
+
+
+def test_callee_filter_drops_self_recursion():
+    sites = [
+        RelocSite(imm_offset=1, kind=RelocKind.REL32, target_va=0x00040000),  # self
+        RelocSite(imm_offset=6, kind=RelocKind.REL32, target_va=0x00020000),
+    ]
+    is_exec = lambda va: True
+    assert _rel32_callee_vas_from_sites(sites, is_exec, self_va=0x00040000) == (
+        0x00020000,
     )
 
 
 def test_callee_filter_empty():
-    assert _rel32_callee_names_from_sites([], lambda v: True) == ()
+    assert _rel32_callee_vas_from_sites([], lambda v: True, self_va=0) == ()
 
 
-def test_compose_ctx_h_lists_callee_names_in_comment():
-    out = _compose_ctx_h("fn_X", "_fn_X", callee_names=("fn_AAAA0001", "fn_BBBB0002"))
-    assert "fn_AAAA0001" in out
-    assert "fn_BBBB0002" in out
-    # No pre-declared externs — the LLM writes them with the right types.
-    assert "extern void fn_AAAA0001(void);" not in out
-    assert "extern void fn_BBBB0002(void);" not in out
+def test_compose_ctx_h_emits_callee_forward_decls():
+    out = _compose_ctx_h(
+        "fn_X", "_fn_X",
+        callee_decls=("int fn_AAAA0001();", "int __stdcall fn_BBBB0002(int);"),
+    )
+    assert "int fn_AAAA0001();" in out
+    assert "int __stdcall fn_BBBB0002(int);" in out
+    assert "Same-binary callees" in out  # the section heading
+    assert "use these names verbatim" not in out  # old comment-style is gone
 
 
-def test_compose_ctx_h_no_callees_no_extern_block():
-    out = _compose_ctx_h("fn_X", "_fn_X", callee_names=())
-    assert "extern void" not in out
-    assert "REL32 calls" not in out
+def test_compose_ctx_h_no_callees_no_block():
+    out = _compose_ctx_h("fn_X", "_fn_X", callee_decls=())
+    assert "Same-binary callees" not in out
 
 
-def test_compose_ctx_h_stdcall_and_callees_coexist():
+def test_compose_ctx_h_stdcall_target_and_callee_decls_coexist():
     out = _compose_ctx_h(
         "fn_002D1D94",
         "_fn_002D1D94@4",
-        callee_names=("fn_002D1D66",),
+        callee_decls=("int __stdcall fn_002D1D66(int, int);",),
     )
-    assert "int __stdcall fn_002D1D94(int);" in out
-    assert "fn_002D1D66" in out
-    assert "extern void fn_002D1D66" not in out  # not pre-declared
+    assert "int __stdcall fn_002D1D94(int);" in out  # target
+    assert "int __stdcall fn_002D1D66(int, int);" in out  # callee
 
 
 def test_wipe_preserves_ctx_h_even_when_caller_wants_history_gone(tmp_path):
@@ -226,6 +239,52 @@ class TestKernelDecl:
         # No ordinal, no signature — bare K&R-style decl with no prototype.
         decl = _format_kernel_decl("NotARealKernelExport")
         assert decl == "__declspec(dllimport) int NotARealKernelExport();"
+
+
+class TestInferConvention:
+    def test_cdecl_when_first_ret_has_no_immediate(self):
+        body = b"\xb8\x00\x00\x00\x00\xc3"  # mov eax, 0; ret
+        assert _infer_convention_from_bytes(body) == ("cdecl", 0)
+
+    def test_stdcall_with_byte_count(self):
+        body = b"\xc2\x08\x00"  # ret 8
+        assert _infer_convention_from_bytes(body) == ("stdcall", 8)
+
+    def test_stdcall_with_one_arg(self):
+        body = b"\x56\x8b\xf1\x5e\xc2\x04\x00"  # ret 4
+        assert _infer_convention_from_bytes(body) == ("stdcall", 4)
+
+    def test_no_ret_falls_back_to_cdecl(self):
+        body = b"\x00" * 8
+        assert _infer_convention_from_bytes(body) == ("cdecl", 0)
+
+    def test_first_ret_wins(self):
+        # ret (c3) then later ret 8 — first wins.
+        body = b"\xc3\xc2\x08\x00"
+        assert _infer_convention_from_bytes(body) == ("cdecl", 0)
+
+
+class TestFormatCalleeDecl:
+    def test_cdecl_kr_style(self):
+        assert _format_callee_decl("fn_X", "cdecl", 0) == "int fn_X();"
+
+    def test_stdcall_zero_args_uses_void(self):
+        assert _format_callee_decl("fn_X", "stdcall", 0) == "int __stdcall fn_X(void);"
+
+    def test_stdcall_one_arg(self):
+        assert _format_callee_decl("fn_X", "stdcall", 4) == "int __stdcall fn_X(int);"
+
+    def test_stdcall_three_args(self):
+        assert (
+            _format_callee_decl("fn_X", "stdcall", 12)
+            == "int __stdcall fn_X(int, int, int);"
+        )
+
+    def test_stdcall_unusual_byte_count_emits_warning(self):
+        out = _format_callee_decl("fn_X", "stdcall", 6)
+        assert "WARN" in out
+        assert "pops 6 bytes" in out
+        assert "int __stdcall fn_X(int);" in out
 
 
 class TestWarmstartMirror:

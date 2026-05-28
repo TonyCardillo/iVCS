@@ -128,7 +128,7 @@ def launch_decomp_job(
     mangled = _infer_mangled_name(body, fn.name)
     obj_bytes = carver_target_obj_build(parsed, fn.va, fn.size, mangled)
     target_asm = _disassemble_listing(parsed, fn.va, fn.size)
-    callee_names = _extract_rel32_callee_names(parsed, fn.va, fn.size)
+    callee_decls = _extract_rel32_callee_decls(parsed, fn.va, fn.size)
     kernel_imports = _extract_kernel_imports(parsed, fn.va, fn.size)
 
     workspace_path = project.workspace_for(fn)
@@ -139,7 +139,7 @@ def launch_decomp_job(
     workspace.target_obj.write_bytes(obj_bytes)
     if reset_ctx_h or not workspace.ctx_h.is_file():
         workspace.ctx_h.write_text(
-            _compose_ctx_h(fn.name, mangled, callee_names, kernel_imports)
+            _compose_ctx_h(fn.name, mangled, callee_decls, kernel_imports)
         )
 
     if use_ghidra_warmstart and not workspace.ghidra_warmstart.is_file():
@@ -241,12 +241,11 @@ def _wipe_workspace_history(workspace: FunctionWorkspace) -> None:
         workspace.best_c.unlink()
 
 
-def _infer_mangled_name(body: bytes, base: str) -> str:
-    """MSVC stdcall mangling from the function's first ret-style instruction.
+def _infer_convention_from_bytes(body: bytes) -> tuple[str, int]:
+    """First ret instruction classifies the calling convention.
 
-    `ret 0` (c3) → cdecl/no-args: returns "_<base>".
-    `ret <imm16>` (c2 NN NN) → stdcall: returns "_<base>@<imm>".
-    No ret found in the disassembly: falls back to "_<base>".
+    Returns ('stdcall', byte_count) for `ret imm16`, ('cdecl', 0) for `ret`
+    or when no ret is found within the scanned bytes.
     """
     md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
     md.detail = False
@@ -254,10 +253,18 @@ def _infer_mangled_name(body: bytes, base: str) -> str:
         if mnem == "ret":
             if op:
                 try:
-                    return f"_{base}@{int(op, 0)}"
+                    return ("stdcall", int(op, 0))
                 except ValueError:
-                    return f"_{base}"
-            return f"_{base}"
+                    return ("cdecl", 0)
+            return ("cdecl", 0)
+    return ("cdecl", 0)
+
+
+def _infer_mangled_name(body: bytes, base: str) -> str:
+    """MSVC stdcall mangling from the function's first ret-style instruction."""
+    conv, byte_count = _infer_convention_from_bytes(body)
+    if conv == "stdcall":
+        return f"_{base}@{byte_count}"
     return f"_{base}"
 
 
@@ -296,11 +303,11 @@ def _format_target_forward_decl(name: str, mangled: str) -> str | None:
 def _compose_ctx_h(
     name: str,
     mangled: str,
-    callee_names: tuple[str, ...] = (),
+    callee_decls: tuple[str, ...] = (),
     kernel_imports: tuple[str, ...] = (),
 ) -> str:
     """Build the auto-stub ctx.h: typedefs, target forward decl, kernel
-    import decls, callee name list."""
+    import decls, same-binary callee decls."""
     parts = [_DEFAULT_CTX_H]
     forward = _format_target_forward_decl(name, mangled)
     if forward is not None:
@@ -308,14 +315,32 @@ def _compose_ctx_h(
     if kernel_imports:
         decls = "\n".join(_format_kernel_decl(n) for n in kernel_imports)
         parts.append("\n/* xboxkrnl imports. */\n" + decls + "\n")
-    if callee_names:
-        wrapped = _wrap_names(callee_names, width=70)
+    if callee_decls:
         parts.append(
-            "\n/* Callees — use these names verbatim:\n"
-            + wrapped
-            + " */\n"
+            "\n/* Same-binary callees. Return type is `int` by default; refine "
+            "if the diff shows the result is consumed differently. */\n"
+            + "\n".join(callee_decls)
+            + "\n"
         )
     return "".join(parts)
+
+
+def _format_callee_decl(name: str, conv: str, byte_count: int) -> str:
+    """Forward decl for a same-binary callee given its inferred convention.
+
+    Return is always `int` — for call sites that don't use the result this
+    is identical to `void`; for ones that consume EAX it's correct.
+    K&R `int name()` (cdecl) accepts any arg list, so the LLM can call it
+    with whatever count it infers from the target asm without a redecl.
+    """
+    if conv == "stdcall":
+        if byte_count == 0:
+            return f"int __stdcall {name}(void);"
+        if byte_count % 4 == 0:
+            args = ", ".join(["int"] * (byte_count // 4))
+            return f"int __stdcall {name}({args});"
+        return f"int __stdcall {name}(int);  /* WARN: target pops {byte_count} bytes */"
+    return f"int {name}();"
 
 
 def _format_kernel_decl(name: str) -> str:
@@ -344,38 +369,30 @@ def _format_kernel_decl(name: str) -> str:
     return f"__declspec(dllimport) int __stdcall {name}({args});"
 
 
-def _wrap_names(names: tuple[str, ...], *, width: int) -> str:
-    """Wrap a list of comma-separated symbol names to fit a comment block."""
-    lines = [" *     "]
-    for name in names:
-        candidate = (", " if lines[-1] != " *     " else "") + name
-        if len(lines[-1]) + len(candidate) > width:
-            lines.append(" *     " + name)
-        else:
-            lines[-1] += candidate
-    return "\n".join(lines) + "\n"
-
-
-def _rel32_callee_names_from_sites(
+def _rel32_callee_vas_from_sites(
     sites: list[RelocSite],
     is_executable_va,
-) -> tuple[str, ...]:
-    """Pure filter/name: keep REL32 sites whose target VA is in an executable
-    section, then return deduped, VA-sorted `sub_NNNNNNNN` names."""
+    self_va: int,
+) -> tuple[int, ...]:
+    """Pure filter: keep REL32 sites whose target VA is in an executable
+    section, dedupe, sort, and drop the self-VA (target is already declared)."""
     seen: set[int] = set()
     for site in sites:
         if site.kind != RelocKind.REL32:
             continue
         if not is_executable_va(site.target_va):
             continue
+        if site.target_va == self_va:
+            continue
         seen.add(site.target_va)
-    return tuple(f"fn_{va:08X}" for va in sorted(seen))
+    return tuple(sorted(seen))
 
 
-def _extract_rel32_callee_names(
+def _extract_rel32_callee_decls(
     parsed: ParsedXbe, fn_va: int, fn_size: int
 ) -> tuple[str, ...]:
-    """Scan a function's bytes for REL32 call/jmp targets in code sections."""
+    """Forward decls for same-binary callees of fn_va, with convention inferred
+    from the first ret in each callee's bytes."""
     body = xbe_function_carve(parsed, fn_va, fn_size)
     sites = relocs_discover(body, fn_va)
 
@@ -383,7 +400,18 @@ def _extract_rel32_callee_names(
         section = xbe_section_containing_va(parsed, va)
         return section is not None and section.is_executable
 
-    return _rel32_callee_names_from_sites(sites, is_executable)
+    callee_vas = _rel32_callee_vas_from_sites(sites, is_executable, self_va=fn_va)
+    decls: list[str] = []
+    for va in callee_vas:
+        name = f"fn_{va:08X}"
+        try:
+            callee_body = xbe_function_carve(parsed, va, 256)
+        except (ValueError, IndexError):
+            decls.append(_format_callee_decl(name, "cdecl", 0))
+            continue
+        conv, byte_count = _infer_convention_from_bytes(callee_body)
+        decls.append(_format_callee_decl(name, conv, byte_count))
+    return tuple(decls)
 
 
 def _extract_kernel_imports(
