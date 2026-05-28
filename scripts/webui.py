@@ -636,6 +636,33 @@ button:disabled:hover { border-color: var(--line); color: var(--fg); }
   border: 1px solid var(--line);
 }
 .filter-bar a.clear-filters:hover { color: var(--cyan); border-color: var(--cyan); }
+
+.action-rerun { color: var(--fg-dim); margin-left: 6px; }
+.action-rerun:hover { color: var(--amber); }
+
+.rerun-notice {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border: 1px dashed var(--line-strong);
+  background: var(--bg);
+  margin: 14px 0 10px 0;
+  font-size: 11px;
+  letter-spacing: 0.05em;
+}
+.rerun-notice .amber { color: var(--amber); }
+.rerun-notice .green { color: var(--green); }
+.rerun-notice .cyan  { color: var(--cyan); }
+
+.kv-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0;
+  font-size: 11px;
+  color: var(--fg-dim);
+}
 """
 
 
@@ -1850,6 +1877,8 @@ def _progress_function_table(
                 action = (
                     f'<a href="/decomp/run?root={html.escape(str(s.workspace_path))}'
                     f'&amp;path={quote(project_path_str)}">view →</a>'
+                    f'  <a href="/decomp/launch?path={quote(project_path_str)}'
+                    f'&amp;va={s.va:#x}" class="action-rerun">↻ rerun</a>'
                 )
             else:
                 action = (
@@ -2016,10 +2045,37 @@ def view_launch_form(project_path_str: str, va_str: str) -> str:
         existing_job and existing_job.is_active()
     )
 
+    # Detect existing on-disk state so the user knows what they're about to overwrite.
+    existing_attempts = []
+    if (workspace_path / "history").is_dir():
+        existing_attempts = sorted(
+            int(p.stem) for p in (workspace_path / "history").glob("*.c")
+        )
+    existing_result = _load_json_or_none(workspace_path / "result.json")
+    existing_state_html = ""
+    if existing_attempts or existing_result:
+        best = (existing_result or {}).get("best_match_percent")
+        best_str = f"{best:.2f}%" if isinstance(best, (int, float)) else "—"
+        reason = (existing_result or {}).get("termination_reason") or "no result.json"
+        existing_state_html = f"""
+<div class="rerun-notice">
+  <span class="badge partial">PRIOR RUN</span>
+  <span>attempts on disk: <span class="amber">{len(existing_attempts)}</span>
+        · best: <span class="green">{best_str}</span>
+        · last reason: <span class="cyan">{html.escape(reason)}</span></span>
+</div>
+<label class="kv-checkbox">
+  <input type="checkbox" name="wipe_history" value="1">
+  wipe history before running (clears attempts, result.json, best.c; keeps ctx.h)
+</label>
+"""
+
     model_options = "".join(
         f'<option value="{m}"{" selected" if m == "claude-haiku-4-5" else ""}>{m}</option>'
         for m in ("claude-haiku-4-5", "claude-sonnet-4-6", "claude-opus-4-7")
     )
+
+    launch_label = "▶ re-run" if existing_attempts else "▶ launch"
 
     form = f"""
 <form method="post" action="/decomp/launch?path={quote(project_path_str)}&amp;va={va:#x}">
@@ -2038,8 +2094,9 @@ def view_launch_form(project_path_str: str, va_str: str) -> str:
       <input type="number" name="hard_timeout_seconds" value="180" min="10" max="3600">
     </div>
   </div>
+  {existing_state_html}
   <div style="margin-top: 14px;">
-    <button type="submit"{' disabled' if not can_launch else ''}>▶ launch</button>
+    <button type="submit"{' disabled' if not can_launch else ''}>{launch_label}</button>
     <a href="/progress?path={quote(project_path_str)}" style="margin-left: 12px;">cancel</a>
   </div>
 </form>
@@ -2081,6 +2138,7 @@ def launch_job_from_form(
     model = form.get("model", "claude-haiku-4-5").strip() or "claude-haiku-4-5"
     max_iter = max(1, min(50, int(form.get("max_iterations", "8") or "8")))
     timeout = max(10.0, min(3600.0, float(form.get("hard_timeout_seconds", "180") or "180")))
+    wipe = form.get("wipe_history", "").lower() in ("1", "on", "true", "yes")
 
     parsed = xbe_cached_load(str(project.xbe_path))
     job = launch_decomp_job(
@@ -2089,6 +2147,7 @@ def launch_job_from_form(
         max_iterations=max_iter,
         hard_timeout_seconds=timeout,
         parsed_xbe=parsed,
+        wipe_history=wipe,
     )
     _register_job(job)
     redirect = (

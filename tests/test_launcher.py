@@ -9,7 +9,9 @@ from src.launcher import (
     _compose_ctx_h,
     _format_target_forward_decl,
     _infer_mangled_name,
+    _wipe_workspace_history,
 )
+from src.workspace import FunctionWorkspace
 
 
 def test_infer_mangled_cdecl_ret_zero():
@@ -82,3 +84,31 @@ def test_compose_ctx_h_stdcall_appends_forward_decl():
     out = _compose_ctx_h("sub_002D1D94", "_sub_002D1D94@4")
     assert "int __stdcall sub_002D1D94(int);" in out
     assert "typedef unsigned long" in out  # baseline typedefs still present
+
+
+def test_wipe_workspace_history_clears_attempts_and_result(tmp_path):
+    ws = FunctionWorkspace(root=tmp_path / "fn", function_name="_sub_X")
+    ws.initialize()
+    (ws.history_dir / "0001.c").write_text("/* attempt 1 */")
+    (ws.history_dir / "0001.obj").write_bytes(b"OBJ")
+    (ws.history_dir / "0001.diff.json").write_text("{}")
+    ws.result_json.write_text('{"success": false}')
+    ws.best_c.write_text("/* best */")
+    ws.target_obj.write_bytes(b"TARGET")
+    ws.ctx_h.write_text("/* user-edited */")
+
+    _wipe_workspace_history(ws)
+
+    assert list(ws.history_dir.iterdir()) == []
+    assert not ws.result_json.exists()
+    assert not ws.best_c.exists()
+    # Inputs preserved:
+    assert ws.target_obj.read_bytes() == b"TARGET"
+    assert ws.ctx_h.read_text() == "/* user-edited */"
+
+
+def test_wipe_workspace_history_is_idempotent_on_empty(tmp_path):
+    ws = FunctionWorkspace(root=tmp_path / "fn", function_name="_sub_X")
+    ws.initialize()
+    _wipe_workspace_history(ws)  # nothing to delete; must not raise
+    assert ws.history_dir.is_dir()

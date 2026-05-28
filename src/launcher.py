@@ -76,6 +76,7 @@ def launch_decomp_job(
     hard_timeout_seconds: float = 180.0,
     api_key: str | None = None,
     parsed_xbe: ParsedXbe | None = None,
+    wipe_history: bool = False,
 ) -> JobInfo:
     """Carve, prepare workspace, and spawn the agent loop in a daemon thread.
 
@@ -97,6 +98,8 @@ def launch_decomp_job(
     workspace_path = project.workspace_for(fn)
     workspace = FunctionWorkspace(root=workspace_path, function_name=mangled)
     workspace.initialize()
+    if wipe_history:
+        _wipe_workspace_history(workspace)
     workspace.target_obj.write_bytes(obj_bytes)
     if not workspace.ctx_h.is_file():
         workspace.ctx_h.write_text(_compose_ctx_h(fn.name, mangled))
@@ -144,6 +147,22 @@ def launch_decomp_job(
     job._thread = t
     t.start()
     return job
+
+
+def _wipe_workspace_history(workspace: FunctionWorkspace) -> None:
+    """Clear prior run artifacts: history/, result.json, best.c.
+
+    Preserves target.obj (re-written by the caller anyway) and ctx.h
+    (user may have hand-edited it; let them keep their changes).
+    """
+    if workspace.history_dir.is_dir():
+        for entry in workspace.history_dir.iterdir():
+            if entry.is_file():
+                entry.unlink()
+    if workspace.result_json.is_file():
+        workspace.result_json.unlink()
+    if workspace.best_c.is_file():
+        workspace.best_c.unlink()
 
 
 def _infer_mangled_name(body: bytes, base: str) -> str:
