@@ -12,7 +12,7 @@ from __future__ import annotations
 import os
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 import capstone
@@ -81,12 +81,10 @@ class JobInfo:
 	hard_timeout_seconds: float
 	state: str = "pending"  # "pending" | "running" | "done" | "error"
 	started_at: float = 0.0
-	finished_at: float | None = None
 	iterations_completed: int = 0
 	best_match_percent: float | None = None
 	termination_reason: str | None = None
 	error: str | None = None
-	_thread: threading.Thread | None = field(default=None, repr=False)
 
 	def is_active(self) -> bool:
 		return self.state in ("pending", "running")
@@ -196,12 +194,8 @@ def launch_decomp_job(
 		except Exception as e:  # noqa: BLE001 — surface any failure to the UI
 			job.error = f"{type(e).__name__}: {e}"
 			job.state = "error"
-		finally:
-			job.finished_at = time.time()
 
-	t = threading.Thread(target=_run, daemon=True, name=f"decomp-{fn.name}")
-	job._thread = t
-	t.start()
+	threading.Thread(target=_run, daemon=True, name=f"decomp-{fn.name}").start()
 	return job
 
 

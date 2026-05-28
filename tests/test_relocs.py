@@ -107,10 +107,6 @@ def _rel32_site(target_va: int) -> RelocSite:
 	return RelocSite(imm_offset=0, kind=RelocKind.REL32, target_va=target_va)
 
 
-def _dir32_site(target_va: int) -> RelocSite:
-	return RelocSite(imm_offset=0, kind=RelocKind.DIR32, target_va=target_va)
-
-
 class TestRelocSymbolNameRel32:
 	BASE = 0x00010000
 	IMAGE_SIZE = 0x00100000

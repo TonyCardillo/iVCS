@@ -2258,7 +2258,7 @@ def view_error(message: str, current_path: str | None = None) -> str:
 
 # ── HTTP plumbing ───────────────────────────────────────────────────────────
 class Handler(BaseHTTPRequestHandler):
-	def log_message(self, fmt, *args):
+	def log_message(self, _fmt, *_args):
 		sys.stderr.write(f"  {self.command} {self.path}\n")
 
 	def do_POST(self):

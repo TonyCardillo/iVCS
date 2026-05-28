@@ -32,7 +32,7 @@ from src.relocs import RelocKind, RelocSite, ResolvedReloc
 
 
 def _coff_header_parse(blob: bytes) -> dict:
-	machine, nsec, ts, sym_ptr, nsym, optsz, chars = struct.unpack_from("<HHIIIHH", blob, 0)
+	machine, nsec, _ts, sym_ptr, nsym, optsz, chars = struct.unpack_from("<HHIIIHH", blob, 0)
 	return dict(
 		machine=machine,
 		section_count=nsec,
@@ -46,7 +46,7 @@ def _coff_header_parse(blob: bytes) -> dict:
 def _section_entry_parse(blob: bytes, index: int) -> dict:
 	off = COFF_HEADER_SIZE + index * COFF_SECTION_SIZE
 	name = blob[off : off + 8]
-	vs, va, raw_sz, raw_ptr, rel_ptr, ln_ptr, nrel, nln, sc = struct.unpack_from(
+	_vs, _va, raw_sz, raw_ptr, rel_ptr, _ln_ptr, nrel, _nln, sc = struct.unpack_from(
 		"<IIIIIIHHI", blob, off + 8
 	)
 	return dict(
