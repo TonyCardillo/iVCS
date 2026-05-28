@@ -22,8 +22,9 @@ from src.carver import carver_target_obj_build
 from src.compile_tool import default_compile_fn, default_diff_fn
 from src.llm_clients import LiteLLMClient
 from src.project import FunctionEntry, Project
+from src.relocs import RelocKind, RelocSite, relocs_discover
 from src.workspace import FunctionWorkspace
-from src.xbe import ParsedXbe, xbe_function_carve, xbe_load
+from src.xbe import ParsedXbe, xbe_function_carve, xbe_load, xbe_section_containing_va
 
 
 _DEFAULT_CTX_H = """\
@@ -95,6 +96,7 @@ def launch_decomp_job(
     mangled = _infer_mangled_name(body, fn.name)
     obj_bytes = carver_target_obj_build(parsed, fn.va, fn.size, mangled)
     target_asm = _disassemble_listing(parsed, fn.va, fn.size)
+    callee_names = _extract_rel32_callee_names(parsed, fn.va, fn.size)
 
     workspace_path = project.workspace_for(fn)
     workspace = FunctionWorkspace(root=workspace_path, function_name=mangled)
@@ -103,7 +105,7 @@ def launch_decomp_job(
         _wipe_workspace_history(workspace)
     workspace.target_obj.write_bytes(obj_bytes)
     if reset_ctx_h or not workspace.ctx_h.is_file():
-        workspace.ctx_h.write_text(_compose_ctx_h(fn.name, mangled))
+        workspace.ctx_h.write_text(_compose_ctx_h(fn.name, mangled, callee_names))
 
     job = JobInfo(
         workspace_path=workspace_path,
@@ -218,19 +220,64 @@ def _format_target_forward_decl(name: str, mangled: str) -> str | None:
     return f"int __stdcall {name}({args});"
 
 
-def _compose_ctx_h(name: str, mangled: str) -> str:
-    """Build the auto-stub ctx.h: typedefs plus the target's forward decl."""
+def _compose_ctx_h(
+    name: str,
+    mangled: str,
+    callee_names: tuple[str, ...] = (),
+) -> str:
+    """Build the auto-stub ctx.h: typedefs, target forward decl, callee externs."""
+    parts = [_DEFAULT_CTX_H]
     forward = _format_target_forward_decl(name, mangled)
-    if forward is None:
-        return _DEFAULT_CTX_H
-    return (
-        _DEFAULT_CTX_H
-        + "\n"
-        + "/* Forward decl pins the target's calling convention so MSVC emits the\n"
-        + " * matching mangled symbol. Edit the param types here AND in your\n"
-        + " * definition if you want concrete types; keep the byte sizing intact. */\n"
-        + forward + "\n"
-    )
+    if forward is not None:
+        parts.append(
+            "\n"
+            "/* Forward decl pins the target's calling convention so MSVC emits the\n"
+            " * matching mangled symbol. Edit the param types here AND in your\n"
+            " * definition if you want concrete types; keep the byte sizing intact. */\n"
+            + forward + "\n"
+        )
+    if callee_names:
+        externs = "\n".join(f"extern void {n}(void);" for n in callee_names)
+        parts.append(
+            "\n"
+            "/* Callees: every REL32 call/jmp this function makes points at one of\n"
+            " * these symbols. Declared as `void f(void)` because we don't know\n"
+            " * their real signatures — refine return type and args in your code\n"
+            " * AND in the matching extern here. Use these names verbatim so MSVC\n"
+            " * emits the same symbol references as the carved target.obj. */\n"
+            + externs + "\n"
+        )
+    return "".join(parts)
+
+
+def _rel32_callee_names_from_sites(
+    sites: list[RelocSite],
+    is_executable_va,
+) -> tuple[str, ...]:
+    """Pure filter/name: keep REL32 sites whose target VA is in an executable
+    section, then return deduped, VA-sorted `sub_NNNNNNNN` names."""
+    seen: set[int] = set()
+    for site in sites:
+        if site.kind != RelocKind.REL32:
+            continue
+        if not is_executable_va(site.target_va):
+            continue
+        seen.add(site.target_va)
+    return tuple(f"sub_{va:08X}" for va in sorted(seen))
+
+
+def _extract_rel32_callee_names(
+    parsed: ParsedXbe, fn_va: int, fn_size: int
+) -> tuple[str, ...]:
+    """Scan a function's bytes for REL32 call/jmp targets in code sections."""
+    body = xbe_function_carve(parsed, fn_va, fn_size)
+    sites = relocs_discover(body, fn_va)
+
+    def is_executable(va: int) -> bool:
+        section = xbe_section_containing_va(parsed, va)
+        return section is not None and section.is_executable
+
+    return _rel32_callee_names_from_sites(sites, is_executable)
 
 
 def _disassemble_listing(parsed: ParsedXbe, fn_va: int, size: int) -> str:

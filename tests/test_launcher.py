@@ -7,10 +7,13 @@ smoke-testing through the web UI, not the test suite.
 
 from src.launcher import (
     _compose_ctx_h,
+    _extract_rel32_callee_names,
     _format_target_forward_decl,
     _infer_mangled_name,
+    _rel32_callee_names_from_sites,
     _wipe_workspace_history,
 )
+from src.relocs import RelocKind, RelocSite
 from src.workspace import FunctionWorkspace
 
 
@@ -112,6 +115,56 @@ def test_wipe_workspace_history_is_idempotent_on_empty(tmp_path):
     ws.initialize()
     _wipe_workspace_history(ws)  # nothing to delete; must not raise
     assert ws.history_dir.is_dir()
+
+
+def test_callee_filter_keeps_executable_rel32_only():
+    sites = [
+        RelocSite(imm_offset=1, kind=RelocKind.REL32, target_va=0x00020000),  # exec
+        RelocSite(imm_offset=6, kind=RelocKind.REL32, target_va=0x00500000),  # data
+        RelocSite(imm_offset=11, kind=RelocKind.DIR32, target_va=0x00020000), # not REL32
+    ]
+    is_exec = lambda va: 0x00010000 <= va < 0x00100000
+    assert _rel32_callee_names_from_sites(sites, is_exec) == ("sub_00020000",)
+
+
+def test_callee_filter_dedupes_and_sorts():
+    sites = [
+        RelocSite(imm_offset=1, kind=RelocKind.REL32, target_va=0x00030000),
+        RelocSite(imm_offset=6, kind=RelocKind.REL32, target_va=0x00020000),
+        RelocSite(imm_offset=11, kind=RelocKind.REL32, target_va=0x00030000),  # dup
+    ]
+    is_exec = lambda va: True
+    assert _rel32_callee_names_from_sites(sites, is_exec) == (
+        "sub_00020000",
+        "sub_00030000",
+    )
+
+
+def test_callee_filter_empty():
+    assert _rel32_callee_names_from_sites([], lambda v: True) == ()
+
+
+def test_compose_ctx_h_emits_callee_externs():
+    out = _compose_ctx_h("sub_X", "_sub_X", callee_names=("sub_AAAA0001", "sub_BBBB0002"))
+    assert "extern void sub_AAAA0001(void);" in out
+    assert "extern void sub_BBBB0002(void);" in out
+    assert "Callees:" in out
+
+
+def test_compose_ctx_h_no_callees_no_extern_block():
+    out = _compose_ctx_h("sub_X", "_sub_X", callee_names=())
+    assert "extern void" not in out
+    assert "Callees:" not in out
+
+
+def test_compose_ctx_h_stdcall_and_callees_coexist():
+    out = _compose_ctx_h(
+        "sub_002D1D94",
+        "_sub_002D1D94@4",
+        callee_names=("sub_002D1D66",),
+    )
+    assert "int __stdcall sub_002D1D94(int);" in out
+    assert "extern void sub_002D1D66(void);" in out
 
 
 def test_wipe_preserves_ctx_h_even_when_caller_wants_history_gone(tmp_path):
