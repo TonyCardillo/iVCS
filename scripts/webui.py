@@ -677,7 +677,6 @@ def page(
     nav_items = [
         ("overview", "/"),
         ("sections", "/xbe" + (f"?path={html.escape(current_path)}" if current_path else "")),
-        ("decomp",   "/decomp"),
         ("progress", "/progress"),
     ]
     nav_html = "".join(
@@ -775,7 +774,7 @@ def view_index(default_path: str = "") -> str:
   <div class="k">overview</div>   <div class="v">Header, build flavor, decoded entry &amp; thunk addresses, VA strip.</div>
   <div class="k">sections</div>   <div class="v">All sections with flags, VA, raw offset, sizes. Click into hex view.</div>
   <div class="k">function</div>   <div class="v">Carve N bytes at VA, disassemble x86 with capstone.</div>
-  <div class="k">decomp</div>     <div class="v">Watch a matching-decomp run: attempt timeline, diffs, best.c.</div>
+  <div class="k">progress</div>   <div class="v">Watch a matching-decomp run: attempt timeline, diffs, best.c.</div>
 </div>
 ''')}
 """
@@ -968,24 +967,23 @@ def view_function(path: str, va_str: str, size: int) -> str:
 
 
 # ── Decomp workspace views ──────────────────────────────────────────────────
-def _workspace_candidates() -> list[Path]:
-    """Directories that look like a FunctionWorkspace (have target.obj or result.json)."""
-    roots = [Path("/tmp"), Path.cwd(), REPO_ROOT]
-    seen: set[Path] = set()
-    found: list[Path] = []
-    for r in roots:
-        if not r.is_dir():
-            continue
+def _path_query_suffix(current_path: str | None) -> str:
+    """`&path=<quoted>` if a project is in scope, else empty. Keeps the
+    project breadcrumb resolvable as the user clicks through decomp pages."""
+    return f"&path={quote(current_path)}" if current_path else ""
+
+
+def _project_crumb(current_path: str | None) -> tuple[str, str | None]:
+    """Middle breadcrumb for decomp views. Falls back to a non-linked
+    'workspace' label when there is no project context (e.g., direct URL
+    without `?path=...`), since the old `/decomp` index page is gone."""
+    if current_path:
         try:
-            for entry in r.iterdir():
-                if not entry.is_dir() or entry in seen:
-                    continue
-                seen.add(entry)
-                if (entry / "target.obj").is_file() or (entry / "result.json").is_file():
-                    found.append(entry)
-        except PermissionError:
-            continue
-    return sorted(found)
+            project = project_load(current_path)
+            return (project.name, f"/progress?path={quote(current_path)}")
+        except Exception:
+            pass
+    return ("workspace", None)
 
 
 def _objdiff_cli_path() -> str | None:
@@ -1125,52 +1123,6 @@ def _sparkline_svg(attempts: list[dict]) -> str:
     )
 
 
-def view_decomp_index(current_path: str | None) -> str:
-    candidates = _workspace_candidates()
-    rows = []
-    for c in candidates:
-        result = _load_json_or_none(c / "result.json")
-        attempts = _attempts_listing(c)
-        best = result.get("best_match_percent") if result else max((a["match_percent"] or 0 for a in attempts), default=None)
-        fn = result.get("function_name") if result else "?"
-        best_str = f"{best:.1f}%" if isinstance(best, (int, float)) else "—"
-        rows.append(
-            f'<tr>'
-            f'<td><a href="/decomp/run?root={html.escape(str(c))}">{html.escape(c.name)}</a></td>'
-            f'<td class="muted">{html.escape(fn)}</td>'
-            f'<td class="num">{len(attempts)}</td>'
-            f'<td>{best_str}</td>'
-            f'<td>{_status_badge(result)}</td>'
-            f'<td class="muted">{html.escape(str(c))}</td>'
-            f'</tr>'
-        )
-
-    table = (
-        '<table>'
-        '<thead><tr><th>workspace</th><th>function</th><th>attempts</th><th>best</th><th>status</th><th>path</th></tr></thead>'
-        f'<tbody>{"".join(rows) or "<tr><td colspan=6 class=\"muted center\">no workspaces autodetected</td></tr>"}</tbody>'
-        '</table>'
-    )
-
-    picker = """
-<form class="inline" action="/decomp/run" method="get">
-  <input type="text" name="root" placeholder="/tmp/halo2_demo_fn_002D1D94" autofocus>
-  <button type="submit">Open →</button>
-</form>
-<p class="muted" style="margin-top: 10px;">
-  Any directory with a <span style="color: var(--cyan);">target.obj</span> or
-  <span style="color: var(--cyan);">result.json</span> qualifies.
-</p>
-"""
-
-    body = (
-        crumbs(("home", "/"), ("decomp", None))
-        + panel("Open workspace", picker)
-        + panel("Autodetected workspaces", table, meta=f"{len(candidates)} found")
-    )
-    return page("decomp", body, current_path=current_path, active="decomp")
-
-
 def view_decomp_run(root_str: str, current_path: str | None) -> str:
     root = Path(root_str)
     if not root.is_dir():
@@ -1273,7 +1225,7 @@ def view_decomp_run(root_str: str, current_path: str | None) -> str:
             )
 
     body = (
-        crumbs(("home", "/"), ("decomp", "/decomp"), (root.name, None))
+        crumbs(("home", "/"), _project_crumb(current_path), (root.name, None))
         + banner
         + panel("Run", header_body, meta=fn_name)
         + panel("Attempts", timeline, meta=f"{len(attempts)} total")
@@ -1290,7 +1242,7 @@ def view_decomp_run(root_str: str, current_path: str | None) -> str:
         f"decomp · {root.name}",
         body,
         current_path=current_path,
-        active="decomp",
+        active="progress",
         refresh_seconds=refresh,
     )
 
@@ -1325,8 +1277,8 @@ def view_decomp_attempt(root_str: str, n: int, current_path: str | None) -> str:
     sections = [
         crumbs(
             ("home", "/"),
-            ("decomp", "/decomp"),
-            (root.name, f"/decomp/run?root={html.escape(str(root))}"),
+            _project_crumb(current_path),
+            (root.name, f"/decomp/run?root={html.escape(str(root))}{_path_query_suffix(current_path)}"),
             (f"#{n:04d}", None),
         ),
         panel(f"Attempt #{n:04d}", head_body),
@@ -1363,7 +1315,7 @@ def view_decomp_attempt(root_str: str, n: int, current_path: str | None) -> str:
         nav.append(f'<a href="/decomp/attempt?root={html.escape(str(root))}&n={n + 1}">next →</a>')
     sections.append(f'<p class="tight" style="display: flex; gap: 18px; padding: 4px 0;">{"  ".join(nav)}</p>')
 
-    return page(f"#{n:04d}", body="".join(sections), current_path=current_path, active="decomp")
+    return page(f"#{n:04d}", body="".join(sections), current_path=current_path, active="progress")
 
 
 _KIND_GLYPHS: dict[DiffKind, str] = {
@@ -2241,8 +2193,6 @@ class Handler(BaseHTTPRequestHandler):
                 html_out = view_section(q["path"], q["name"])
             elif route == "/function":
                 html_out = view_function(q["path"], q.get("va", "0"), int(q.get("size", "64")))
-            elif route == "/decomp":
-                html_out = view_decomp_index(current_path=q.get("path") or None)
             elif route == "/decomp/run":
                 html_out = view_decomp_run(q["root"], current_path=q.get("path") or None)
             elif route == "/decomp/attempt":
