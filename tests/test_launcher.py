@@ -11,6 +11,7 @@ from src.launcher import (
     _format_kernel_decl,
     _format_target_forward_decl,
     _infer_mangled_name,
+    _mirror_warmstart_as_attempt_zero,
     _rel32_callee_names_from_sites,
     _wipe_workspace_history,
 )
@@ -225,6 +226,30 @@ class TestKernelDecl:
         # No ordinal, no signature — bare K&R-style decl with no prototype.
         decl = _format_kernel_decl("NotARealKernelExport")
         assert decl == "__declspec(dllimport) int NotARealKernelExport();"
+
+
+class TestWarmstartMirror:
+    def test_noop_when_no_warmstart_file(self, tmp_path):
+        ws = FunctionWorkspace(root=tmp_path / "fn", function_name="_fn_X")
+        ws.initialize()
+        _mirror_warmstart_as_attempt_zero(ws)
+        assert not (ws.history_dir / "0000.c").exists()
+
+    def test_writes_attempt_zero_when_warmstart_exists(self, tmp_path):
+        ws = FunctionWorkspace(root=tmp_path / "fn", function_name="_fn_X")
+        ws.initialize()
+        ws.ghidra_warmstart.write_text("/* Ghidra draft */\nvoid fn_X(void){}\n")
+        _mirror_warmstart_as_attempt_zero(ws)
+        assert (ws.history_dir / "0000.c").read_text() == "/* Ghidra draft */\nvoid fn_X(void){}\n"
+
+    def test_idempotent_does_not_overwrite_existing_zero(self, tmp_path):
+        ws = FunctionWorkspace(root=tmp_path / "fn", function_name="_fn_X")
+        ws.initialize()
+        ws.ghidra_warmstart.write_text("new draft")
+        (ws.history_dir / "0000.c").write_text("pre-existing")
+        _mirror_warmstart_as_attempt_zero(ws)
+        # Pre-existing 0000.c must not be clobbered; user may have hand-edited.
+        assert (ws.history_dir / "0000.c").read_text() == "pre-existing"
 
 
 class TestKernelImportsInCtxH:

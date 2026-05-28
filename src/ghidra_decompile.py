@@ -11,6 +11,7 @@ Two operations:
 import os
 import subprocess
 import tempfile
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -21,6 +22,9 @@ _DECOMPILE_SCRIPT = "DecompileOne.java"
 _XBE_LOADER = "XbeLoader"
 _ANALYSIS_SUCCESS_MARKER = "REPORT: Analysis succeeded"
 _IMPORT_SUCCESS_MARKER = "REPORT: Import succeeded"
+_LOCK_ERROR_MARKER = "Unable to lock project"
+_LOCK_RETRY_ATTEMPTS = 3
+_LOCK_RETRY_BACKOFF_SECONDS = 2.0
 
 
 class GhidraError(RuntimeError):
@@ -57,13 +61,17 @@ def ghidra_config_from_env(xbe_path: Path) -> GhidraConfig:
 
     IVCS_GHIDRA_HOME, IVCS_GHIDRA_PROJECT_DIR, IVCS_GHIDRA_PROJECT_NAME
     override the per-host bits.
+
+    Default project name = XBE filename stem, so multiple XBEs each get
+    their own analyzed project under /tmp/ghidra-projects/ instead of
+    sharing one and re-analyzing on every switch.
     """
     home = Path(os.environ.get(
         "IVCS_GHIDRA_HOME",
         str(Path.home() / "Downloads" / "ghidra_12.0.3_PUBLIC"),
     ))
     project_dir = Path(os.environ.get("IVCS_GHIDRA_PROJECT_DIR", "/tmp/ghidra-projects"))
-    project_name = os.environ.get("IVCS_GHIDRA_PROJECT_NAME", "ivcs")
+    project_name = os.environ.get("IVCS_GHIDRA_PROJECT_NAME") or xbe_path.stem
     return GhidraConfig(
         ghidra_home=home,
         project_dir=project_dir,
@@ -117,7 +125,7 @@ def ghidra_decompile_function(
     try:
         argv = _decompile_argv(config, va, out_path)
         run = analyze_headless_fn or _default_run
-        result = run(argv)
+        result = _run_with_lock_retry(argv, run)
         if result.returncode != 0:
             raise GhidraError(
                 f"decompile failed for va=0x{va:08x} (rc={result.returncode})\n"
@@ -132,6 +140,27 @@ def ghidra_decompile_function(
         return out_path.read_text()
     finally:
         out_path.unlink(missing_ok=True)
+
+
+def _run_with_lock_retry(
+    argv: list[str],
+    run: AnalyzeHeadlessFn,
+    *,
+    attempts: int = _LOCK_RETRY_ATTEMPTS,
+    backoff_seconds: float = _LOCK_RETRY_BACKOFF_SECONDS,
+    sleep_fn: Callable[[float], None] = time.sleep,
+) -> "subprocess.CompletedProcess[str]":
+    """Retry when Ghidra reports `Unable to lock project` (transient JVM-shutdown race)."""
+    for attempt in range(attempts):
+        result = run(argv)
+        stdout = result.stdout or ""
+        stderr = result.stderr or ""
+        if _LOCK_ERROR_MARKER not in stdout and _LOCK_ERROR_MARKER not in stderr:
+            return result
+        if attempt == attempts - 1:
+            return result
+        sleep_fn(backoff_seconds * (2 ** attempt))
+    return result
 
 
 def _import_argv(config: GhidraConfig) -> list[str]:

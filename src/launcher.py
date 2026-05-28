@@ -146,6 +146,8 @@ def launch_decomp_job(
             import sys
             print(f"[launcher] Ghidra warm-start failed for {fn.name}: {e}", file=sys.stderr)
 
+    _mirror_warmstart_as_attempt_zero(workspace)
+
     job = JobInfo(
         workspace_path=workspace_path,
         function_name=mangled,
@@ -189,6 +191,16 @@ def launch_decomp_job(
     job._thread = t
     t.start()
     return job
+
+
+def _mirror_warmstart_as_attempt_zero(workspace: FunctionWorkspace) -> None:
+    """Surface the Ghidra draft on the run page as attempt 0, idempotently."""
+    if not workspace.ghidra_warmstart.is_file():
+        return
+    target = workspace.history_dir / "0000.c"
+    if target.is_file():
+        return
+    target.write_text(workspace.ghidra_warmstart.read_text())
 
 
 def _wipe_workspace_history(workspace: FunctionWorkspace) -> None:

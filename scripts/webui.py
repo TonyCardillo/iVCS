@@ -1093,7 +1093,8 @@ def _status_badge(result_json: dict | None) -> str:
 
 
 def _sparkline_svg(attempts: list[dict]) -> str:
-    series = [a["match_percent"] for a in attempts]
+    # Skip the Ghidra baseline (n=0): it has no match% and isn't a real attempt.
+    series = [a["match_percent"] for a in attempts if a["n"] != 0]
     if not series:
         return '<div class="muted center" style="padding: 18px;">no attempts yet</div>'
     pts: list[tuple[float, float]] = []
@@ -1193,7 +1194,7 @@ def view_decomp_run(root_str: str, current_path: str | None) -> str:
 <div class="kv">
   <div class="k">workspace</div>      <div class="v">{html.escape(str(root))}</div>
   <div class="k">function</div>       <div class="v amber">{html.escape(fn_name)}</div>
-  <div class="k">attempts</div>       <div class="v">{len(attempts)}</div>
+  <div class="k">attempts</div>       <div class="v">{sum(1 for a in attempts if a["n"] != 0)}</div>
   <div class="k">best match</div>     <div class="v green">{(f"{best:.2f}%" if isinstance(best, (int, float)) else "—")}</div>
   <div class="k">status</div>         <div class="v">{_status_badge(result)}</div>
 </div>
@@ -1207,20 +1208,24 @@ def view_decomp_run(root_str: str, current_path: str | None) -> str:
 
     timeline_rows = []
     for a in attempts:
-        is_in_flight = job_active and a["n"] == last_n
-        label, badge_cls, badge_text = _attempt_status_labels(a, is_in_flight=is_in_flight)
-        if label is not None:
-            mp_html = f'<span class="muted">{label}</span>'
-            status_html = f'<span class="badge {badge_cls}">{badge_text}</span>'
+        if a["n"] == 0:
+            mp_html = '<span class="muted">warm baseline</span>'
+            status_html = '<span class="badge partial">ghidra</span>'
         else:
-            mp = a["match_percent"]
-            cls = "" if mp > 0 else "zero"
-            mp_html = f'<span class="mp {cls}">{mp:.2f}%</span>'
-            status_html = (
-                '<span class="badge matched">100%</span>'
-                if mp == 100.0
-                else '<span class="badge partial">partial</span>'
-            )
+            is_in_flight = job_active and a["n"] == last_n
+            label, badge_cls, badge_text = _attempt_status_labels(a, is_in_flight=is_in_flight)
+            if label is not None:
+                mp_html = f'<span class="muted">{label}</span>'
+                status_html = f'<span class="badge {badge_cls}">{badge_text}</span>'
+            else:
+                mp = a["match_percent"]
+                cls = "" if mp > 0 else "zero"
+                mp_html = f'<span class="mp {cls}">{mp:.2f}%</span>'
+                status_html = (
+                    '<span class="badge matched">100%</span>'
+                    if mp == 100.0
+                    else '<span class="badge partial">partial</span>'
+                )
         timeline_rows.append(
             f'<div class="attempt-row">'
             f'<span class="n">#{a["n"]:04d}</span>'
@@ -1298,6 +1303,9 @@ def view_decomp_attempt(root_str: str, n: int, current_path: str | None) -> str:
 
     info = _attempt_info(root, n)
     c_text = info["c_path"].read_text() if info["c_path"].is_file() else "(missing)"
+
+    if n == 0:
+        return _view_warm_baseline(root, c_text, current_path)
 
     compile_error = ""
     if not info["diff_path"].is_file() and not info["compiled"]:
@@ -1488,6 +1496,42 @@ def _load_json_or_none(path: Path) -> dict | None:
         return json.loads(path.read_text())
     except (json.JSONDecodeError, OSError):
         return None
+
+
+def _view_warm_baseline(root: Path, c_text: str, current_path: str | None) -> str:
+    """Render the Ghidra-generated draft as a read-only baseline. No diff."""
+    head_body = f"""
+<div class="kv">
+  <div class="k">attempt</div>        <div class="v">#0000 (warm baseline)</div>
+  <div class="k">workspace</div>      <div class="v muted">{html.escape(str(root))}</div>
+  <div class="k">source</div>         <div class="v">Ghidra headless decompile, unmodified</div>
+</div>
+<div class="muted tight" style="margin-top: 8px;">
+  This is the starting point the LLM sees in attempt #0001. Types
+  (often <code>undefined4</code>) and naming are usually wrong; the
+  control flow and identified callees are usually correct.
+</div>
+"""
+    sections = [
+        crumbs(
+            ("home", "/"),
+            ("decomp", "/decomp"),
+            (root.name, f"/decomp/run?root={html.escape(str(root))}"),
+            ("#0000", None),
+        ),
+        panel("Warm baseline", head_body),
+        panel("ghidra_warmstart.c", f'<pre class="code">{_numbered_c(c_text)}</pre>',
+              meta=f"{len(c_text.splitlines())} lines"),
+        f'<p class="tight" style="display: flex; gap: 18px; padding: 4px 0;">'
+        f'<a href="/decomp/run?root={html.escape(str(root))}">↑ run</a>'
+        + (
+            f'  <a href="/decomp/attempt?root={html.escape(str(root))}&n=1">next →</a>'
+            if (root / "history" / "0001.c").is_file()
+            else ""
+        )
+        + "</p>",
+    ]
+    return page("#0000", body="".join(sections), current_path=current_path, active="decomp")
 
 
 def _attempt_status_labels(

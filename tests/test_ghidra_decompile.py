@@ -15,6 +15,8 @@ from src.ghidra_decompile import (
     GhidraError,
     _decompile_argv,
     _import_argv,
+    _run_with_lock_retry,
+    ghidra_config_from_env,
     ghidra_decompile_function,
     ghidra_project_ensure,
 )
@@ -125,6 +127,60 @@ class TestProjectEnsure:
 
         with pytest.raises(GhidraError, match="bootstrap failed"):
             ghidra_project_ensure(cfg, analyze_headless_fn=fake)
+
+
+class TestConfigFromEnv:
+    def test_default_project_name_is_xbe_stem(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("IVCS_GHIDRA_PROJECT_NAME", raising=False)
+        cfg = ghidra_config_from_env(tmp_path / "halo2_default.xbe")
+        assert cfg.project_name == "halo2_default"
+
+    def test_env_var_overrides_project_name(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("IVCS_GHIDRA_PROJECT_NAME", "custom")
+        cfg = ghidra_config_from_env(tmp_path / "halo2_default.xbe")
+        assert cfg.project_name == "custom"
+
+
+class TestLockRetry:
+    def test_passes_through_on_first_success(self):
+        calls = {"n": 0}
+
+        def fake(argv):
+            calls["n"] += 1
+            return _completed(0, stdout="all good")
+
+        result = _run_with_lock_retry(["fake"], fake, sleep_fn=lambda _: None)
+        assert result.returncode == 0
+        assert calls["n"] == 1
+
+    def test_retries_on_lock_error(self):
+        attempts = {"n": 0}
+
+        def fake(argv):
+            attempts["n"] += 1
+            if attempts["n"] < 3:
+                return _completed(1, stdout="ERROR Unable to lock project! /tmp/foo")
+            return _completed(0, stdout="done")
+
+        sleeps = []
+        result = _run_with_lock_retry(
+            ["fake"], fake, sleep_fn=lambda s: sleeps.append(s)
+        )
+        assert result.returncode == 0
+        assert attempts["n"] == 3
+        # Two sleeps between three attempts; exponential backoff.
+        assert len(sleeps) == 2
+        assert sleeps[0] < sleeps[1]
+
+    def test_returns_final_result_if_all_attempts_locked(self):
+        def fake(argv):
+            return _completed(1, stdout="ERROR Unable to lock project!")
+
+        result = _run_with_lock_retry(
+            ["fake"], fake, attempts=2, backoff_seconds=0, sleep_fn=lambda _: None
+        )
+        assert result.returncode == 1
+        assert "Unable to lock project" in result.stdout
 
 
 class TestDecompileFunction:
