@@ -9,6 +9,7 @@ Two operations:
 """
 
 import os
+import re
 import subprocess
 import tempfile
 import time
@@ -203,6 +204,40 @@ def _tail(s: str | None, lines: int = 40) -> str:
     return "\n".join(parts[-lines:])
 
 
+_PSEUDO_C_TYPE_MAP = {
+    "undefined8": "__int64",
+    "undefined4": "int",
+    "undefined2": "short",
+    "undefined1": "char",
+    "undefined":  "void",
+    "byte":       "BYTE",
+    "ushort":     "USHORT",
+    "uint":       "UINT",
+    "ulong":      "ULONG",
+    "dword":      "DWORD",
+    "qword":      "ULONGLONG",
+    "longlong":   "__int64",
+    "ulonglong":  "ULONGLONG",
+}
+
+_PSEUDO_C_TYPE_PATTERN = re.compile(
+    r"\b(" + "|".join(re.escape(k) for k in _PSEUDO_C_TYPE_MAP) + r")\b"
+)
+_PSEUDO_C_FUN_PATTERN = re.compile(r"\bFUN_([0-9a-fA-F]{8})\b")
+
+
+def ghidra_pseudo_c_normalize(c: str) -> str:
+    """Best-effort rewrite of Ghidra's pseudo-C into something MSVC will parse.
+
+    Handles the common placeholder types and Ghidra's FUN_xxxxxxxx → our
+    fn_XXXXXXXX naming. Does NOT touch DAT_/LAB_ references; those still
+    need typed declarations the LLM provides.
+    """
+    c = _PSEUDO_C_TYPE_PATTERN.sub(lambda m: _PSEUDO_C_TYPE_MAP[m.group(1)], c)
+    c = _PSEUDO_C_FUN_PATTERN.sub(lambda m: f"fn_{m.group(1).upper()}", c)
+    return c
+
+
 __all__ = [
     "AnalyzeHeadlessFn",
     "GhidraConfig",
@@ -210,4 +245,5 @@ __all__ = [
     "ghidra_config_from_env",
     "ghidra_decompile_function",
     "ghidra_project_ensure",
+    "ghidra_pseudo_c_normalize",
 ]

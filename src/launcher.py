@@ -25,6 +25,7 @@ from src.ghidra_decompile import (
     ghidra_config_from_env,
     ghidra_decompile_function,
     ghidra_project_ensure,
+    ghidra_pseudo_c_normalize,
 )
 from src.llm_clients import LiteLLMClient
 from src.project import FunctionEntry, Project
@@ -209,8 +210,10 @@ def launch_decomp_job(
 def _mirror_warmstart_as_attempt_zero(workspace: FunctionWorkspace) -> None:
     """Write ghidra_warmstart.c as 0000.c with ctx.h prepended.
 
-    Same shape as LLM-produced attempts so the agent loop's startup-baseline
-    compile+diff can treat it identically.
+    Ghidra emits pseudo-C (undefined4, byte, FUN_xxxxxxxx...) which MSVC
+    won't accept. We normalize during the mirror so attempt 0 has a real
+    shot at compiling; the un-normalized draft stays at ghidra_warmstart.c
+    so the LLM sees Ghidra's "undefined" signal in its system prompt.
     """
     if not workspace.ghidra_warmstart.is_file():
         return
@@ -218,7 +221,8 @@ def _mirror_warmstart_as_attempt_zero(workspace: FunctionWorkspace) -> None:
     if target.is_file():
         return
     ctx = workspace.ctx_h.read_text() if workspace.ctx_h.is_file() else ""
-    target.write_text(ctx + "\n" + workspace.ghidra_warmstart.read_text())
+    normalized = ghidra_pseudo_c_normalize(workspace.ghidra_warmstart.read_text())
+    target.write_text(ctx + "\n" + normalized)
 
 
 def _wipe_workspace_history(workspace: FunctionWorkspace) -> None:

@@ -19,6 +19,7 @@ from src.ghidra_decompile import (
     ghidra_config_from_env,
     ghidra_decompile_function,
     ghidra_project_ensure,
+    ghidra_pseudo_c_normalize,
 )
 
 
@@ -127,6 +128,67 @@ class TestProjectEnsure:
 
         with pytest.raises(GhidraError, match="bootstrap failed"):
             ghidra_project_ensure(cfg, analyze_headless_fn=fake)
+
+
+class TestPseudoCNormalize:
+    def test_undefined_types_to_real_types(self):
+        out = ghidra_pseudo_c_normalize(
+            "undefined1 a; undefined2 b; undefined4 c; undefined8 d; undefined *p;"
+        )
+        assert "char a" in out
+        assert "short b" in out
+        assert "int c" in out
+        assert "__int64 d" in out
+        assert "void *p" in out  # bare `undefined` → void
+
+    def test_undefined_does_not_swallow_numbered_variant(self):
+        # Order in the alternation matters: undefined4 must match before bare undefined.
+        out = ghidra_pseudo_c_normalize("undefined4 x;")
+        assert "int x" in out
+        assert "void" not in out
+
+    def test_lowercase_type_aliases(self):
+        out = ghidra_pseudo_c_normalize("byte x; ushort y; uint z; dword w;")
+        assert "BYTE x" in out
+        assert "USHORT y" in out
+        assert "UINT z" in out
+        assert "DWORD w" in out
+
+    def test_fun_renamed_to_fn_with_uppercase_hex(self):
+        out = ghidra_pseudo_c_normalize("FUN_002d0cf5(x); FUN_abcdef01(y);")
+        assert "fn_002D0CF5" in out
+        assert "fn_ABCDEF01" in out
+        assert "FUN_" not in out
+
+    def test_preserves_identifiers_that_contain_type_names(self):
+        # `bytes` and `_byte` shouldn't be touched.
+        out = ghidra_pseudo_c_normalize("int bytes = 0; int my_byte = 0;")
+        assert "int bytes = 0" in out
+        assert "int my_byte = 0" in out
+        assert "BYTE" not in out  # nothing matched
+
+    def test_leaves_DAT_and_LAB_references_alone(self):
+        # Those still need typed decls / are valid labels; not our job.
+        src = "x = &DAT_004618c8; goto LAB_002d0d7c;"
+        assert ghidra_pseudo_c_normalize(src) == src
+
+    def test_realistic_excerpt(self):
+        src = """\
+void FUN_002d0cf5(int param_1, undefined4 param_2)
+{
+  byte local_42c [520];
+  undefined4 local_1c;
+  ushort local_10 [2];
+  iVar1 = FUN_002d0979(param_1, local_42c);
+  return;
+}
+"""
+        out = ghidra_pseudo_c_normalize(src)
+        assert "fn_002D0CF5" in out
+        assert "BYTE local_42c" in out
+        assert "int local_1c" in out
+        assert "USHORT local_10" in out
+        assert "fn_002D0979" in out
 
 
 class TestConfigFromEnv:
