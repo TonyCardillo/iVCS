@@ -1885,7 +1885,7 @@ def _progress_function_table(
                     f'<a href="/decomp/launch?path={quote(project_path_str)}'
                     f'&amp;va={s.va:#x}">▶ run</a>'
                 )
-        model = s.model or ""
+        model = s.model or (job.model if job else "") or ""
         rows.append(
             f'<tr>'
             f'<td>{html.escape(s.name)}</td>'
