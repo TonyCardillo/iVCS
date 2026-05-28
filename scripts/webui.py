@@ -998,7 +998,7 @@ def _project_crumb(current_path: str | None) -> tuple[str, str | None]:
 		try:
 			project = project_load(current_path)
 			return (project.name, f"/progress?path={quote(current_path)}")
-		except Exception:
+		except Exception:  # noqa: BLE001, S110 — malformed/missing manifest falls back gracefully
 			pass
 	return ("workspace", None)
 
@@ -1578,7 +1578,7 @@ def _discover_projects() -> list[tuple[str, str, int]]:
 		try:
 			project = project_load(manifest)
 			found.append((str(manifest), project.name, len(project.functions)))
-		except Exception:  # noqa: BLE001 — malformed manifests just get skipped
+		except Exception:  # noqa: BLE001, S112 — malformed manifests just get skipped
 			continue
 	return found
 
@@ -1727,8 +1727,8 @@ def _progress_filter_bar(
 	order_sel = f.get("order", "asc")
 
 	state_options = "".join(
-		opt(v, l, state_sel)
-		for v, l in (
+		opt(v, label, state_sel)
+		for v, label in (
 			("", "all"),
 			("matched", "matched"),
 			("partial", "partial"),
@@ -1736,8 +1736,8 @@ def _progress_filter_bar(
 		)
 	)
 	sort_options = "".join(
-		opt(v, l, sort_sel)
-		for v, l in (
+		opt(v, label, sort_sel)
+		for v, label in (
 			("va", "VA"),
 			("name", "name"),
 			("size", "size"),
@@ -1747,8 +1747,8 @@ def _progress_filter_bar(
 		)
 	)
 	order_options = "".join(
-		opt(v, l, order_sel)
-		for v, l in (
+		opt(v, label, order_sel)
+		for v, label in (
 			("asc", "↑ asc"),
 			("desc", "↓ desc"),
 		)

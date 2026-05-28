@@ -284,7 +284,10 @@ class TestCompileErrorFormat:
 		out = CompileOutput(
 			success=False,
 			stdout="error C2065: undeclared identifier",
-			stderr="0114:err:kerberos:kerberos_LsaApInitializePackage no Kerberos support, expect problems",
+			stderr=(
+				"0114:err:kerberos:kerberos_LsaApInitializePackage "
+				"no Kerberos support, expect problems"
+			),
 		)
 		msg = compile_error_format(out)
 		assert "C2065" in msg

@@ -206,14 +206,12 @@ def xbe_functions_enumerate(parsed: ParsedXbe) -> tuple[XbeFunction, ...]:
 	"""Linear-sweep every executable section, emitting (name, va, size) per
 	detected function. Names follow `sub_VVVVVVVV` (8 hex digits uppercase).
 
-	Two-pass per section:
-	  1. Disassemble the whole section, recording every direct `call`
-	     target that lands within the section. Each is a guaranteed
-	     function start.
-	  2. Walk the instruction stream. A `ret` closes the current function
-	     iff the byte after it is padding (0xCC/0x90), the section ends,
-	     the next decoded instruction is a recognized MSVC /O2 prologue,
-	     or its VA is in the call-target set.
+	Two-pass per section. First, disassemble the whole section and record
+	every direct `call` target that lands within it — each is a guaranteed
+	function start. Second, walk the instruction stream: a `ret` closes the
+	current function iff the byte after it is padding (0xCC/0x90), the
+	section ends, the next decoded instruction is a recognized MSVC /O2
+	prologue, or its VA is in the call-target set.
 	"""
 	md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
 	md.detail = False
@@ -300,9 +298,7 @@ def _next_instr_is_prologue(instrs: list[tuple[int, int, str, str]], idx: int) -
 			return True
 		if mnem == "mov" and op == "edi, edi":
 			return True
-		if mnem == "enter":
-			return True
-		return False
+		return mnem == "enter"
 	return False
 
 

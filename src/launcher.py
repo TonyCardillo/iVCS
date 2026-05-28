@@ -431,9 +431,8 @@ def _extract_kernel_imports(parsed: ParsedXbe, fn_va: int, fn_size: int) -> tupl
 def _disassemble_listing(parsed: ParsedXbe, fn_va: int, size: int) -> str:
 	body = xbe_function_carve(parsed, fn_va, size)
 	md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
-	lines = []
-	for instr in md.disasm(body, fn_va):
-		lines.append(
-			f"{instr.address:#010x}  {instr.bytes.hex():<14} {instr.mnemonic} {instr.op_str}"
-		)
+	lines = [
+		f"{instr.address:#010x}  {instr.bytes.hex():<14} {instr.mnemonic} {instr.op_str}"
+		for instr in md.disasm(body, fn_va)
+	]
 	return "\n".join(lines)

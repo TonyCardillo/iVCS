@@ -90,7 +90,7 @@ def build_minimal_xbe(
 	out.write(bytes(header))
 
 	raw_cursor = raw_data_offset
-	for (name, flags, data, virtual_address), name_off in zip(sections, name_offsets, strict=True):
+	for (_name, flags, data, virtual_address), name_off in zip(sections, name_offsets, strict=True):
 		out.write(struct.pack("<I", flags))
 		out.write(struct.pack("<I", virtual_address))
 		out.write(struct.pack("<I", len(data)))  # virtual size

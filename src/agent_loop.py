@@ -167,11 +167,14 @@ def agent_loop_run(
 			diff_fn=diff_fn,
 		)
 
-		if result.success and result.match_percent is not None:
-			if best_match is None or result.match_percent > best_match:
-				best_match = result.match_percent
-				best_c_code = c_code
-				workspace.best_c.write_text(c_code)
+		if (
+			result.success
+			and result.match_percent is not None
+			and (best_match is None or result.match_percent > best_match)
+		):
+			best_match = result.match_percent
+			best_c_code = c_code
+			workspace.best_c.write_text(c_code)
 
 		if result.match_percent == 100.0:
 			return _finalize(

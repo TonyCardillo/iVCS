@@ -124,7 +124,10 @@ def test_callee_filter_keeps_executable_rel32_only():
 		RelocSite(imm_offset=6, kind=RelocKind.REL32, target_va=0x00500000),  # data
 		RelocSite(imm_offset=11, kind=RelocKind.DIR32, target_va=0x00020000),  # not REL32
 	]
-	is_exec = lambda va: 0x00010000 <= va < 0x00100000
+
+	def is_exec(va: int) -> bool:
+		return 0x00010000 <= va < 0x00100000
+
 	assert _rel32_callee_vas_from_sites(sites, is_exec, self_va=0) == (0x00020000,)
 
 
@@ -134,8 +137,7 @@ def test_callee_filter_dedupes_and_sorts():
 		RelocSite(imm_offset=6, kind=RelocKind.REL32, target_va=0x00020000),
 		RelocSite(imm_offset=11, kind=RelocKind.REL32, target_va=0x00030000),  # dup
 	]
-	is_exec = lambda va: True
-	assert _rel32_callee_vas_from_sites(sites, is_exec, self_va=0) == (
+	assert _rel32_callee_vas_from_sites(sites, lambda _va: True, self_va=0) == (
 		0x00020000,
 		0x00030000,
 	)
@@ -146,8 +148,9 @@ def test_callee_filter_drops_self_recursion():
 		RelocSite(imm_offset=1, kind=RelocKind.REL32, target_va=0x00040000),  # self
 		RelocSite(imm_offset=6, kind=RelocKind.REL32, target_va=0x00020000),
 	]
-	is_exec = lambda va: True
-	assert _rel32_callee_vas_from_sites(sites, is_exec, self_va=0x00040000) == (0x00020000,)
+	assert _rel32_callee_vas_from_sites(sites, lambda _va: True, self_va=0x00040000) == (
+		0x00020000,
+	)
 
 
 def test_callee_filter_empty():

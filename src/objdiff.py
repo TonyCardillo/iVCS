@@ -62,7 +62,8 @@ class DiffResult:
 	right: DiffSide | None = None
 
 	def function_symbols(self, side: str = "left") -> tuple[DiffSymbol, ...]:
-		"""objdiff also emits section markers ([.drectve], [.text]) and metadata (@feat.00); filter those out."""
+		"""objdiff also emits section markers ([.drectve], [.text]) and metadata
+		(@feat.00); filter those out."""
 		s = self.left if side == "left" else self.right
 		if s is None:
 			return ()
