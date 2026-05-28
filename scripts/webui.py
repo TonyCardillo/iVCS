@@ -16,7 +16,6 @@ import sys
 import threading
 import time
 import traceback
-from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote, urlsplit
@@ -33,10 +32,17 @@ if "IVCS_OBJDIFF_CLI" not in os.environ and _BUNDLED_OBJDIFF.is_file():
 
 import capstone  # noqa: E402
 
+from src.launcher import JobInfo, launch_decomp_job  # noqa: E402
+from src.objdiff import DiffKind, objdiff_parse  # noqa: E402
+from src.project import (  # noqa: E402
+    Project,
+    ProjectStats,
+    project_aggregate,
+    project_load,
+)
 from src.xbe import (  # noqa: E402
     ParsedXbe,
     XbeFormatError,
-    XbeSection,
     xbe_build_flavor_detect,
     xbe_entry_point_get,
     xbe_kernel_thunk_address_get,
@@ -44,16 +50,6 @@ from src.xbe import (  # noqa: E402
     xbe_section_find,
     xbe_section_read,
 )
-from src.launcher import JobInfo, launch_decomp_job  # noqa: E402
-from src.objdiff import DiffKind, objdiff_parse  # noqa: E402
-from src.project import (  # noqa: E402
-    FunctionEntry,
-    Project,
-    ProjectStats,
-    project_aggregate,
-    project_load,
-)
-
 
 # ── Tiny XBE cache (parsing a 5 MB XBE is cheap, but redundant) ─────────────
 _PARSE_CACHE: dict[str, ParsedXbe] = {}
@@ -1229,7 +1225,7 @@ def view_decomp_run(root_str: str, current_path: str | None) -> str:
         + banner
         + panel("Run", header_body, meta=fn_name)
         + panel("Attempts", timeline, meta=f"{len(attempts)} total")
-        + f'<div class="split">'
+        + '<div class="split">'
         + panel(
             "ctx.h",
             f'<pre class="code">{html.escape(ctx_h)}</pre>',
@@ -1822,7 +1818,7 @@ def _progress_function_table(
         best_str = f"{s.best_match_percent:.2f}%" if isinstance(s.best_match_percent, (int, float)) else "—"
         job = _job_for(s.workspace_path)
         if job and job.is_active():
-            state_label = f'<span class="fn-state partial">running</span>'
+            state_label = '<span class="fn-state partial">running</span>'
             action = (
                 f'<a href="/decomp/run?root={html.escape(str(s.workspace_path))}'
                 f'&amp;path={quote(project_path_str)}">iter {job.iterations_completed}/{job.max_iterations} →</a>'
@@ -1918,7 +1914,7 @@ def _progress_pager(
 
     if page < total_pages:
         pages.append(link(page + 1, "next ›"))
-        pages.append(link(total_pages, f"last »"))
+        pages.append(link(total_pages, "last »"))
     else:
         pages.append('<span class="pg-disabled">next ›</span>')
         pages.append('<span class="pg-disabled">last »</span>')

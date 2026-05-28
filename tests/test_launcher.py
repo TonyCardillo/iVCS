@@ -7,7 +7,6 @@ smoke-testing through the web UI, not the test suite.
 
 from src.launcher import (
     _compose_ctx_h,
-    _extract_rel32_callee_decls,
     _format_callee_decl,
     _format_kernel_decl,
     _format_target_forward_decl,

@@ -1,0 +1,34 @@
+[tool.ruff]
+line-length = 100
+target-version = "py314"
+
+[tool.ruff.lint]
+select = [
+    # pycodestyle
+    "E",
+    # Pyflakes
+    "F",
+    # pyupgrade
+    "UP",
+    # flake8-bugbear
+    "B",
+    # flake8-simplify
+    "SIM",
+    # flake8-bandit
+    "S",
+    # isort
+    "I",
+    # perflint
+    "PERF",
+]
+ignore = [
+    "SIM108", "SIM118", "SIM105",
+    "S603",  # subprocess.run(argv_list, ...) is the safe pattern; rule has no exception for it
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S101"]  # asserts in tests
+"scripts/*" = ["S101", "S108"]  # demo/sanity scripts: assert + /tmp paths are intentional
+
+[tool.ruff.format]
+indent-style = "tab"

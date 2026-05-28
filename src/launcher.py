@@ -40,7 +40,6 @@ from src.xboxkrnl import (
     xboxkrnl_signature_get,
 )
 
-
 _DEFAULT_CTX_H = """\
 typedef unsigned char    BYTE;
 typedef unsigned char    UCHAR;

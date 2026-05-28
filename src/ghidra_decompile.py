@@ -17,7 +17,6 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-
 _GHIDRA_SCRIPTS_DIR = Path(__file__).parent.parent / "ghidra_scripts"
 _DECOMPILE_SCRIPT = "DecompileOne.java"
 _XBE_LOADER = "XbeLoader"
@@ -71,7 +70,7 @@ def ghidra_config_from_env(xbe_path: Path) -> GhidraConfig:
         "IVCS_GHIDRA_HOME",
         str(Path.home() / "Downloads" / "ghidra_12.0.3_PUBLIC"),
     ))
-    project_dir = Path(os.environ.get("IVCS_GHIDRA_PROJECT_DIR", "/tmp/ghidra-projects"))
+    project_dir = Path(os.environ.get("IVCS_GHIDRA_PROJECT_DIR", "/tmp/ghidra-projects"))  # noqa: S108
     project_name = os.environ.get("IVCS_GHIDRA_PROJECT_NAME") or xbe_path.stem
     return GhidraConfig(
         ghidra_home=home,
@@ -150,7 +149,7 @@ def _run_with_lock_retry(
     attempts: int = _LOCK_RETRY_ATTEMPTS,
     backoff_seconds: float = _LOCK_RETRY_BACKOFF_SECONDS,
     sleep_fn: Callable[[float], None] = time.sleep,
-) -> "subprocess.CompletedProcess[str]":
+) -> subprocess.CompletedProcess[str]:
     """Retry when Ghidra reports `Unable to lock project` (transient JVM-shutdown race)."""
     for attempt in range(attempts):
         result = run(argv)
@@ -187,7 +186,7 @@ def _decompile_argv(config: GhidraConfig, va: int, out_path: Path) -> list[str]:
     ]
 
 
-def _default_run(argv: list[str]) -> "subprocess.CompletedProcess[str]":
+def _default_run(argv: list[str]) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         argv,
         capture_output=True,

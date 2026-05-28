@@ -87,6 +87,6 @@ def test_path_query_suffix_empty_when_none():
 
 
 def test_path_query_suffix_quotes_path():
-    s = _path_query_suffix("/tmp/has space/project.json")
+    s = _path_query_suffix("/tmp/has space/project.json")  # noqa: S108
     assert s.startswith("&path=")
     assert "%20" in s or "+" in s  # space encoded
