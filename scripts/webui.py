@@ -607,6 +607,35 @@ button:disabled:hover { border-color: var(--line); color: var(--fg); }
 .proj-card .proj-name { color: var(--amber); font-weight: 600; }
 .proj-card .proj-meta { color: var(--cyan); font-size: 11px; margin: 2px 0 4px 0; }
 .proj-card .proj-path { font-size: 10px; word-break: break-all; }
+
+.filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  margin: 0 0 10px 0;
+  font-size: 11px;
+}
+.filter-bar label {
+  display: flex; align-items: center; gap: 6px;
+  color: var(--fg-dim);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-size: 10px;
+}
+.filter-bar input[type=text] { width: 140px; }
+.filter-bar input[type=number] { width: 70px; }
+.filter-bar select { font-size: 11px; }
+.filter-bar a.clear-filters {
+  color: var(--fg-dim);
+  text-decoration: none;
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+}
+.filter-bar a.clear-filters:hover { color: var(--cyan); border-color: var(--cyan); }
 """
 
 
@@ -1522,7 +1551,7 @@ def view_progress_index(current_path: str | None) -> str:
 </form>
 <p class="muted" style="margin-top: 12px;">
   Point at a <span style="color: var(--cyan);">project.json</span> manifest.
-  See <span style="color: var(--cyan);">examples/halo2_default.project.json</span> for the schema.
+  Generate one with <span style="color: var(--cyan);">scripts/enumerate.py</span>.
 </p>
 '''.replace("{autofocus}", " autofocus" if not projects else ""),
     )
@@ -1536,21 +1565,30 @@ def view_progress(
     *,
     page_n: int = 1,
     page_size: int = 100,
+    filters: dict[str, str] | None = None,
 ) -> str:
     project = project_load(project_path_str)
     stats = project_aggregate(project)
+    filters = filters or {}
 
-    total = stats.total_functions
+    all_statuses = list(stats.function_statuses)
+    filtered = _apply_filters(all_statuses, filters)
+    filtered = _apply_sort(filtered, filters.get("sort", "va"), filters.get("order", "asc"))
+
+    total_unfiltered = stats.total_functions
+    total = len(filtered)
     total_pages = max(1, (total + page_size - 1) // page_size)
     page_n = max(1, min(page_n, total_pages))
     start = (page_n - 1) * page_size
-    page_slice = stats.function_statuses[start : start + page_size]
+    page_slice = filtered[start : start + page_size]
 
     summary = _progress_summary(project, stats)
     histogram = _progress_histogram(stats)
+    filter_bar = _progress_filter_bar(project_path_str, filters, page_size, total, total_unfiltered)
     table = _progress_function_table(
         page_slice, project_path_str,
         page=page_n, total_pages=total_pages, total=total, page_size=page_size,
+        filters=filters,
     )
 
     rng = (
@@ -1560,11 +1598,103 @@ def view_progress(
     )
     body = (
         crumbs(("home", "/"), ("progress", "/progress"), (project.name, None))
-        + panel("Project", summary, meta=f"{total} functions · {stats.total_bytes:,} bytes")
+        + panel("Project", summary, meta=f"{total_unfiltered} functions · {stats.total_bytes:,} bytes")
         + panel("Match distribution", histogram, meta="function count per 10% bucket")
-        + panel("Functions", table, meta=f"{rng} · page {page_n}/{total_pages}")
+        + panel("Functions", filter_bar + table, meta=f"{rng} · page {page_n}/{total_pages}")
     )
     return page(f"progress · {project.name}", body, current_path=current_path, active="progress")
+
+
+_STATE_SORT_ORDER = {"matched": 0, "partial": 1, "untouched": 2}
+
+
+def _apply_filters(statuses: list, f: dict[str, str]) -> list:
+    out = statuses
+    state = f.get("state") or ""
+    if state in ("matched", "partial", "untouched"):
+        out = [s for s in out if s.state == state]
+    query = (f.get("q") or "").strip().lower()
+    if query:
+        out = [s for s in out if query in s.name.lower()]
+    try:
+        min_size = int(f.get("min_size") or "")
+        out = [s for s in out if s.size >= min_size]
+    except ValueError:
+        pass
+    try:
+        max_size = int(f.get("max_size") or "")
+        out = [s for s in out if s.size <= max_size]
+    except ValueError:
+        pass
+    return out
+
+
+def _apply_sort(statuses: list, sort_key: str, order: str) -> list:
+    reverse = order == "desc"
+
+    def keyer(s):
+        if sort_key == "name":     return s.name
+        if sort_key == "size":     return s.size
+        if sort_key == "best":     return s.best_match_percent if s.best_match_percent is not None else -1.0
+        if sort_key == "iters":    return s.iterations
+        if sort_key == "state":    return _STATE_SORT_ORDER.get(s.state, 99)
+        return s.va  # default: VA
+
+    return sorted(statuses, key=keyer, reverse=reverse)
+
+
+def _progress_filter_bar(
+    project_path_str: str, f: dict[str, str], page_size: int,
+    total_filtered: int, total_unfiltered: int,
+) -> str:
+    def opt(value: str, label: str, selected: str) -> str:
+        sel = " selected" if value == selected else ""
+        return f'<option value="{value}"{sel}>{label}</option>'
+
+    state_sel = f.get("state", "")
+    sort_sel = f.get("sort", "va")
+    order_sel = f.get("order", "asc")
+
+    state_options = "".join(opt(v, l, state_sel) for v, l in (
+        ("",          "all"),
+        ("matched",   "matched"),
+        ("partial",   "partial"),
+        ("untouched", "untouched"),
+    ))
+    sort_options = "".join(opt(v, l, sort_sel) for v, l in (
+        ("va",    "VA"),
+        ("name",  "name"),
+        ("size",  "size"),
+        ("best",  "best %"),
+        ("iters", "iters"),
+        ("state", "state"),
+    ))
+    order_options = "".join(opt(v, l, order_sel) for v, l in (
+        ("asc",  "↑ asc"),
+        ("desc", "↓ desc"),
+    ))
+
+    count_chip = (
+        f'<span class="muted">{total_filtered:,} match'
+        + (f' · {total_unfiltered:,} total' if total_filtered != total_unfiltered else "")
+        + '</span>'
+    )
+
+    return f"""
+<form class="filter-bar" method="get" action="/progress">
+  <input type="hidden" name="path"      value="{html.escape(project_path_str)}">
+  <input type="hidden" name="page_size" value="{page_size}">
+  <label>state <select name="state">{state_options}</select></label>
+  <label>name contains <input type="text" name="q" value="{html.escape(f.get('q', ''))}" placeholder="sub_002D"></label>
+  <label>size <input type="number" name="min_size" value="{html.escape(f.get('min_size', ''))}" placeholder="min" min="0">
+    <span class="muted">–</span>
+    <input type="number" name="max_size" value="{html.escape(f.get('max_size', ''))}" placeholder="max" min="0"></label>
+  <label>sort <select name="sort">{sort_options}</select> <select name="order">{order_options}</select></label>
+  <button type="submit">apply</button>
+  <a href="/progress?path={quote(project_path_str)}" class="clear-filters">clear</a>
+  {count_chip}
+</form>
+"""
 
 
 def _progress_summary(project: Project, stats: ProjectStats) -> str:
@@ -1702,6 +1832,7 @@ def _progress_function_table(
     total_pages: int,
     total: int,
     page_size: int,
+    filters: dict[str, str] | None = None,
 ) -> str:
     rows = []
     for s in page_slice:
@@ -1741,15 +1872,16 @@ def _progress_function_table(
 
     pager = _progress_pager(
         project_path_str, page=page, total_pages=total_pages,
-        total=total, page_size=page_size,
+        total=total, page_size=page_size, filters=filters or {},
     )
+    empty_msg = "no functions match these filters" if filters and any(filters.values()) else "empty project"
     return (
         '<table>'
         '<thead><tr>'
         '<th>name</th><th>VA</th><th>size</th><th>state</th>'
         '<th>best</th><th>iters</th><th>reason</th><th></th>'
         '</tr></thead>'
-        f'<tbody>{"".join(rows) or "<tr><td colspan=8 class=\"muted center\">empty project</td></tr>"}</tbody>'
+        f'<tbody>{"".join(rows) or f"<tr><td colspan=8 class=\"muted center\">{empty_msg}</td></tr>"}</tbody>'
         '</table>'
         + pager
     )
@@ -1762,15 +1894,19 @@ def _progress_pager(
     total_pages: int,
     total: int,
     page_size: int,
+    filters: dict[str, str] | None = None,
 ) -> str:
     if total_pages <= 1:
         return ""
+
+    filter_qs = _filters_to_qs(filters or {})
 
     def link(p: int, label: str, cls: str = "") -> str:
         qs = (
             f"path={quote(project_path_str)}"
             f"&page={p}"
             f"&page_size={page_size}"
+            + filter_qs
         )
         if cls:
             return f'<a href="/progress?{qs}" class="{cls}">{label}</a>'
@@ -1802,10 +1938,15 @@ def _progress_pager(
         pages.append('<span class="pg-disabled">next ›</span>')
         pages.append('<span class="pg-disabled">last »</span>')
 
+    hidden_filters = "".join(
+        f'<input type="hidden" name="{k}" value="{html.escape(v)}">'
+        for k, v in (filters or {}).items() if v
+    )
     jump = (
         f'<form class="pg-jump" method="get" action="/progress">'
         f'<input type="hidden" name="path" value="{html.escape(project_path_str)}">'
         f'<input type="hidden" name="page_size" value="{page_size}">'
+        f'{hidden_filters}'
         f'<span class="muted">jump</span>'
         f'<input type="number" name="page" min="1" max="{total_pages}" value="{page}">'
         f'</form>'
@@ -1818,6 +1959,15 @@ def _progress_pager(
         f'{jump}'
         f'</div>'
     )
+
+
+def _filters_to_qs(filters: dict[str, str]) -> str:
+    """Encode active filter values as `&key=value` pairs for pagination links."""
+    out = []
+    for k, v in filters.items():
+        if v:
+            out.append(f"&{k}={quote(str(v))}")
+    return "".join(out)
 
 
 def _pager_window(page: int, total_pages: int, radius: int = 2) -> list[int]:
@@ -2021,7 +2171,18 @@ class Handler(BaseHTTPRequestHandler):
                     page_n = max(1, int(q.get("page", "1") or "1"))
                     size_n = max(10, min(500, int(q.get("page_size", "100") or "100")))
                     html_out = view_progress(
-                        project_path, current_path=None, page_n=page_n, page_size=size_n,
+                        project_path,
+                        current_path=None,
+                        page_n=page_n,
+                        page_size=size_n,
+                        filters={
+                            "state":    q.get("state", ""),
+                            "q":        q.get("q", ""),
+                            "min_size": q.get("min_size", ""),
+                            "max_size": q.get("max_size", ""),
+                            "sort":     q.get("sort", "va"),
+                            "order":    q.get("order", "asc"),
+                        },
                     )
             elif route == "/healthz":
                 self._send_json(200, {"ok": True})
