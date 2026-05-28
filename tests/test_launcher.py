@@ -8,6 +8,7 @@ smoke-testing through the web UI, not the test suite.
 from src.launcher import (
     _compose_ctx_h,
     _extract_rel32_callee_names,
+    _format_kernel_decl,
     _format_target_forward_decl,
     _infer_mangled_name,
     _rel32_callee_names_from_sites,
@@ -182,3 +183,75 @@ def test_wipe_preserves_ctx_h_even_when_caller_wants_history_gone(tmp_path):
 
     assert ws.ctx_h.read_text() == "/* hand-edited typedefs */"
     assert not (ws.history_dir / "0001.c").exists()
+
+
+class TestKernelDecl:
+    def test_known_function_uses_curated_signature(self):
+        decl = _format_kernel_decl("NtClose")
+        assert decl == "__declspec(dllimport) NTSTATUS __stdcall NtClose(HANDLE);"
+
+    def test_zero_arg_function_uses_void(self):
+        decl = _format_kernel_decl("AvGetSavedDataAddress")
+        assert decl == (
+            "__declspec(dllimport) PVOID __stdcall AvGetSavedDataAddress(void);"
+        )
+
+    def test_variable_export_uses_extern_form(self):
+        decl = _format_kernel_decl("KeTickCount")
+        assert decl == (
+            "extern __declspec(dllimport) volatile ULONG KeTickCount;"
+        )
+
+    def test_varargs_function_omits_stdcall(self):
+        # DbgPrint is variadic and unmangled.
+        decl = _format_kernel_decl("DbgPrint")
+        assert "__stdcall" not in decl
+        assert "..." in decl
+        assert decl.startswith("__declspec(dllimport) ULONG DbgPrint(")
+
+    def test_uncurated_function_falls_back_to_int_placeholders(self):
+        # An export with @N but no curated signature should fall back.
+        # ExAcquireReadWriteLockShared@4 (ordinal 12 in xbdm_gdb_bridge):
+        # it's in xboxkrnl_ordinals.json but we did NOT curate it.
+        decl = _format_kernel_decl("ExAcquireReadWriteLockShared")
+        # Curated entries take precedence; uncurated => int fallback.
+        # If we later curate this one the test must be retargeted to a
+        # still-uncurated export.
+        assert decl.startswith("__declspec(dllimport) int __stdcall ")
+        assert decl.endswith(");")
+        assert "ExAcquireReadWriteLockShared" in decl
+
+    def test_unknown_kernel_name_falls_back_to_knr(self):
+        # No ordinal, no signature — bare K&R-style decl with no prototype.
+        decl = _format_kernel_decl("NotARealKernelExport")
+        assert decl == "__declspec(dllimport) int NotARealKernelExport();"
+
+
+class TestKernelImportsInCtxH:
+    def test_kernel_imports_section_present(self):
+        out = _compose_ctx_h("fn_X", "_fn_X", (), ("NtClose", "DbgPrint"))
+        assert "/* xboxkrnl imports. */" in out
+        assert "NtClose(HANDLE)" in out
+        assert "DbgPrint" in out
+
+    def test_kernel_imports_sorted(self):
+        # Composer trusts caller-provided order; the extractor produces
+        # sorted tuples, so the rendered block is sorted too.
+        out = _compose_ctx_h("fn_X", "_fn_X", (), ("DbgPrint", "NtClose"))
+        d_pos = out.index("DbgPrint")
+        n_pos = out.index("NtClose")
+        assert d_pos < n_pos
+
+    def test_no_kernel_imports_section_when_empty(self):
+        out = _compose_ctx_h("fn_X", "_fn_X", (), ())
+        assert "/* xboxkrnl imports." not in out
+
+    def test_typedef_block_includes_kernel_types(self):
+        # ULONG, HANDLE, NTSTATUS, PVOID must all be in the default ctx.h
+        # so that any kernel decl that uses them parses.
+        out = _compose_ctx_h("fn_X", "_fn_X", (), ())
+        for t in ("ULONG", "USHORT", "UCHAR", "CHAR", "ACCESS_MASK",
+                  "LARGE_INTEGER", "PLARGE_INTEGER", "PHANDLE",
+                  "POBJECT_ATTRIBUTES", "PIO_STATUS_BLOCK", "PULONG",
+                  "ULONG_PTR", "ULONGLONG", "SIZE_T"):
+            assert f" {t};" in out or f"{t} " in out, f"missing typedef {t}"

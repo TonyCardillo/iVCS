@@ -22,24 +22,45 @@ from src.carver import carver_target_obj_build
 from src.compile_tool import default_compile_fn, default_diff_fn
 from src.llm_clients import LiteLLMClient
 from src.project import FunctionEntry, Project
-from src.relocs import RelocKind, RelocSite, relocs_discover
+from src.relocs import RelocKind, RelocSite, relocs_discover, relocs_kernel_ordinal_at
 from src.workspace import FunctionWorkspace
 from src.xbe import ParsedXbe, xbe_function_carve, xbe_load, xbe_section_containing_va
+from src.xboxkrnl import (
+    KernelFunctionSig,
+    KernelVariableSig,
+    xboxkrnl_mangled_byte_count,
+    xboxkrnl_name_get,
+    xboxkrnl_signature_get,
+)
 
 
 _DEFAULT_CTX_H = """\
 typedef unsigned char    BYTE;
+typedef unsigned char    UCHAR;
+typedef char             CHAR;
 typedef unsigned short   WORD;
+typedef unsigned short   USHORT;
 typedef unsigned long    DWORD;
+typedef unsigned long    ULONG;
 typedef unsigned __int64 DWORD64;
+typedef unsigned __int64 ULONGLONG;
 typedef int              BOOL;
 typedef long             LONG;
 typedef long             NTSTATUS;
 typedef unsigned int     UINT;
+typedef unsigned int     SIZE_T;
+typedef unsigned long    ULONG_PTR;
+typedef unsigned long    ACCESS_MASK;
+typedef __int64          LARGE_INTEGER;
 typedef void *           PVOID;
 typedef void *           HANDLE;
 typedef char *           LPSTR;
 typedef const char *     LPCSTR;
+typedef ULONG *          PULONG;
+typedef HANDLE *         PHANDLE;
+typedef LARGE_INTEGER *  PLARGE_INTEGER;
+typedef void *           POBJECT_ATTRIBUTES;
+typedef void *           PIO_STATUS_BLOCK;
 """
 
 
@@ -94,6 +115,7 @@ def launch_decomp_job(
     obj_bytes = carver_target_obj_build(parsed, fn.va, fn.size, mangled)
     target_asm = _disassemble_listing(parsed, fn.va, fn.size)
     callee_names = _extract_rel32_callee_names(parsed, fn.va, fn.size)
+    kernel_imports = _extract_kernel_imports(parsed, fn.va, fn.size)
 
     workspace_path = project.workspace_for(fn)
     workspace = FunctionWorkspace(root=workspace_path, function_name=mangled)
@@ -102,7 +124,9 @@ def launch_decomp_job(
         _wipe_workspace_history(workspace)
     workspace.target_obj.write_bytes(obj_bytes)
     if reset_ctx_h or not workspace.ctx_h.is_file():
-        workspace.ctx_h.write_text(_compose_ctx_h(fn.name, mangled, callee_names))
+        workspace.ctx_h.write_text(
+            _compose_ctx_h(fn.name, mangled, callee_names, kernel_imports)
+        )
 
     job = JobInfo(
         workspace_path=workspace_path,
@@ -221,12 +245,17 @@ def _compose_ctx_h(
     name: str,
     mangled: str,
     callee_names: tuple[str, ...] = (),
+    kernel_imports: tuple[str, ...] = (),
 ) -> str:
-    """Build the auto-stub ctx.h: typedefs, target forward decl, callee externs."""
+    """Build the auto-stub ctx.h: typedefs, target forward decl, kernel
+    import decls, callee name list."""
     parts = [_DEFAULT_CTX_H]
     forward = _format_target_forward_decl(name, mangled)
     if forward is not None:
         parts.append("\n/* Target — pins mangling. */\n" + forward + "\n")
+    if kernel_imports:
+        decls = "\n".join(_format_kernel_decl(n) for n in kernel_imports)
+        parts.append("\n/* xboxkrnl imports. */\n" + decls + "\n")
     if callee_names:
         wrapped = _wrap_names(callee_names, width=70)
         parts.append(
@@ -235,6 +264,32 @@ def _compose_ctx_h(
             + " */\n"
         )
     return "".join(parts)
+
+
+def _format_kernel_decl(name: str) -> str:
+    """Emit a `__declspec(dllimport)` decl for a kernel export.
+
+    Uses the hand-curated signature when present; otherwise falls back
+    to int placeholders sized by the export's `@N` byte count.
+    """
+    sig = xboxkrnl_signature_get(name)
+    if isinstance(sig, KernelVariableSig):
+        return f"extern __declspec(dllimport) {sig.var_type} {name};"
+    if isinstance(sig, KernelFunctionSig):
+        args = ", ".join(sig.arg_types) if sig.arg_types else "void"
+        if sig.varargs:
+            args = (args + ", ..." if sig.arg_types else "...")
+            return f"__declspec(dllimport) {sig.return_type} {name}({args});"
+        return f"__declspec(dllimport) {sig.return_type} __stdcall {name}({args});"
+    byte_count = xboxkrnl_mangled_byte_count(name)
+    if byte_count is None:
+        return f"__declspec(dllimport) int {name}();"
+    if byte_count == 0:
+        return f"__declspec(dllimport) int __stdcall {name}(void);"
+    if byte_count % 4 != 0:
+        return f"__declspec(dllimport) int __stdcall {name}(int);"
+    args = ", ".join(["int"] * (byte_count // 4))
+    return f"__declspec(dllimport) int __stdcall {name}({args});"
 
 
 def _wrap_names(names: tuple[str, ...], *, width: int) -> str:
@@ -277,6 +332,26 @@ def _extract_rel32_callee_names(
         return section is not None and section.is_executable
 
     return _rel32_callee_names_from_sites(sites, is_executable)
+
+
+def _extract_kernel_imports(
+    parsed: ParsedXbe, fn_va: int, fn_size: int
+) -> tuple[str, ...]:
+    """Scan DIR32 sites for kernel-thunk references; return plain export
+    names (e.g., 'NtClose'), deduped and sorted."""
+    body = xbe_function_carve(parsed, fn_va, fn_size)
+    sites = relocs_discover(body, fn_va)
+    seen: set[str] = set()
+    for site in sites:
+        if site.kind != RelocKind.DIR32:
+            continue
+        ordinal = relocs_kernel_ordinal_at(site.target_va, parsed)
+        if ordinal is None:
+            continue
+        name = xboxkrnl_name_get(ordinal)
+        if name is not None:
+            seen.add(name)
+    return tuple(sorted(seen))
 
 
 def _disassemble_listing(parsed: ParsedXbe, fn_va: int, size: int) -> str:

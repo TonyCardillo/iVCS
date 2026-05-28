@@ -9,9 +9,13 @@ catch a corrupted/regenerated DB.
 from src.xboxkrnl import (
     XBOXKRNL_ORDINAL_MAX,
     XBOXKRNL_ORDINAL_MIN,
+    KernelFunctionSig,
+    KernelVariableSig,
+    xboxkrnl_mangled_byte_count,
     xboxkrnl_mangled_get,
     xboxkrnl_name_get,
     xboxkrnl_ordinals_known,
+    xboxkrnl_signature_get,
 )
 
 # Known stable anchors lifted from the Cxbx-Reloaded / xbdm_gdb_bridge tables.
@@ -70,3 +74,46 @@ class TestStructuralInvariants:
             # Strip optional fastcall '@' prefix and optional '@N' suffix.
             core = mangled.lstrip("@").rsplit("@", 1)[0] if "@" in mangled.lstrip("@") else mangled.lstrip("@")
             assert core == name, f"ordinal {ordinal}: mangled {mangled!r} doesn't carry name {name!r}"
+
+
+class TestSignatureLookup:
+    def test_function_signature_resolves(self):
+        sig = xboxkrnl_signature_get("NtClose")
+        assert isinstance(sig, KernelFunctionSig)
+        assert sig.return_type == "NTSTATUS"
+        assert sig.arg_types == ("HANDLE",)
+        assert sig.varargs is False
+
+    def test_varargs_signature_marked(self):
+        sig = xboxkrnl_signature_get("DbgPrint")
+        assert isinstance(sig, KernelFunctionSig)
+        assert sig.varargs is True
+
+    def test_variable_signature_resolves(self):
+        sig = xboxkrnl_signature_get("KeTickCount")
+        assert isinstance(sig, KernelVariableSig)
+        assert sig.var_type == "volatile ULONG"
+
+    def test_unknown_name_returns_none(self):
+        assert xboxkrnl_signature_get("NotARealKernelExport") is None
+
+    def test_meta_key_is_filtered_out(self):
+        # The JSON file carries a "_meta" key for human-readable notes.
+        # It must not be exposed as a signature lookup result.
+        assert xboxkrnl_signature_get("_meta") is None
+
+
+class TestMangledByteCount:
+    def test_known_stdcall_count(self):
+        # NtClose@4 → 4 bytes popped.
+        assert xboxkrnl_mangled_byte_count("NtClose") == 4
+
+    def test_zero_arg_function(self):
+        assert xboxkrnl_mangled_byte_count("AvGetSavedDataAddress") == 0
+
+    def test_unmangled_export_returns_none(self):
+        # DbgPrint is exported without @N (variadic).
+        assert xboxkrnl_mangled_byte_count("DbgPrint") is None
+
+    def test_unknown_name_returns_none(self):
+        assert xboxkrnl_mangled_byte_count("NotARealKernelExport") is None

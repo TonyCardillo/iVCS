@@ -129,7 +129,10 @@ def _site_from_branch(instr, function_va: int, function_end: int) -> RelocSite |
 _IMAGE_ORDINAL_FLAG32 = 0x80000000
 
 
-def _kernel_import_name_at(target_va: int, parsed: ParsedXbe) -> str | None:
+def relocs_kernel_ordinal_at(target_va: int, parsed: ParsedXbe) -> int | None:
+    """Return the kernel export ordinal at this VA, or None if the VA
+    isn't a thunk-table slot. Public so callers (e.g., the launcher's
+    ctx.h composer) can resolve to a plain name without re-mangling."""
     try:
         thunk_va = xbe_kernel_thunk_address_get(parsed)
     except XbeFormatError:
@@ -151,6 +154,11 @@ def _kernel_import_name_at(target_va: int, parsed: ParsedXbe) -> str | None:
     raw = struct.unpack_from("<I", parsed.data, file_offset)[0]
     if not (raw & _IMAGE_ORDINAL_FLAG32):
         return None
-    ordinal = raw & 0x7FFFFFFF
+    return raw & 0x7FFFFFFF
 
+
+def _kernel_import_name_at(target_va: int, parsed: ParsedXbe) -> str | None:
+    ordinal = relocs_kernel_ordinal_at(target_va, parsed)
+    if ordinal is None:
+        return None
     return xboxkrnl_mangled_get(ordinal) or xboxkrnl_name_get(ordinal)
