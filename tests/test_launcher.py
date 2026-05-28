@@ -144,17 +144,19 @@ def test_callee_filter_empty():
     assert _rel32_callee_names_from_sites([], lambda v: True) == ()
 
 
-def test_compose_ctx_h_emits_callee_externs():
+def test_compose_ctx_h_lists_callee_names_in_comment():
     out = _compose_ctx_h("sub_X", "_sub_X", callee_names=("sub_AAAA0001", "sub_BBBB0002"))
-    assert "extern void sub_AAAA0001(void);" in out
-    assert "extern void sub_BBBB0002(void);" in out
-    assert "Callees:" in out
+    assert "sub_AAAA0001" in out
+    assert "sub_BBBB0002" in out
+    # No pre-declared externs — the LLM writes them with the right types.
+    assert "extern void sub_AAAA0001(void);" not in out
+    assert "extern void sub_BBBB0002(void);" not in out
 
 
 def test_compose_ctx_h_no_callees_no_extern_block():
     out = _compose_ctx_h("sub_X", "_sub_X", callee_names=())
     assert "extern void" not in out
-    assert "Callees:" not in out
+    assert "REL32 calls" not in out
 
 
 def test_compose_ctx_h_stdcall_and_callees_coexist():
@@ -164,7 +166,8 @@ def test_compose_ctx_h_stdcall_and_callees_coexist():
         callee_names=("sub_002D1D66",),
     )
     assert "int __stdcall sub_002D1D94(int);" in out
-    assert "extern void sub_002D1D66(void);" in out
+    assert "sub_002D1D66" in out
+    assert "extern void sub_002D1D66" not in out  # not pre-declared
 
 
 def test_wipe_preserves_ctx_h_even_when_caller_wants_history_gone(tmp_path):

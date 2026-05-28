@@ -237,17 +237,36 @@ def _compose_ctx_h(
             + forward + "\n"
         )
     if callee_names:
-        externs = "\n".join(f"extern void {n}(void);" for n in callee_names)
+        # Wrap the canonical names so the comment block stays readable.
+        wrapped = _wrap_names(callee_names, width=70)
         parts.append(
             "\n"
-            "/* Callees: every REL32 call/jmp this function makes points at one of\n"
-            " * these symbols. Declared as `void f(void)` because we don't know\n"
-            " * their real signatures — refine return type and args in your code\n"
-            " * AND in the matching extern here. Use these names verbatim so MSVC\n"
-            " * emits the same symbol references as the carved target.obj. */\n"
-            + externs + "\n"
+            "/* This function makes REL32 calls to the symbols below. Names are\n"
+            " * case-sensitive and zero-padded — use them VERBATIM in your code\n"
+            " * (and in any extern decls you write) so MSVC mangles each call\n"
+            " * site identically to target.obj.\n"
+            " *\n"
+            " * Declare each callee yourself with the best return type and args\n"
+            " * you can infer from the disassembly. We deliberately don't\n"
+            " * pre-declare them — a fixed `void f(void)` decl conflicts every\n"
+            " * time the LLM needs to use a return value or pass an argument.\n"
+            " *\n"
+            + wrapped
+            + " */\n"
         )
     return "".join(parts)
+
+
+def _wrap_names(names: tuple[str, ...], *, width: int) -> str:
+    """Wrap a list of comma-separated symbol names to fit a comment block."""
+    lines = [" *     "]
+    for name in names:
+        candidate = (", " if lines[-1] != " *     " else "") + name
+        if len(lines[-1]) + len(candidate) > width:
+            lines.append(" *     " + name)
+        else:
+            lines[-1] += candidate
+    return "\n".join(lines) + "\n"
 
 
 def _rel32_callee_names_from_sites(
