@@ -253,7 +253,7 @@ def xbe_functions_enumerate(parsed: ParsedXbe) -> tuple[XbeFunction, ...]:
                     fn_size = end_off - fn_start_off
                     if 1 <= fn_size <= MAX_FUNCTION_SIZE:
                         found.append(XbeFunction(
-                            name=f"sub_{fn_va:08X}", va=fn_va, size=fn_size,
+                            name=f"fn_{fn_va:08X}", va=fn_va, size=fn_size,
                         ))
                     fn_start_off = None
 

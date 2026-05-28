@@ -525,7 +525,7 @@ class TestEnumerateFunctions:
             )
         )
         fns = xbe_functions_enumerate(parsed)
-        assert fns == (XbeFunction(name="sub_00011000", va=0x00011000, size=6),)
+        assert fns == (XbeFunction(name="fn_00011000", va=0x00011000, size=6),)
 
     def test_two_functions_separated_by_int3_padding(self):
         text = FN_LEAF_RET0 + b"\xcc\xcc\xcc" + FN_FRAME_NOOP
@@ -538,8 +538,8 @@ class TestEnumerateFunctions:
         )
         fns = xbe_functions_enumerate(parsed)
         assert len(fns) == 2
-        assert fns[0] == XbeFunction(name="sub_00011000", va=0x00011000, size=6)
-        assert fns[1] == XbeFunction(name="sub_00011009", va=0x00011009, size=5)
+        assert fns[0] == XbeFunction(name="fn_00011000", va=0x00011000, size=6)
+        assert fns[1] == XbeFunction(name="fn_00011009", va=0x00011009, size=5)
 
     def test_nop_padding_between_functions(self):
         text = FN_LEAF_RET0 + b"\x90\x90" + FN_RET_ONLY
@@ -592,7 +592,7 @@ class TestEnumerateFunctions:
             )
         )
         fns = xbe_functions_enumerate(parsed)
-        assert fns == (XbeFunction(name="sub_00011000", va=0x00011000, size=1),)
+        assert fns == (XbeFunction(name="fn_00011000", va=0x00011000, size=1),)
 
     def test_skips_leading_padding(self):
         text = b"\xcc\xcc\xcc\xcc" + FN_LEAF_RET0
@@ -616,7 +616,7 @@ class TestEnumerateFunctions:
             )
         )
         fns = xbe_functions_enumerate(parsed)
-        assert fns[0].name == "sub_002D1D94"
+        assert fns[0].name == "fn_002D1D94"
 
     def test_multi_section_enumeration(self):
         text1 = FN_LEAF_RET0
@@ -633,7 +633,7 @@ class TestEnumerateFunctions:
         )
         fns = xbe_functions_enumerate(parsed)
         names = {f.name for f in fns}
-        assert names == {"sub_00011000", "sub_00020000"}
+        assert names == {"fn_00011000", "fn_00020000"}
 
     def test_back_to_back_functions_split_on_prologue(self):
         # Two functions with NO padding between them. The first ends in `ret`
@@ -649,8 +649,8 @@ class TestEnumerateFunctions:
         )
         fns = xbe_functions_enumerate(parsed)
         assert len(fns) == 2
-        assert fns[0] == XbeFunction(name="sub_00011000", va=0x00011000, size=6)
-        assert fns[1] == XbeFunction(name="sub_00011006", va=0x00011006, size=5)
+        assert fns[0] == XbeFunction(name="fn_00011000", va=0x00011000, size=6)
+        assert fns[1] == XbeFunction(name="fn_00011006", va=0x00011006, size=5)
 
     def test_back_to_back_split_when_target_of_internal_call(self):
         # Function A at 0x11000 makes a self-referential call to 0x11006
@@ -674,8 +674,8 @@ class TestEnumerateFunctions:
         )
         fns = xbe_functions_enumerate(parsed)
         assert len(fns) == 2
-        assert fns[0] == XbeFunction(name="sub_00011000", va=0x00011000, size=6)
-        assert fns[1] == XbeFunction(name="sub_00011006", va=0x00011006, size=6)
+        assert fns[0] == XbeFunction(name="fn_00011000", va=0x00011000, size=6)
+        assert fns[1] == XbeFunction(name="fn_00011006", va=0x00011006, size=6)
 
     def test_back_to_back_not_split_when_no_prologue(self):
         # Two consecutive `ret` instructions with no padding and no prologue

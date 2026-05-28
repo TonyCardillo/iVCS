@@ -28,9 +28,6 @@ from src.xbe import ParsedXbe, xbe_function_carve, xbe_load, xbe_section_contain
 
 
 _DEFAULT_CTX_H = """\
-/* Minimal stub written by the launcher when no ctx.h existed.
- * Add typedefs, externs, and forward decls as the LLM needs them,
- * then re-run; the launcher won't overwrite a hand-edited ctx.h. */
 typedef unsigned char    BYTE;
 typedef unsigned short   WORD;
 typedef unsigned long    DWORD;
@@ -229,28 +226,11 @@ def _compose_ctx_h(
     parts = [_DEFAULT_CTX_H]
     forward = _format_target_forward_decl(name, mangled)
     if forward is not None:
-        parts.append(
-            "\n"
-            "/* Forward decl pins the target's calling convention so MSVC emits the\n"
-            " * matching mangled symbol. Edit the param types here AND in your\n"
-            " * definition if you want concrete types; keep the byte sizing intact. */\n"
-            + forward + "\n"
-        )
+        parts.append("\n/* Target — pins mangling. */\n" + forward + "\n")
     if callee_names:
-        # Wrap the canonical names so the comment block stays readable.
         wrapped = _wrap_names(callee_names, width=70)
         parts.append(
-            "\n"
-            "/* This function makes REL32 calls to the symbols below. Names are\n"
-            " * case-sensitive and zero-padded — use them VERBATIM in your code\n"
-            " * (and in any extern decls you write) so MSVC mangles each call\n"
-            " * site identically to target.obj.\n"
-            " *\n"
-            " * Declare each callee yourself with the best return type and args\n"
-            " * you can infer from the disassembly. We deliberately don't\n"
-            " * pre-declare them — a fixed `void f(void)` decl conflicts every\n"
-            " * time the LLM needs to use a return value or pass an argument.\n"
-            " *\n"
+            "\n/* Callees — use these names verbatim:\n"
             + wrapped
             + " */\n"
         )
@@ -282,7 +262,7 @@ def _rel32_callee_names_from_sites(
         if not is_executable_va(site.target_va):
             continue
         seen.add(site.target_va)
-    return tuple(f"sub_{va:08X}" for va in sorted(seen))
+    return tuple(f"fn_{va:08X}" for va in sorted(seen))
 
 
 def _extract_rel32_callee_names(

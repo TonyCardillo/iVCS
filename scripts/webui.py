@@ -1154,7 +1154,7 @@ def view_decomp_index(current_path: str | None) -> str:
 
     picker = """
 <form class="inline" action="/decomp/run" method="get">
-  <input type="text" name="root" placeholder="/tmp/halo2_demo_sub_002D1D94" autofocus>
+  <input type="text" name="root" placeholder="/tmp/halo2_demo_fn_002D1D94" autofocus>
   <button type="submit">Open →</button>
 </form>
 <p class="muted" style="margin-top: 10px;">
@@ -1516,10 +1516,10 @@ def _attempt_status_labels(
 
 
 def _guess_function_name(root: Path) -> str | None:
-    # If the workspace was named like "halo2_demo_sub_002D1D94", strip the prefix.
+    # If the workspace was named like "halo2_demo_fn_002D1D94", strip the prefix.
     name = root.name
-    if "_sub_" in name:
-        return "sub_" + name.split("_sub_", 1)[1]
+    if "_fn_" in name:
+        return "fn_" + name.split("_fn_", 1)[1]
     return None
 
 
@@ -1712,7 +1712,7 @@ def _progress_filter_bar(
   <input type="hidden" name="path"      value="{html.escape(project_path_str)}">
   <input type="hidden" name="page_size" value="{page_size}">
   <label>state <select name="state">{state_options}</select></label>
-  <label>name contains <input type="text" name="q" value="{html.escape(f.get('q', ''))}" placeholder="sub_002D"></label>
+  <label>name contains <input type="text" name="q" value="{html.escape(f.get('q', ''))}" placeholder="fn_002D"></label>
   <label>size <input type="number" name="min_size" value="{html.escape(f.get('min_size', ''))}" placeholder="min" min="0">
     <span class="muted">–</span>
     <input type="number" name="max_size" value="{html.escape(f.get('max_size', ''))}" placeholder="max" min="0"></label>

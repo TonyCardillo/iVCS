@@ -25,5 +25,5 @@ class TestCarverTargetObjBuild:
             )
         )
         blob = carver_target_obj_build(parsed, fn_va, len(body), "_caller")
-        # The external "_sub_00020000" must be in the symbol table somewhere
-        assert b"_sub_00020000" in blob
+        # The external "_fn_00020000" must be in the symbol table somewhere
+        assert b"_fn_00020000" in blob

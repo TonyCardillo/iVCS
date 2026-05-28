@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """End-to-end matching-decomp demo on a small real Halo 2 function.
 
-Target: sub_002D1D94 — 23-byte stdcall(1 arg) that wraps RtlNtStatusToDosError
+Target: fn_002D1D94 — 23-byte stdcall(1 arg) that wraps RtlNtStatusToDosError
 and an internal helper. Small enough for Haiku to plausibly match; rich
 enough to exercise both the FF 15 / __imp__ kernel-call path and a REL32
 internal-call path.
@@ -27,12 +27,12 @@ from src.workspace import FunctionWorkspace  # noqa: E402
 from src.xbe import xbe_function_carve, xbe_load  # noqa: E402
 
 XBE_PATH = Path("/tmp/halo2_default.xbe")
-WORKSPACE_ROOT = Path("/tmp/halo2_demo_sub_002D1D94")
+WORKSPACE_ROOT = Path("/tmp/halo2_demo_fn_002D1D94")
 FUNCTION_VA = 0x002D1D94
-FUNCTION_NAME = "_sub_002D1D94@4"
+FUNCTION_NAME = "_fn_002D1D94@4"
 
 CTX_H = """\
-/* Minimal typedefs + externs for sub_002D1D94 — hand-rolled for the demo. */
+/* Minimal typedefs + externs for fn_002D1D94 — hand-rolled for the demo. */
 typedef unsigned long  DWORD;
 typedef long           NTSTATUS;
 
@@ -40,10 +40,10 @@ __declspec(dllimport) DWORD __stdcall RtlNtStatusToDosError(NTSTATUS Status);
 
 /* Forward decl pins the calling convention so MSVC emits the @4 mangling
  * that matches the carved target symbol. */
-DWORD __stdcall sub_002D1D94(NTSTATUS Status);
+DWORD __stdcall fn_002D1D94(NTSTATUS Status);
 
 /* Internal helper — best-guess cdecl. */
-DWORD sub_002D1D66(DWORD x);
+DWORD fn_002D1D66(DWORD x);
 """
 
 

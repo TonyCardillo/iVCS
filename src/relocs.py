@@ -87,7 +87,7 @@ def reloc_symbol_name(site: RelocSite, parsed: ParsedXbe) -> str:
 
     section = xbe_section_containing_va(parsed, site.target_va)
     if section is not None and section.is_executable:
-        return f"_sub_{site.target_va:08X}"
+        return f"_fn_{site.target_va:08X}"
     return f"_data_{site.target_va:08X}"
 
 

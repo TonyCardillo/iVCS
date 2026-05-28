@@ -119,7 +119,7 @@ class TestRelocSymbolNameRel32:
     BASE = 0x00010000
     IMAGE_SIZE = 0x00100000
 
-    def test_target_in_executable_section_is_sub_prefix(self):
+    def test_target_in_executable_section_is_fn_prefix(self):
         parsed = xbe_parse(
             build_minimal_xbe(
                 base_addr=self.BASE,
@@ -127,7 +127,7 @@ class TestRelocSymbolNameRel32:
                 sections=[(".text", SECTION_FLAG_EXECUTABLE, b"\x90" * 16, 0x00011000)],
             )
         )
-        assert reloc_symbol_name(_rel32_site(0x00011008), parsed) == "_sub_00011008"
+        assert reloc_symbol_name(_rel32_site(0x00011008), parsed) == "_fn_00011008"
 
     def test_target_in_non_executable_section_is_data_prefix(self):
         parsed = xbe_parse(
@@ -312,7 +312,7 @@ class TestRelocsResolveCombines:
         assert resolved == [
             ResolvedReloc(
                 site=RelocSite(imm_offset=1, kind=RelocKind.REL32, target_va=0x00012000),
-                symbol_name="_sub_00012000",
+                symbol_name="_fn_00012000",
             )
         ]
 
