@@ -6,6 +6,7 @@ binaries via the IVCS_* environment variables documented below.
 """
 
 import os
+import re
 import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -57,7 +58,7 @@ def compile_and_view_assembly(
         return CompileAndViewResult(
             success=False,
             attempt_number=attempt_n,
-            error=compile_out.stderr or compile_out.stdout or "compile failed (no output)",
+            error=compile_error_format(compile_out),
         )
 
     diff_result = diff_fn(workspace.target_obj, paths.obj, workspace.function_name)
@@ -127,6 +128,57 @@ def default_diff_fn(target: Path, base: Path, symbol: str) -> DiffResult:
     """IVCS_OBJDIFF_CLI (default "objdiff-cli", expected on PATH) overrides the binary."""
     cli = os.environ.get("IVCS_OBJDIFF_CLI", "objdiff-cli")
     return objdiff_run(target_obj=target, base_obj=base, symbol=symbol, cli_path=cli)
+
+
+_WINE_NOISE_RE = re.compile(
+    r"^\s*(\[mvk-|VK_|MoltenVK|GPU |pipelineCacheUUID|Metal Shading|"
+    r"\d+:err:|\d+:fixme:|model:|type:|vendorID:|deviceID:|"
+    r"supports the following|Read-Write Texture|Created VkInstance|"
+    r"The following \d+ Vulkan)",
+    re.IGNORECASE,
+)
+
+
+def _wine_noise_filter(text: str) -> str:
+    """Strip MoltenVK / Vulkan / Wine chatter from a stderr stream.
+
+    cl.exe writes diagnostics to stdout when run under Wine; Wine pollutes
+    stderr with its own startup noise. We want to drop that noise so the
+    LLM sees real compiler errors instead of pages of Vulkan extensions.
+    """
+    if not text:
+        return ""
+    kept: list[str] = []
+    for line in text.splitlines():
+        if _WINE_NOISE_RE.match(line):
+            continue
+        # Indented continuation lines that follow a Vulkan/MoltenVK block.
+        if line.startswith("\t") and kept and not kept[-1]:
+            continue
+        kept.append(line)
+    # Collapse runs of blank lines.
+    out: list[str] = []
+    for line in kept:
+        if line.strip() == "" and out and out[-1].strip() == "":
+            continue
+        out.append(line)
+    return "\n".join(out).strip()
+
+
+def compile_error_format(out: CompileOutput) -> str:
+    """Build a clean error message for the LLM from a failed compile.
+
+    cl.exe writes real errors to stdout. Wine writes its own noise to
+    stderr. Prefer stdout; append filtered stderr only if non-empty after
+    noise removal.
+    """
+    parts: list[str] = []
+    if out.stdout and out.stdout.strip():
+        parts.append(out.stdout.strip())
+    cleaned_stderr = _wine_noise_filter(out.stderr)
+    if cleaned_stderr:
+        parts.append("--- stderr ---\n" + cleaned_stderr)
+    return "\n".join(parts) or "compile failed (no output)"
 
 
 def _winepath(wine: str, unix_path: str) -> str:

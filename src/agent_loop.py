@@ -16,6 +16,7 @@ from src.compile_tool import (
     CompileFn,
     DiffFn,
     compile_and_view_assembly,
+    compile_error_format,
 )
 from src.workspace import FunctionWorkspace
 
@@ -200,7 +201,7 @@ def _baseline_compile_attempt_zero(
     result = compile_fn(paths.c, paths.obj, workspace.root)
     if not result.success:
         stderr_path = paths.c.with_suffix(".stderr")
-        stderr_path.write_text(result.stderr or result.stdout or "(no output)")
+        stderr_path.write_text(compile_error_format(result))
 
 
 def ghidra_only_run(

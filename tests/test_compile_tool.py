@@ -8,7 +8,7 @@ exercised in the recon scripts, not here.
 
 from pathlib import Path
 
-from src.compile_tool import CompileOutput, compile_and_view_assembly
+from src.compile_tool import CompileOutput, compile_and_view_assembly, compile_error_format
 from src.objdiff import (
     SYMBOL_KIND_FUNCTION,
     DiffInstruction,
@@ -236,3 +236,54 @@ class TestSymbolNotInDiff:
         )
         assert result.success is True  # compile succeeded
         assert result.match_percent is None  # but our target symbol isn't there
+
+
+class TestCompileErrorFormat:
+    def test_uses_stdout_for_cl_errors(self):
+        out = CompileOutput(
+            success=False,
+            stdout="src.c(12): error C2143: missing semicolon",
+            stderr="",
+        )
+        msg = compile_error_format(out)
+        assert "C2143" in msg
+        assert "missing semicolon" in msg
+
+    def test_strips_moltenvk_chatter_from_stderr(self):
+        moltenvk = "\n".join((
+            "[mvk-info] MoltenVK version 1.4.1",
+            "\tVK_KHR_16bit_storage v1",
+            "\tVK_KHR_8bit_storage v1",
+            "[mvk-info] GPU device:",
+            "\tmodel: Apple M4 Pro",
+            "\tvendorID: 0x106b",
+        ))
+        out = CompileOutput(success=False, stdout="src.c(1): error C2143: bad", stderr=moltenvk)
+        msg = compile_error_format(out)
+        assert "C2143" in msg
+        assert "MoltenVK" not in msg
+        assert "VK_KHR" not in msg
+        assert "Apple M4 Pro" not in msg
+
+    def test_returns_placeholder_when_both_empty(self):
+        out = CompileOutput(success=False, stdout="", stderr="")
+        assert compile_error_format(out) == "compile failed (no output)"
+
+    def test_keeps_non_noise_stderr(self):
+        out = CompileOutput(
+            success=False,
+            stdout="",
+            stderr="ld.exe: cannot find symbol _foo",
+        )
+        msg = compile_error_format(out)
+        assert "cannot find symbol" in msg
+
+    def test_filters_wine_err_lines(self):
+        out = CompileOutput(
+            success=False,
+            stdout="error C2065: undeclared identifier",
+            stderr="0114:err:kerberos:kerberos_LsaApInitializePackage no Kerberos support, expect problems",
+        )
+        msg = compile_error_format(out)
+        assert "C2065" in msg
+        assert "kerberos" not in msg.lower()
