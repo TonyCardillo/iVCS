@@ -11,11 +11,11 @@ from src.xbe import ParsedXbe, xbe_function_carve
 
 
 def carver_target_obj_build(
-    parsed: ParsedXbe,
-    function_virtual_address: int,
-    function_size: int,
-    function_name: str,
+	parsed: ParsedXbe,
+	function_virtual_address: int,
+	function_size: int,
+	function_name: str,
 ) -> bytes:
-    carved = xbe_function_carve(parsed, function_virtual_address, function_size)
-    resolved = relocs_resolve(carved, function_virtual_address, parsed)
-    return coff_object_build(carved, function_name, relocations=resolved)
+	carved = xbe_function_carve(parsed, function_virtual_address, function_size)
+	resolved = relocs_resolve(carved, function_virtual_address, parsed)
+	return coff_object_build(carved, function_name, relocations=resolved)

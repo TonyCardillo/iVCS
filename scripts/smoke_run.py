@@ -61,77 +61,80 @@ CTX_H = "/* no external dependencies for this fixture */\n"
 
 
 def check_prereqs() -> None:
-    missing = []
-    if "ANTHROPIC_API_KEY" not in os.environ:
-        missing.append("ANTHROPIC_API_KEY not set")
-    if not TARGET_OBJ.is_file():
-        missing.append(f"target.obj missing at {TARGET_OBJ}")
-    if not OBJDIFF_CLI.is_file():
-        missing.append(f"objdiff-cli missing at {OBJDIFF_CLI}")
+	missing = []
+	if "ANTHROPIC_API_KEY" not in os.environ:
+		missing.append("ANTHROPIC_API_KEY not set")
+	if not TARGET_OBJ.is_file():
+		missing.append(f"target.obj missing at {TARGET_OBJ}")
+	if not OBJDIFF_CLI.is_file():
+		missing.append(f"objdiff-cli missing at {OBJDIFF_CLI}")
 
-    msvc_dir = Path(os.environ.get("IVCS_MSVC_DIR", "/Users/entmoot/Code/msvc8.0p"))
-    if not (msvc_dir / "bin" / "cl.exe").is_file():
-        missing.append(f"widberg cl.exe not at {msvc_dir}/bin/cl.exe")
+	msvc_dir = Path(os.environ.get("IVCS_MSVC_DIR", "/Users/entmoot/Code/msvc8.0p"))
+	if not (msvc_dir / "bin" / "cl.exe").is_file():
+		missing.append(f"widberg cl.exe not at {msvc_dir}/bin/cl.exe")
 
-    import shutil
-    if shutil.which("wine") is None:
-        missing.append("wine not on PATH")
+	import shutil
 
-    if missing:
-        print("MISSING PREREQS:", file=sys.stderr)
-        for m in missing:
-            print(f"  - {m}", file=sys.stderr)
-        sys.exit(2)
+	if shutil.which("wine") is None:
+		missing.append("wine not on PATH")
+
+	if missing:
+		print("MISSING PREREQS:", file=sys.stderr)
+		for m in missing:
+			print(f"  - {m}", file=sys.stderr)
+		sys.exit(2)
 
 
 def main() -> int:
-    check_prereqs()
-    os.environ.setdefault("IVCS_OBJDIFF_CLI", str(OBJDIFF_CLI))
+	check_prereqs()
+	os.environ.setdefault("IVCS_OBJDIFF_CLI", str(OBJDIFF_CLI))
 
-    with tempfile.TemporaryDirectory(prefix="ivcs-smoke-") as tmp:
-        ws = FunctionWorkspace(root=Path(tmp), function_name="_classify")
-        ws.initialize()
-        ws.target_obj.write_bytes(TARGET_OBJ.read_bytes())
-        ws.ctx_h.write_text(CTX_H)
+	with tempfile.TemporaryDirectory(prefix="ivcs-smoke-") as tmp:
+		ws = FunctionWorkspace(root=Path(tmp), function_name="_classify")
+		ws.initialize()
+		ws.target_obj.write_bytes(TARGET_OBJ.read_bytes())
+		ws.ctx_h.write_text(CTX_H)
 
-        print(f"workspace: {ws.root}")
-        print(f"function:  {ws.function_name}")
-        print(f"target:    {ws.target_obj} ({ws.target_obj.stat().st_size} bytes)")
-        print()
+		print(f"workspace: {ws.root}")
+		print(f"function:  {ws.function_name}")
+		print(f"target:    {ws.target_obj} ({ws.target_obj.stat().st_size} bytes)")
+		print()
 
-        config = AgentConfig(
-            model="anthropic/claude-haiku-4-5",
-            api_base="",  # cloud, not local; api_base unused
-            max_iterations=8,
-            hard_timeout_seconds=180.0,
-        )
-        client = LiteLLMClient(model="anthropic/claude-haiku-4-5", api_key=os.environ["ANTHROPIC_API_KEY"])
+		config = AgentConfig(
+			model="anthropic/claude-haiku-4-5",
+			api_base="",  # cloud, not local; api_base unused
+			max_iterations=8,
+			hard_timeout_seconds=180.0,
+		)
+		client = LiteLLMClient(
+			model="anthropic/claude-haiku-4-5", api_key=os.environ["ANTHROPIC_API_KEY"]
+		)
 
-        print("running agent_loop_run...")
-        result = agent_loop_run(
-            workspace=ws,
-            target_asm=CLASSIFY_ASM,
-            config=config,
-            llm_client=client,
-            compile_fn=default_compile_fn,
-            diff_fn=default_diff_fn,
-        )
+		print("running agent_loop_run...")
+		result = agent_loop_run(
+			workspace=ws,
+			target_asm=CLASSIFY_ASM,
+			config=config,
+			llm_client=client,
+			compile_fn=default_compile_fn,
+			diff_fn=default_diff_fn,
+		)
 
-        print()
-        print("RESULT")
-        print(f"  success:               {result.success}")
-        print(f"  best_match_percent:    {result.best_match_percent}")
-        print(f"  iterations:            {result.iterations}")
-        print(f"  termination_reason:    {result.termination_reason}")
-        print()
-        if ws.best_c.is_file():
-            print(f"best.c ({ws.best_c.stat().st_size} bytes):")
-            print("-" * 60)
-            print(ws.best_c.read_text())
-            print("-" * 60)
+		print()
+		print("RESULT")
+		print(f"  success:               {result.success}")
+		print(f"  best_match_percent:    {result.best_match_percent}")
+		print(f"  iterations:            {result.iterations}")
+		print(f"  termination_reason:    {result.termination_reason}")
+		print()
+		if ws.best_c.is_file():
+			print(f"best.c ({ws.best_c.stat().st_size} bytes):")
+			print("-" * 60)
+			print(ws.best_c.read_text())
+			print("-" * 60)
 
-        return 0 if result.success else 1
+		return 0 if result.success else 1
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+	sys.exit(main())

@@ -48,80 +48,82 @@ DWORD fn_002D1D66(DWORD x);
 
 
 def main() -> int:
-    if not XBE_PATH.is_file():
-        print(f"ERROR: missing {XBE_PATH}", file=sys.stderr)
-        return 1
+	if not XBE_PATH.is_file():
+		print(f"ERROR: missing {XBE_PATH}", file=sys.stderr)
+		return 1
 
-    parsed = xbe_load(XBE_PATH)
-    fn_size = _function_size_by_scan(parsed, FUNCTION_VA)
-    print(f"target: {FUNCTION_NAME} at {FUNCTION_VA:#x}, size={fn_size} bytes")
+	parsed = xbe_load(XBE_PATH)
+	fn_size = _function_size_by_scan(parsed, FUNCTION_VA)
+	print(f"target: {FUNCTION_NAME} at {FUNCTION_VA:#x}, size={fn_size} bytes")
 
-    obj_bytes = carver_target_obj_build(parsed, FUNCTION_VA, fn_size, FUNCTION_NAME)
-    print(f"synthesized target.obj: {len(obj_bytes)} bytes")
+	obj_bytes = carver_target_obj_build(parsed, FUNCTION_VA, fn_size, FUNCTION_NAME)
+	print(f"synthesized target.obj: {len(obj_bytes)} bytes")
 
-    asm_listing = _disassemble_listing(parsed, FUNCTION_VA, fn_size)
-    print("--- disassembly ---")
-    print(asm_listing)
-    print("---")
+	asm_listing = _disassemble_listing(parsed, FUNCTION_VA, fn_size)
+	print("--- disassembly ---")
+	print(asm_listing)
+	print("---")
 
-    if WORKSPACE_ROOT.exists():
-        shutil.rmtree(WORKSPACE_ROOT)
-    workspace = FunctionWorkspace(root=WORKSPACE_ROOT, function_name=FUNCTION_NAME)
-    workspace.initialize()
-    workspace.target_obj.write_bytes(obj_bytes)
-    workspace.ctx_h.write_text(CTX_H)
-    print(f"workspace ready at {WORKSPACE_ROOT}")
+	if WORKSPACE_ROOT.exists():
+		shutil.rmtree(WORKSPACE_ROOT)
+	workspace = FunctionWorkspace(root=WORKSPACE_ROOT, function_name=FUNCTION_NAME)
+	workspace.initialize()
+	workspace.target_obj.write_bytes(obj_bytes)
+	workspace.ctx_h.write_text(CTX_H)
+	print(f"workspace ready at {WORKSPACE_ROOT}")
 
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
-        print("ERROR: ANTHROPIC_API_KEY not set", file=sys.stderr)
-        return 1
-    llm = LiteLLMClient(model="anthropic/claude-haiku-4-5", api_key=api_key)
-    config = AgentConfig(
-        model="claude-haiku-4-5",
-        api_base="",
-        max_iterations=8,
-        hard_timeout_seconds=180.0,
-    )
+	api_key = os.environ.get("ANTHROPIC_API_KEY")
+	if not api_key:
+		print("ERROR: ANTHROPIC_API_KEY not set", file=sys.stderr)
+		return 1
+	llm = LiteLLMClient(model="anthropic/claude-haiku-4-5", api_key=api_key)
+	config = AgentConfig(
+		model="claude-haiku-4-5",
+		api_base="",
+		max_iterations=8,
+		hard_timeout_seconds=180.0,
+	)
 
-    print("running agent loop...")
-    result = agent_loop_run(
-        workspace=workspace,
-        target_asm=asm_listing,
-        config=config,
-        llm_client=llm,
-        compile_fn=default_compile_fn,
-        diff_fn=default_diff_fn,
-    )
+	print("running agent loop...")
+	result = agent_loop_run(
+		workspace=workspace,
+		target_asm=asm_listing,
+		config=config,
+		llm_client=llm,
+		compile_fn=default_compile_fn,
+		diff_fn=default_diff_fn,
+	)
 
-    print("\n=== Result ===")
-    print(f"  reason       : {result.termination_reason}")
-    print(f"  success      : {result.success}")
-    print(f"  iterations   : {result.iterations}")
-    print(f"  best match % : {result.best_match_percent}")
-    if workspace.best_c.is_file():
-        print(f"\n  best.c:\n{workspace.best_c.read_text()}")
-    return 0 if result.success else 2
+	print("\n=== Result ===")
+	print(f"  reason       : {result.termination_reason}")
+	print(f"  success      : {result.success}")
+	print(f"  iterations   : {result.iterations}")
+	print(f"  best match % : {result.best_match_percent}")
+	if workspace.best_c.is_file():
+		print(f"\n  best.c:\n{workspace.best_c.read_text()}")
+	return 0 if result.success else 2
 
 
 def _function_size_by_scan(parsed, fn_va: int, max_size: int = 4096) -> int:
-    body = xbe_function_carve(parsed, fn_va, max_size)
-    md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
-    md.detail = True
-    for instr in md.disasm(body, fn_va):
-        if instr.mnemonic == "ret" or instr.mnemonic.startswith("retn"):
-            return (instr.address + instr.size) - fn_va
-    raise RuntimeError(f"no ret found within {max_size} bytes of {fn_va:#x}")
+	body = xbe_function_carve(parsed, fn_va, max_size)
+	md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
+	md.detail = True
+	for instr in md.disasm(body, fn_va):
+		if instr.mnemonic == "ret" or instr.mnemonic.startswith("retn"):
+			return (instr.address + instr.size) - fn_va
+	raise RuntimeError(f"no ret found within {max_size} bytes of {fn_va:#x}")
 
 
 def _disassemble_listing(parsed, fn_va: int, size: int) -> str:
-    body = xbe_function_carve(parsed, fn_va, size)
-    md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
-    lines = []
-    for instr in md.disasm(body, fn_va):
-        lines.append(f"{instr.address:#010x}  {instr.bytes.hex():<14} {instr.mnemonic} {instr.op_str}")
-    return "\n".join(lines)
+	body = xbe_function_carve(parsed, fn_va, size)
+	md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
+	lines = []
+	for instr in md.disasm(body, fn_va):
+		lines.append(
+			f"{instr.address:#010x}  {instr.bytes.hex():<14} {instr.mnemonic} {instr.op_str}"
+		)
+	return "\n".join(lines)
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+	raise SystemExit(main())

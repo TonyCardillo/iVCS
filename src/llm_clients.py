@@ -13,37 +13,37 @@ from litellm import completion as litellm_completion
 
 @dataclass
 class LiteLLMClient:
-    model: str
-    api_base: str | None = None
-    api_key: str = "sk-local"
+	model: str
+	api_base: str | None = None
+	api_key: str = "sk-local"
 
-    def complete(self, messages: list[dict], tools: list[dict]) -> dict:
-        kwargs = {
-            "model": self.model,
-            "messages": messages,
-            "tools": tools,
-            "api_key": self.api_key,
-        }
-        if self.api_base is not None:
-            kwargs["api_base"] = self.api_base
+	def complete(self, messages: list[dict], tools: list[dict]) -> dict:
+		kwargs = {
+			"model": self.model,
+			"messages": messages,
+			"tools": tools,
+			"api_key": self.api_key,
+		}
+		if self.api_base is not None:
+			kwargs["api_base"] = self.api_base
 
-        response = litellm_completion(**kwargs)
-        message = response.choices[0].message
+		response = litellm_completion(**kwargs)
+		message = response.choices[0].message
 
-        result: dict = {"role": "assistant", "content": getattr(message, "content", None)}
+		result: dict = {"role": "assistant", "content": getattr(message, "content", None)}
 
-        tool_calls = getattr(message, "tool_calls", None) or []
-        if tool_calls:
-            result["tool_calls"] = [
-                {
-                    "id": tc.id,
-                    "type": "function",
-                    "function": {
-                        "name": tc.function.name,
-                        "arguments": tc.function.arguments,
-                    },
-                }
-                for tc in tool_calls
-            ]
+		tool_calls = getattr(message, "tool_calls", None) or []
+		if tool_calls:
+			result["tool_calls"] = [
+				{
+					"id": tc.id,
+					"type": "function",
+					"function": {
+						"name": tc.function.name,
+						"arguments": tc.function.arguments,
+					},
+				}
+				for tc in tool_calls
+			]
 
-        return result
+		return result
