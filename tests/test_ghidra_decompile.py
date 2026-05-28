@@ -20,6 +20,7 @@ from src.ghidra_decompile import (
     ghidra_decompile_function,
     ghidra_project_ensure,
     ghidra_pseudo_c_normalize,
+    ghidra_pseudo_c_normalize_for_prompt,
 )
 
 
@@ -189,6 +190,47 @@ void FUN_002d0cf5(int param_1, undefined4 param_2)
         assert "int local_1c" in out
         assert "USHORT local_10" in out
         assert "fn_002D0979" in out
+
+
+class TestPseudoCNormalizeForPrompt:
+    def test_renames_fun_to_fn_with_uppercase_hex(self):
+        out = ghidra_pseudo_c_normalize_for_prompt(
+            "FUN_002d0cf5(); FUN_abcdef01();"
+        )
+        assert "fn_002D0CF5" in out
+        assert "fn_ABCDEF01" in out
+        assert "FUN_" not in out
+
+    def test_strips_xapilib_namespace(self):
+        out = ghidra_pseudo_c_normalize_for_prompt(
+            "XAPILIB::CloseHandle(DAT_004e0354);"
+        )
+        assert out == "CloseHandle(DAT_004e0354);"
+
+    def test_drops_globals_warning_line(self):
+        src = (
+            "/* WARNING: Globals starting with '_' overlap smaller symbols at the same address */\n"
+            "\n"
+            "void FUN_00012080(void) {}\n"
+        )
+        out = ghidra_pseudo_c_normalize_for_prompt(src)
+        assert "WARNING: Globals" not in out
+        assert "fn_00012080" in out
+
+    def test_keeps_undefined_types(self):
+        # We deliberately don't strip placeholder types; the LLM should see
+        # them as a signal that Ghidra was uncertain.
+        out = ghidra_pseudo_c_normalize_for_prompt(
+            "undefined4 x; byte y; FUN_00012080();"
+        )
+        assert "undefined4 x" in out
+        assert "byte y" in out
+        assert "fn_00012080" in out
+
+    def test_keeps_dat_and_lab_references(self):
+        # DAT_/LAB_ stay; the prompt-side cleaner doesn't try to fix them.
+        src = "x = &DAT_004618c8; goto LAB_002d0d7c;"
+        assert ghidra_pseudo_c_normalize_for_prompt(src) == src
 
 
 class TestConfigFromEnv:

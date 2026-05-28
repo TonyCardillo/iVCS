@@ -302,7 +302,9 @@ class TestGhidraWarmstartInSystemPrompt:
         )
         prompt = _system_prompt_build(ws, "ret")
         assert "Ghidra warm-start draft" in prompt
-        assert "FUN_002d0cf5" in prompt
+        # FUN_ renamed to fn_ in the prompt copy so callee names match ctx.h.
+        assert "fn_002D0CF5" in prompt
+        assert "FUN_002d0cf5" not in prompt
         # Fenced as C so the model treats it as code.
         assert "```c" in prompt
 
@@ -314,6 +316,28 @@ class TestGhidraWarmstartInSystemPrompt:
         prompt = _system_prompt_build(ws, "ret")
         # ctx.h before warm-start: model sees types before the draft that uses them.
         assert prompt.index("CTX_MARKER") < prompt.index("WARMSTART_MARKER")
+
+    def test_target_asm_is_code_fenced(self, tmp_path):
+        from src.agent_loop import _system_prompt_build
+        ws = _make_workspace(tmp_path)
+        prompt = _system_prompt_build(ws, "0x00012080  c3  ret")
+        # asm should appear inside a ```asm fence so the model treats it
+        # as code and so markdown-aware viewers don't reinterpret it.
+        assert "```asm" in prompt
+        asm_start = prompt.index("```asm")
+        asm_end = prompt.index("```", asm_start + 6)
+        between = prompt[asm_start:asm_end]
+        assert "ret" in between
+
+    def test_ctx_h_is_code_fenced(self, tmp_path):
+        from src.agent_loop import _system_prompt_build
+        ws = _make_workspace(tmp_path)
+        ws.ctx_h.write_text("typedef int MARKER;\n")
+        prompt = _system_prompt_build(ws, "ret")
+        # ctx.h section gets a ```c fence.
+        ctx_idx = prompt.index("Context header")
+        fence_idx = prompt.index("```c", ctx_idx)
+        assert "MARKER" in prompt[fence_idx:fence_idx + 200]
 
 
 class TestGhidraOnlyRun:

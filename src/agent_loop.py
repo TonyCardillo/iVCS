@@ -18,6 +18,7 @@ from src.compile_tool import (
     compile_and_view_assembly,
     compile_error_format,
 )
+from src.ghidra_decompile import ghidra_pseudo_c_normalize_for_prompt
 from src.workspace import FunctionWorkspace
 
 COMPILE_TOOL_NAME = "compile_and_view_assembly"
@@ -287,17 +288,21 @@ The tool returns per-instruction diff rows with these kinds:
 Symbol: {workspace.function_name}
 
 # Target assembly
+```asm
 {target_asm}
+```
 
 # Context header (ctx.h)
+```c
 {ctx_h}
+```
 {warmstart}"""
 
 
 def _warmstart_section(workspace: FunctionWorkspace) -> str:
     if not workspace.ghidra_warmstart.is_file():
         return ""
-    draft = workspace.ghidra_warmstart.read_text()
+    draft = ghidra_pseudo_c_normalize_for_prompt(workspace.ghidra_warmstart.read_text())
     return f"""
 # Ghidra warm-start draft (machine-generated; may be wrong)
 A Ghidra headless decompile of the target function. Use it as a starting point: \

@@ -238,6 +238,28 @@ def ghidra_pseudo_c_normalize(c: str) -> str:
     return c
 
 
+_PSEUDO_C_WARNING_LINE_RE = re.compile(
+    r"^/\* WARNING: Globals starting with '_'[^\n]*\n",
+    re.MULTILINE,
+)
+
+
+def ghidra_pseudo_c_normalize_for_prompt(c: str) -> str:
+    """Light cleanup suitable for the LLM system prompt.
+
+    Renames FUN_xxxxxxxx → fn_XXXXXXXX so callees match ctx.h's declared
+    names. Strips XAPILIB:: (C++ namespace doesn't parse as C). Drops the
+    noisy "Globals starting with '_'" warning Ghidra emits.
+
+    Keeps `undefined4`/`byte`/etc. unchanged — those are the LLM's signal
+    that Ghidra was uncertain about the type.
+    """
+    c = _PSEUDO_C_FUN_PATTERN.sub(lambda m: f"fn_{m.group(1).upper()}", c)
+    c = c.replace("XAPILIB::", "")
+    c = _PSEUDO_C_WARNING_LINE_RE.sub("", c)
+    return c
+
+
 __all__ = [
     "AnalyzeHeadlessFn",
     "GhidraConfig",
@@ -246,4 +268,5 @@ __all__ = [
     "ghidra_decompile_function",
     "ghidra_project_ensure",
     "ghidra_pseudo_c_normalize",
+    "ghidra_pseudo_c_normalize_for_prompt",
 ]
