@@ -46,10 +46,10 @@ class TestAttemptPaths:
         paths = ws.attempt_paths(1234)
         assert paths.c.name == "1234.c"
 
-    def test_attempt_paths_zero_not_allowed(self, tmp_path):
+    def test_attempt_paths_zero_allowed_for_baselines(self, tmp_path):
         ws = FunctionWorkspace(root=tmp_path, function_name="_Foo@8")
-        with pytest.raises(ValueError):
-            ws.attempt_paths(0)
+        paths = ws.attempt_paths(0)
+        assert paths.c == tmp_path / "history" / "0000.c"
 
     def test_attempt_paths_negative_not_allowed(self, tmp_path):
         ws = FunctionWorkspace(root=tmp_path, function_name="_Foo@8")

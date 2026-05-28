@@ -235,12 +235,25 @@ class TestWarmstartMirror:
         _mirror_warmstart_as_attempt_zero(ws)
         assert not (ws.history_dir / "0000.c").exists()
 
-    def test_writes_attempt_zero_when_warmstart_exists(self, tmp_path):
+    def test_writes_attempt_zero_with_ctx_h_prepended(self, tmp_path):
         ws = FunctionWorkspace(root=tmp_path / "fn", function_name="_fn_X")
         ws.initialize()
-        ws.ghidra_warmstart.write_text("/* Ghidra draft */\nvoid fn_X(void){}\n")
+        ws.ctx_h.write_text("typedef int TYPE;\n")
+        ws.ghidra_warmstart.write_text("void fn_X(void){}\n")
         _mirror_warmstart_as_attempt_zero(ws)
-        assert (ws.history_dir / "0000.c").read_text() == "/* Ghidra draft */\nvoid fn_X(void){}\n"
+        # Same shape as LLM attempts: ctx.h then the function body.
+        zero = (ws.history_dir / "0000.c").read_text()
+        assert "typedef int TYPE;" in zero
+        assert "void fn_X(void){}" in zero
+        assert zero.index("typedef") < zero.index("void fn_X")
+
+    def test_attempt_zero_uses_canonical_path(self, tmp_path):
+        ws = FunctionWorkspace(root=tmp_path / "fn", function_name="_fn_X")
+        ws.initialize()
+        ws.ghidra_warmstart.write_text("void fn_X(void){}\n")
+        _mirror_warmstart_as_attempt_zero(ws)
+        # attempt_paths(0).c is the canonical destination.
+        assert ws.attempt_paths(0).c.is_file()
 
     def test_idempotent_does_not_overwrite_existing_zero(self, tmp_path):
         ws = FunctionWorkspace(root=tmp_path / "fn", function_name="_fn_X")

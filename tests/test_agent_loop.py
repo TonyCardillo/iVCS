@@ -15,6 +15,7 @@ from src.agent_loop import (
     agent_loop_run,
     assistant_text,
     assistant_tool_call,
+    ghidra_only_run,
 )
 from src.compile_tool import CompileOutput
 from src.objdiff import (
@@ -233,6 +234,59 @@ class TestBestSoFar:
         assert ws.best_c.read_text() == c_codes[0]
 
 
+class TestBaselineCompileAttemptZero:
+    def test_noop_when_no_attempt_zero_c(self, tmp_path):
+        from src.agent_loop import _baseline_compile_attempt_zero
+        ws = _make_workspace(tmp_path)
+        calls = {"n": 0}
+
+        def fake_compile(c, o, root):
+            calls["n"] += 1
+            return CompileOutput(success=True)
+
+        _baseline_compile_attempt_zero(ws, compile_fn=fake_compile)
+        assert calls["n"] == 0
+
+    def test_skips_if_obj_already_present(self, tmp_path):
+        from src.agent_loop import _baseline_compile_attempt_zero
+        ws = _make_workspace(tmp_path)
+        ws.attempt_paths(0).c.write_text("// already compiled")
+        ws.attempt_paths(0).obj.write_bytes(b"\x90" * 8)
+        calls = {"n": 0}
+
+        def fake_compile(c, o, root):
+            calls["n"] += 1
+            return CompileOutput(success=True)
+
+        _baseline_compile_attempt_zero(ws, compile_fn=fake_compile)
+        assert calls["n"] == 0
+
+    def test_compiles_when_c_present_no_obj(self, tmp_path):
+        from src.agent_loop import _baseline_compile_attempt_zero
+        ws = _make_workspace(tmp_path)
+        ws.attempt_paths(0).c.write_text("void fn(void){}")
+
+        def fake_compile(c, o, root):
+            o.write_bytes(b"\x90" * 4)
+            return CompileOutput(success=True)
+
+        _baseline_compile_attempt_zero(ws, compile_fn=fake_compile)
+        assert ws.attempt_paths(0).obj.is_file()
+
+    def test_persists_stderr_on_compile_failure(self, tmp_path):
+        from src.agent_loop import _baseline_compile_attempt_zero
+        ws = _make_workspace(tmp_path)
+        ws.attempt_paths(0).c.write_text("garbage")
+
+        def fake_compile(c, o, root):
+            return CompileOutput(success=False, stderr="error C2143: oh no")
+
+        _baseline_compile_attempt_zero(ws, compile_fn=fake_compile)
+        stderr_path = ws.attempt_paths(0).c.with_suffix(".stderr")
+        assert stderr_path.is_file()
+        assert "C2143" in stderr_path.read_text()
+
+
 class TestGhidraWarmstartInSystemPrompt:
     def test_section_omitted_when_warmstart_absent(self, tmp_path):
         from src.agent_loop import _system_prompt_build
@@ -260,6 +314,64 @@ class TestGhidraWarmstartInSystemPrompt:
         prompt = _system_prompt_build(ws, "ret")
         # ctx.h before warm-start: model sees types before the draft that uses them.
         assert prompt.index("CTX_MARKER") < prompt.index("WARMSTART_MARKER")
+
+
+class TestGhidraOnlyRun:
+    def test_returns_ghidra_unavailable_when_no_attempt_zero(self, tmp_path):
+        ws = _make_workspace(tmp_path)
+        result = ghidra_only_run(
+            workspace=ws,
+            compile_fn=_compile_ok,
+            diff_fn=_scripted_diff(),
+        )
+        assert result.success is False
+        assert result.termination_reason == "ghidra_unavailable"
+        assert result.best_match_percent is None
+        data = json.loads(ws.result_json.read_text())
+        assert data["model"] == "ghidra"
+
+    def test_returns_compile_failed_when_baseline_doesnt_compile(self, tmp_path):
+        ws = _make_workspace(tmp_path)
+        ws.attempt_paths(0).c.write_text("garbage")
+        result = ghidra_only_run(
+            workspace=ws,
+            compile_fn=_compile_fail,
+            diff_fn=_scripted_diff(),
+        )
+        assert result.termination_reason == "compile_failed"
+        assert result.best_match_percent is None
+        data = json.loads(ws.result_json.read_text())
+        assert data["model"] == "ghidra"
+
+    def test_records_match_percent_for_partial_baseline(self, tmp_path):
+        ws = _make_workspace(tmp_path, fn_name="_classify")
+        ws.attempt_paths(0).c.write_text("int classify(int x){return x;}\n")
+        result = ghidra_only_run(
+            workspace=ws,
+            compile_fn=_compile_ok,
+            diff_fn=_scripted_diff(43.7),
+        )
+        assert result.termination_reason == "ghidra_only"
+        assert result.best_match_percent == 43.7
+        assert result.success is False
+        data = json.loads(ws.result_json.read_text())
+        assert data["best_match_percent"] == 43.7
+        assert data["model"] == "ghidra"
+
+    def test_full_match_baseline_reports_success(self, tmp_path):
+        ws = _make_workspace(tmp_path, fn_name="_classify")
+        ws.attempt_paths(0).c.write_text("// matches perfectly\n")
+        ws.ghidra_warmstart.write_text("// matches perfectly\n")
+        result = ghidra_only_run(
+            workspace=ws,
+            compile_fn=_compile_ok,
+            diff_fn=_scripted_diff(100.0),
+        )
+        assert result.success is True
+        assert result.termination_reason == "matched"
+        assert result.best_match_percent == 100.0
+        # best.c gets written so the aggregator counts this as a real match.
+        assert ws.best_c.is_file()
 
 
 class TestToollessResponse:

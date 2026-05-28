@@ -59,8 +59,8 @@ class FunctionWorkspace:
         return self.root / "ghidra_warmstart.c"
 
     def attempt_paths(self, n: int) -> AttemptPaths:
-        if n < 1:
-            raise ValueError(f"attempt number must be >= 1, got {n}")
+        if n < 0:
+            raise ValueError(f"attempt number must be >= 0, got {n}")
         stem = f"{n:04d}"
         return AttemptPaths(
             c=self.history_dir / f"{stem}.c",

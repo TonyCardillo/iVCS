@@ -17,7 +17,7 @@ from pathlib import Path
 
 import capstone
 
-from src.agent_loop import AgentConfig, agent_loop_run
+from src.agent_loop import AgentConfig, agent_loop_run, ghidra_only_run
 from src.carver import carver_target_obj_build
 from src.compile_tool import default_compile_fn, default_diff_fn
 from src.ghidra_decompile import (
@@ -111,9 +111,15 @@ def launch_decomp_job(
     mutates as the run progresses; readers see state, iterations, and
     best_match_percent advance live.
     """
-    key = api_key or os.environ.get("ANTHROPIC_API_KEY")
-    if not key:
-        raise RuntimeError("ANTHROPIC_API_KEY not set in environment")
+    is_ghidra_only = (model == "ghidra")
+    if is_ghidra_only:
+        # Ghidra-only runs need the warm-start to have anything to compile.
+        use_ghidra_warmstart = True
+        key = None
+    else:
+        key = api_key or os.environ.get("ANTHROPIC_API_KEY")
+        if not key:
+            raise RuntimeError("ANTHROPIC_API_KEY not set in environment")
 
     parsed = parsed_xbe if parsed_xbe is not None else xbe_load(project.xbe_path)
 
@@ -162,21 +168,28 @@ def launch_decomp_job(
         job.state = "running"
         job.started_at = time.time()
         try:
-            llm = LiteLLMClient(model=f"anthropic/{model}", api_key=key)
-            config = AgentConfig(
-                model=model,
-                api_base="",
-                max_iterations=max_iterations,
-                hard_timeout_seconds=hard_timeout_seconds,
-            )
-            result = agent_loop_run(
-                workspace=workspace,
-                target_asm=target_asm,
-                config=config,
-                llm_client=llm,
-                compile_fn=default_compile_fn,
-                diff_fn=default_diff_fn,
-            )
+            if is_ghidra_only:
+                result = ghidra_only_run(
+                    workspace=workspace,
+                    compile_fn=default_compile_fn,
+                    diff_fn=default_diff_fn,
+                )
+            else:
+                llm = LiteLLMClient(model=f"anthropic/{model}", api_key=key)
+                config = AgentConfig(
+                    model=model,
+                    api_base="",
+                    max_iterations=max_iterations,
+                    hard_timeout_seconds=hard_timeout_seconds,
+                )
+                result = agent_loop_run(
+                    workspace=workspace,
+                    target_asm=target_asm,
+                    config=config,
+                    llm_client=llm,
+                    compile_fn=default_compile_fn,
+                    diff_fn=default_diff_fn,
+                )
             job.iterations_completed = result.iterations
             job.best_match_percent = result.best_match_percent
             job.termination_reason = result.termination_reason
@@ -194,13 +207,18 @@ def launch_decomp_job(
 
 
 def _mirror_warmstart_as_attempt_zero(workspace: FunctionWorkspace) -> None:
-    """Surface the Ghidra draft on the run page as attempt 0, idempotently."""
+    """Write ghidra_warmstart.c as 0000.c with ctx.h prepended.
+
+    Same shape as LLM-produced attempts so the agent loop's startup-baseline
+    compile+diff can treat it identically.
+    """
     if not workspace.ghidra_warmstart.is_file():
         return
-    target = workspace.history_dir / "0000.c"
+    target = workspace.attempt_paths(0).c
     if target.is_file():
         return
-    target.write_text(workspace.ghidra_warmstart.read_text())
+    ctx = workspace.ctx_h.read_text() if workspace.ctx_h.is_file() else ""
+    target.write_text(ctx + "\n" + workspace.ghidra_warmstart.read_text())
 
 
 def _wipe_workspace_history(workspace: FunctionWorkspace) -> None:

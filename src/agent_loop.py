@@ -121,6 +121,7 @@ def agent_loop_run(
     diff_fn: DiffFn,
 ) -> AgentResult:
     workspace.validate_inputs()
+    _baseline_compile_attempt_zero(workspace, compile_fn=compile_fn)
 
     messages: list[dict] = [
         {"role": "system", "content": _system_prompt_build(workspace, target_asm)},
@@ -182,6 +183,69 @@ def agent_loop_run(
             })
 
     return _finalize(workspace, "budget_exhausted", best_match, iterations, model=config.model)
+
+
+def _baseline_compile_attempt_zero(
+    workspace: FunctionWorkspace, *, compile_fn: CompileFn
+) -> None:
+    """Compile the Ghidra warm-start as attempt 0 so its match% acts as a baseline.
+
+    The webui lazily derives 0000.diff.json from 0000.obj on first render; we
+    only need to ensure 0000.obj exists. On compile failure, persist stderr
+    next to 0000.c so the attempt view can show the actual cl.exe error.
+    """
+    paths = workspace.attempt_paths(0)
+    if not paths.c.is_file() or paths.obj.is_file():
+        return
+    result = compile_fn(paths.c, paths.obj, workspace.root)
+    if not result.success:
+        stderr_path = paths.c.with_suffix(".stderr")
+        stderr_path.write_text(result.stderr or result.stdout or "(no output)")
+
+
+def ghidra_only_run(
+    workspace: FunctionWorkspace,
+    *,
+    compile_fn: CompileFn,
+    diff_fn: DiffFn,
+) -> AgentResult:
+    """Compile + diff attempt 0 only; no LLM. Writes result.json with model='ghidra'.
+
+    Termination reasons:
+    - 'ghidra_only': baseline compiled and diffed (best_match_percent set)
+    - 'compile_failed': baseline compile failed (best_match_percent = None)
+    - 'ghidra_unavailable': no 0000.c on disk (warm-start didn't run)
+    """
+    workspace.validate_inputs()
+    paths = workspace.attempt_paths(0)
+
+    if not paths.c.is_file():
+        return _finalize(workspace, "ghidra_unavailable", None, 0, model="ghidra")
+
+    _baseline_compile_attempt_zero(workspace, compile_fn=compile_fn)
+    if not paths.obj.is_file():
+        return _finalize(workspace, "compile_failed", None, 0, model="ghidra")
+
+    diff = diff_fn(workspace.target_obj, paths.obj, workspace.function_name)
+    match: float | None = None
+    for symbol in diff.function_symbols("left"):
+        if symbol.name == workspace.function_name:
+            match = symbol.match_percent
+            break
+    if match is None:
+        for symbol in diff.function_symbols("right"):
+            if symbol.name == workspace.function_name:
+                match = symbol.match_percent
+                break
+
+    if match == 100.0:
+        # Surface as a "matched" success so the aggregator counts it.
+        return _finalize(
+            workspace, "matched", match, 0,
+            best_c_code=workspace.ghidra_warmstart.read_text() if workspace.ghidra_warmstart.is_file() else None,
+            model="ghidra",
+        )
+    return _finalize(workspace, "ghidra_only", match, 0, model="ghidra")
 
 
 def _system_prompt_build(workspace: FunctionWorkspace, target_asm: str) -> str:
@@ -349,4 +413,5 @@ __all__ = [
     "agent_loop_run",
     "assistant_text",
     "assistant_tool_call",
+    "ghidra_only_run",
 ]
