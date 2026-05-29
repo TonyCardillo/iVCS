@@ -1550,7 +1550,7 @@ def _attempt_status_labels(attempt: dict, *, is_in_flight: bool) -> tuple[str | 
 
 
 def _guess_function_name(root: Path) -> str | None:
-	# If the workspace was named like "halo2_demo_fn_002D1D94", strip the prefix.
+	# If the workspace was named like "<prefix>_fn_002D1D94", recover "fn_002D1D94".
 	name = root.name
 	if "_fn_" in name:
 		return "fn_" + name.split("_fn_", 1)[1]

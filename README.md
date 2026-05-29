@@ -53,13 +53,8 @@ pip install -r requirements.txt
 # 2. Run the test suite
 pytest
 
-# 3. End-to-end demo on a real Halo 2 function (requires Wine + XDK 5849 cl.exe + ANTHROPIC_API_KEY)
-# Place a Halo 2 default.xbe at /tmp/halo2_default.xbe first.
-IVCS_MSVC_DIR=/path/to/xdk5849-vc71 \
-IVCS_WINE=wine \
-IVCS_OBJDIFF_CLI=$(pwd)/recon/objdiff-smoke/objdiff-cli \
-ANTHROPIC_API_KEY=sk-ant-... \
-python scripts/halo2_demo.py
+# 3. End-to-end agent-loop demo (requires Wine + XDK 5849 cl.exe; no XBE needed)
+ANTHROPIC_API_KEY=sk-ant-... python scripts/smoke_run.py
 ```
 
 Environment:
@@ -89,7 +84,6 @@ tests/
 scripts/
   smoke_run.py      End-to-end agent loop against the bundled objdiff-smoke fixture (no XBE needed)
   halo2_sanity.py   End-to-end pipeline diagnostic against a real Halo 2 XBE
-  halo2_demo.py     Full carve → workspace → agent loop run
   webui.py          Local web UI for inspecting an XBE (sections, hex, disassembly, kernel ordinals)
 recon/objdiff-smoke/
                     Real MSVC-emitted .obj fixtures + a bundled objdiff-cli
