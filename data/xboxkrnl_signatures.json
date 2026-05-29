@@ -78,8 +78,8 @@
   "NtClose":                          { "return": "NTSTATUS", "args": ["HANDLE"] },
   "NtCreateFile":                     { "return": "NTSTATUS", "args": ["PHANDLE", "ACCESS_MASK", "POBJECT_ATTRIBUTES", "PIO_STATUS_BLOCK", "PLARGE_INTEGER", "ULONG", "ULONG", "ULONG", "ULONG"] },
   "NtOpenFile":                       { "return": "NTSTATUS", "args": ["PHANDLE", "ACCESS_MASK", "POBJECT_ATTRIBUTES", "PIO_STATUS_BLOCK", "ULONG", "ULONG"] },
-  "NtReadFile":                       { "return": "NTSTATUS", "args": ["HANDLE", "HANDLE", "PVOID", "PVOID", "PIO_STATUS_BLOCK", "PVOID", "ULONG", "PLARGE_INTEGER", "PULONG"] },
-  "NtWriteFile":                      { "return": "NTSTATUS", "args": ["HANDLE", "HANDLE", "PVOID", "PVOID", "PIO_STATUS_BLOCK", "PVOID", "ULONG", "PLARGE_INTEGER", "PULONG"] },
+  "NtReadFile":                       { "return": "NTSTATUS", "args": ["HANDLE", "HANDLE", "PVOID", "PVOID", "PIO_STATUS_BLOCK", "PVOID", "ULONG", "PLARGE_INTEGER"] },
+  "NtWriteFile":                      { "return": "NTSTATUS", "args": ["HANDLE", "HANDLE", "PVOID", "PVOID", "PIO_STATUS_BLOCK", "PVOID", "ULONG", "PLARGE_INTEGER"] },
   "NtQueryInformationFile":           { "return": "NTSTATUS", "args": ["HANDLE", "PIO_STATUS_BLOCK", "PVOID", "ULONG", "ULONG"] },
   "NtSetInformationFile":             { "return": "NTSTATUS", "args": ["HANDLE", "PIO_STATUS_BLOCK", "PVOID", "ULONG", "ULONG"] },
   "NtQueryVirtualMemory":             { "return": "NTSTATUS", "args": ["PVOID", "PVOID"] },
@@ -88,12 +88,12 @@
   "NtYieldExecution":                 { "return": "void",     "args": [] },
 
   "ObReferenceObjectByHandle":        { "return": "NTSTATUS", "args": ["HANDLE", "PVOID", "PVOID"] },
-  "ObReferenceObjectByName":          { "return": "NTSTATUS", "args": ["PVOID", "ULONG", "PVOID", "PVOID"] },
+  "ObReferenceObjectByName":          { "return": "NTSTATUS", "args": ["PVOID", "ULONG", "PVOID", "PVOID", "PVOID"] },
   "ObfDereferenceObject":             { "return": "void",     "args": ["PVOID"] },
   "ObfReferenceObject":               { "return": "void",     "args": ["PVOID"] },
 
   "PsCreateSystemThread":             { "return": "NTSTATUS", "args": ["PHANDLE", "PVOID", "PVOID", "PVOID", "BOOL"] },
-  "PsCreateSystemThreadEx":           { "return": "NTSTATUS", "args": ["PHANDLE", "ULONG", "ULONG", "ULONG", "PVOID", "PVOID", "BOOL", "BOOL", "PVOID"] },
+  "PsCreateSystemThreadEx":           { "return": "NTSTATUS", "args": ["PHANDLE", "ULONG", "ULONG", "ULONG", "PULONG", "PVOID", "PVOID", "BOOL", "BOOL", "PVOID"] },
   "PsTerminateSystemThread":          { "return": "void",     "args": ["NTSTATUS"] },
   "PsQueryStatistics":                { "return": "NTSTATUS", "args": ["PVOID"] },
 

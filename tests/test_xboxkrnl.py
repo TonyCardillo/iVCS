@@ -7,6 +7,7 @@ catch a corrupted/regenerated DB.
 """
 
 from src.xboxkrnl import (
+	_SIGNATURES,
 	XBOXKRNL_ORDINAL_MAX,
 	XBOXKRNL_ORDINAL_MIN,
 	KernelFunctionSig,
@@ -17,6 +18,14 @@ from src.xboxkrnl import (
 	xboxkrnl_ordinals_known,
 	xboxkrnl_signature_get,
 )
+
+# Stack-arg byte sizes for stdcall @N accounting. Everything is a 4-byte slot
+# except the 64-bit-by-value types.
+_ARG_BYTES_8 = {"LARGE_INTEGER", "ULARGE_INTEGER", "ULONGLONG", "DWORD64", "__int64", "LONGLONG"}
+
+
+def _signature_arg_bytes(arg_types: tuple[str, ...]) -> int:
+	return sum(8 if t in _ARG_BYTES_8 else 4 for t in arg_types)
 
 # Known stable anchors lifted from the Cxbx-Reloaded / xbdm_gdb_bridge tables.
 # These ordinals have been published consistently for years.
@@ -123,3 +132,21 @@ class TestMangledByteCount:
 
 	def test_unknown_name_returns_none(self):
 		assert xboxkrnl_mangled_byte_count("NotARealKernelExport") is None
+
+
+class TestSignatureExportConsistency:
+	def test_function_signature_arg_bytes_match_export_mangling(self):
+		# A stdcall signature whose args don't sum to the export's @N would make
+		# ctx.h declare __imp__Name@<wrong>, mismatching target.obj's relocation
+		# and silently breaking that kernel call site. Enforce agreement.
+		bad = []
+		for name, sig in _SIGNATURES.items():
+			if name == "_meta" or not isinstance(sig, KernelFunctionSig) or sig.varargs:
+				continue
+			at = xboxkrnl_mangled_byte_count(name)
+			if at is None:
+				continue  # export not mangled with @N (e.g. variadic/cdecl) — can't check
+			implied = _signature_arg_bytes(sig.arg_types)
+			if implied != at:
+				bad.append(f"{name}: sig @{implied} vs export @{at}")
+		assert not bad, "signature arg-bytes disagree with export @N: " + "; ".join(bad)
