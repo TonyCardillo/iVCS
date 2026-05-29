@@ -85,11 +85,12 @@ def _function_match_percent(diff: DiffResult, function_name: str) -> float | Non
 def default_compile_fn(c_source: Path, out_obj: Path, workspace_root: Path) -> CompileOutput:
 	"""Spawn XDK 5849's cl.exe 13.10.3077 (VC++ 7.1) under Wine.
 
-	IVCS_MSVC_DIR (default /Users/entmoot/Code/xdk5849-vc71) and IVCS_WINE
+	IVCS_MSVC_DIR (default <repo>/compilers/xdk5849-vc71) and IVCS_WINE
 	(default "wine") override the toolchain location. The layout expected
 	under IVCS_MSVC_DIR is `bin/`, `include/`, `lib/`.
 	"""
-	msvc_dir = Path(os.environ.get("IVCS_MSVC_DIR", "/Users/entmoot/Code/xdk5849-vc71"))
+	default_msvc_dir = Path(__file__).parent.parent / "compilers" / "xdk5849-vc71"
+	msvc_dir = Path(os.environ.get("IVCS_MSVC_DIR", str(default_msvc_dir)))
 	wine = os.environ.get("IVCS_WINE", "wine")
 
 	msvc_w = _winepath(wine, str(msvc_dir))

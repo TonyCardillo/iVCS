@@ -108,3 +108,7 @@ recon/**/*.ilk
 
 # Per-user project workspaces (manifest + decomp attempts derived from a user's XBE)
 projects/
+
+# Vendored toolchains (large third-party binaries; install locally per docs)
+compilers/
+tools/

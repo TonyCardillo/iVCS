@@ -65,8 +65,8 @@ python scripts/halo2_demo.py
 Environment:
 
 | variable | purpose | default |
-|---|---|---|
-| `IVCS_MSVC_DIR` | Root of the XDK 5849 VC7.1 toolchain (must contain `bin/cl.exe`). Layout: `bin/`, `include/`, `lib/`. | `/Users/entmoot/Code/xdk5849-vc71` |
+| --- | --- | --- |
+| `IVCS_MSVC_DIR` | Root of the XDK 5849 VC7.1 toolchain (must contain `bin/cl.exe`). Layout: `bin/`, `include/`, `lib/`. | `<repo>/compilers/xdk5849-vc71` |
 | `IVCS_WINE` | Wine binary to invoke `cl.exe` with. | `wine` (on PATH) |
 | `IVCS_OBJDIFF_CLI` | Path to the `objdiff-cli` binary. | `objdiff-cli` (on PATH) |
 
@@ -95,6 +95,12 @@ recon/objdiff-smoke/
                     Real MSVC-emitted .obj fixtures + a bundled objdiff-cli
 data/xboxkrnl_ordinals.json
                     Source of xboxkrnl exports
+compilers/xdk5849-vc71/
+                    XDK 5849 VC7.1 toolchain (cl.exe). Vendored, gitignored;
+                    default IVCS_MSVC_DIR. Install locally.
+tools/ghidra_12.0.3_PUBLIC/
+                    Ghidra + XBE loader for warm-start decompilation.
+                    Vendored, gitignored; default IVCS_GHIDRA_HOME. See docs/ghidra_setup.md.
 ```
 
 ## Why Xbox

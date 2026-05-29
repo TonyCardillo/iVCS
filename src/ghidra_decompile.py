@@ -66,10 +66,11 @@ def ghidra_config_from_env(xbe_path: Path) -> GhidraConfig:
 	their own analyzed project under /tmp/ghidra-projects/ instead of
 	sharing one and re-analyzing on every switch.
 	"""
+	default_ghidra_home = Path(__file__).parent.parent / "tools" / "ghidra_12.0.3_PUBLIC"
 	home = Path(
 		os.environ.get(
 			"IVCS_GHIDRA_HOME",
-			str(Path.home() / "Downloads" / "ghidra_12.0.3_PUBLIC"),
+			str(default_ghidra_home),
 		)
 	)
 	project_dir = Path(os.environ.get("IVCS_GHIDRA_PROJECT_DIR", "/tmp/ghidra-projects"))  # noqa: S108

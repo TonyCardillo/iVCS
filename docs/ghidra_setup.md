@@ -26,7 +26,7 @@ Plan: pick a single Ghidra release that the XBE loader has a build for,
 and pin that pair. Record both versions in this file when chosen.
 
 | component | pinned version | source |
-|---|---|---|
+| --- | --- | --- |
 | Ghidra | 12.0.3_PUBLIC | <https://github.com/NationalSecurityAgency/ghidra/releases> |
 | XBE loader | `ghidra_12.0.3_PUBLIC_20260225_ghidra-xbe.zip` | <https://github.com/XboxDev/ghidra-xbe/releases/tag/build-202602250354> |
 | Java | 21+ | Temurin via Homebrew: `brew install --cask temurin@21` |
@@ -39,8 +39,9 @@ downloaded a different Ghidra, swap to 12.0.3 to match the loader.
 
 1. Install Java 21+ (Temurin via Homebrew works: `brew install --cask temurin@21`).
 2. Download a Ghidra release from
-   <https://github.com/NationalSecurityAgency/ghidra/releases>. Unzip
-   somewhere stable, e.g. `~/Tools/ghidra_<version>`.
+   <https://github.com/NationalSecurityAgency/ghidra/releases>. Unzip it
+   into the repo's `tools/` folder, e.g. `tools/ghidra_12.0.3_PUBLIC`
+   — that path is the default `IVCS_GHIDRA_HOME`.
 3. Locate an XBE loader extension built for the exact Ghidra version
    chosen in step 2. Save the loader `.zip` next to Ghidra.
 4. Install the loader: open Ghidra, `File > Install Extensions`, green
@@ -68,7 +69,7 @@ Once GUI import succeeds, confirm headless works (this is what our wrapper
 will call):
 
 ```bash
-~/Tools/ghidra_<version>/support/analyzeHeadless \
+tools/ghidra_12.0.3_PUBLIC/support/analyzeHeadless \
     /tmp/ghidra-projects halo2 \
     -import /tmp/halo2_default.xbe \
     -overwrite
