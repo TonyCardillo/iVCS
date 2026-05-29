@@ -29,7 +29,14 @@ from src.ghidra_decompile import (
 )
 from src.llm_clients import LiteLLMClient
 from src.project import FunctionEntry, Project
-from src.relocs import RelocKind, RelocSite, relocs_discover, relocs_kernel_ordinal_at
+from src.relocs import (
+	RelocKind,
+	RelocSite,
+	callee_convention_at,
+	convention_from_bytes,
+	relocs_discover,
+	relocs_kernel_ordinal_at,
+)
 from src.workspace import FunctionWorkspace
 from src.xbe import ParsedXbe, xbe_function_carve, xbe_load, xbe_section_containing_va
 from src.xboxkrnl import (
@@ -233,28 +240,9 @@ def _wipe_workspace_history(workspace: FunctionWorkspace) -> None:
 		workspace.best_c.unlink()
 
 
-def _infer_convention_from_bytes(body: bytes) -> tuple[str, int]:
-	"""First ret instruction classifies the calling convention.
-
-	Returns ('stdcall', byte_count) for `ret imm16`, ('cdecl', 0) for `ret`
-	or when no ret is found within the scanned bytes.
-	"""
-	md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
-	md.detail = False
-	for _addr, _size, mnem, op in md.disasm_lite(body, 0):
-		if mnem == "ret":
-			if op:
-				try:
-					return ("stdcall", int(op, 0))
-				except ValueError:
-					return ("cdecl", 0)
-			return ("cdecl", 0)
-	return ("cdecl", 0)
-
-
 def _infer_mangled_name(body: bytes, base: str) -> str:
 	"""MSVC stdcall mangling from the function's first ret-style instruction."""
-	conv, byte_count = _infer_convention_from_bytes(body)
+	conv, byte_count = convention_from_bytes(body)
 	if conv == "stdcall":
 		return f"_{base}@{byte_count}"
 	return f"_{base}"
@@ -393,14 +381,10 @@ def _extract_rel32_callee_decls(parsed: ParsedXbe, fn_va: int, fn_size: int) -> 
 	callee_vas = _rel32_callee_vas_from_sites(sites, is_executable, self_va=fn_va)
 	decls: list[str] = []
 	for va in callee_vas:
-		name = f"fn_{va:08X}"
-		try:
-			callee_body = xbe_function_carve(parsed, va, 256)
-		except (ValueError, IndexError):
-			decls.append(_format_callee_decl(name, "cdecl", 0))
-			continue
-		conv, byte_count = _infer_convention_from_bytes(callee_body)
-		decls.append(_format_callee_decl(name, conv, byte_count))
+		# Same inference the carver uses for target.obj's call-site symbol, so
+		# the ctx.h decl and the relocation decoration always agree.
+		conv, byte_count = callee_convention_at(parsed, va)
+		decls.append(_format_callee_decl(f"fn_{va:08X}", conv, byte_count))
 	return tuple(decls)
 
 

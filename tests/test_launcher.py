@@ -10,7 +10,6 @@ from src.launcher import (
 	_format_callee_decl,
 	_format_kernel_decl,
 	_format_target_forward_decl,
-	_infer_convention_from_bytes,
 	_infer_mangled_name,
 	_mirror_warmstart_as_attempt_zero,
 	_rel32_callee_vas_from_sites,
@@ -236,27 +235,6 @@ class TestKernelDecl:
 		assert decl == "__declspec(dllimport) int NotARealKernelExport();"
 
 
-class TestInferConvention:
-	def test_cdecl_when_first_ret_has_no_immediate(self):
-		body = b"\xb8\x00\x00\x00\x00\xc3"  # mov eax, 0; ret
-		assert _infer_convention_from_bytes(body) == ("cdecl", 0)
-
-	def test_stdcall_with_byte_count(self):
-		body = b"\xc2\x08\x00"  # ret 8
-		assert _infer_convention_from_bytes(body) == ("stdcall", 8)
-
-	def test_stdcall_with_one_arg(self):
-		body = b"\x56\x8b\xf1\x5e\xc2\x04\x00"  # ret 4
-		assert _infer_convention_from_bytes(body) == ("stdcall", 4)
-
-	def test_no_ret_falls_back_to_cdecl(self):
-		body = b"\x00" * 8
-		assert _infer_convention_from_bytes(body) == ("cdecl", 0)
-
-	def test_first_ret_wins(self):
-		# ret (c3) then later ret 8 — first wins.
-		body = b"\xc3\xc2\x08\x00"
-		assert _infer_convention_from_bytes(body) == ("cdecl", 0)
 
 
 class TestFormatCalleeDecl:

@@ -11,6 +11,7 @@ from src.relocs import (
 	RelocKind,
 	RelocSite,
 	ResolvedReloc,
+	convention_from_bytes,
 	reloc_symbol_name,
 	relocs_discover,
 	relocs_resolve,
@@ -107,6 +108,29 @@ def _rel32_site(target_va: int) -> RelocSite:
 	return RelocSite(imm_offset=0, kind=RelocKind.REL32, target_va=target_va)
 
 
+class TestConventionFromBytes:
+	def test_cdecl_when_first_ret_has_no_immediate(self):
+		body = b"\xb8\x00\x00\x00\x00\xc3"  # mov eax, 0; ret
+		assert convention_from_bytes(body) == ("cdecl", 0)
+
+	def test_stdcall_with_byte_count(self):
+		body = b"\xc2\x08\x00"  # ret 8
+		assert convention_from_bytes(body) == ("stdcall", 8)
+
+	def test_stdcall_with_one_arg(self):
+		body = b"\x56\x8b\xf1\x5e\xc2\x04\x00"  # ret 4
+		assert convention_from_bytes(body) == ("stdcall", 4)
+
+	def test_no_ret_falls_back_to_cdecl(self):
+		body = b"\x00" * 8
+		assert convention_from_bytes(body) == ("cdecl", 0)
+
+	def test_first_ret_wins(self):
+		# ret (c3) then later ret 8 — first wins.
+		body = b"\xc3\xc2\x08\x00"
+		assert convention_from_bytes(body) == ("cdecl", 0)
+
+
 class TestRelocSymbolNameRel32:
 	BASE = 0x00010000
 	IMAGE_SIZE = 0x00100000
@@ -120,6 +144,31 @@ class TestRelocSymbolNameRel32:
 			)
 		)
 		assert reloc_symbol_name(_rel32_site(0x00011008), parsed) == "_fn_00011008"
+
+	def test_stdcall_callee_gets_at_n_decoration(self):
+		# Callee whose first ret is `ret 8` (C2 08 00) is __stdcall; the symbol
+		# must carry @8 so target.obj matches the ctx.h-declared call site.
+		text = b"\x90" * 8 + b"\xc2\x08\x00" + b"\x90" * 5
+		parsed = xbe_parse(
+			build_minimal_xbe(
+				base_addr=self.BASE,
+				size_of_image=self.IMAGE_SIZE,
+				sections=[(".text", SECTION_FLAG_EXECUTABLE, text, 0x00011000)],
+			)
+		)
+		assert reloc_symbol_name(_rel32_site(0x00011008), parsed) == "_fn_00011008@8"
+
+	def test_cdecl_callee_with_plain_ret_has_no_decoration(self):
+		# A plain `ret` (C3) is cdecl — no @N suffix.
+		text = b"\xc3" + b"\x90" * 15
+		parsed = xbe_parse(
+			build_minimal_xbe(
+				base_addr=self.BASE,
+				size_of_image=self.IMAGE_SIZE,
+				sections=[(".text", SECTION_FLAG_EXECUTABLE, text, 0x00011000)],
+			)
+		)
+		assert reloc_symbol_name(_rel32_site(0x00011000), parsed) == "_fn_00011000"
 
 	def test_target_in_non_executable_section_is_data_prefix(self):
 		parsed = xbe_parse(

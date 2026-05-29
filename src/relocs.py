@@ -27,6 +27,7 @@ import capstone.x86
 from src.xbe import (
 	ParsedXbe,
 	XbeFormatError,
+	xbe_function_carve,
 	xbe_kernel_thunk_address_get,
 	xbe_section_containing_va,
 )
@@ -74,9 +75,48 @@ def relocs_discover(function_bytes: bytes, function_va: int) -> list[RelocSite]:
 	return sites
 
 
+_CALLEE_SCAN_BYTES = 256
+
+
+def convention_from_bytes(body: bytes) -> tuple[str, int]:
+	"""Classify calling convention from the first ret instruction.
+
+	`ret imm16` → ('stdcall', byte_count); a bare `ret` or no ret found within
+	the scanned bytes → ('cdecl', 0). The byte_count is the callee's stack
+	cleanup, which is also the MSVC @N decoration.
+	"""
+	md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
+	md.detail = False
+	for _addr, _size, mnem, op in md.disasm_lite(body, 0):
+		if mnem == "ret":
+			if op:
+				try:
+					return ("stdcall", int(op, 0))
+				except ValueError:
+					return ("cdecl", 0)
+			return ("cdecl", 0)
+	return ("cdecl", 0)
+
+
+def callee_convention_at(parsed: ParsedXbe, target_va: int) -> tuple[str, int]:
+	"""Infer a same-binary callee's convention by reading its real bytes."""
+	section = xbe_section_containing_va(parsed, target_va)
+	if section is None or not section.is_executable:
+		return ("cdecl", 0)
+	available = section.raw_size - (target_va - section.virtual_address)
+	if available <= 0:
+		return ("cdecl", 0)
+	try:
+		body = xbe_function_carve(parsed, target_va, min(_CALLEE_SCAN_BYTES, available))
+	except XbeFormatError:
+		return ("cdecl", 0)
+	return convention_from_bytes(body)
+
+
 def reloc_symbol_name(site: RelocSite, parsed: ParsedXbe) -> str:
-	# MSVC mangles cdecl as `_name`; stdcall as `_name@N`. We default to
-	# cdecl since we can't infer arg byte count from a placeholder.
+	# MSVC mangles cdecl as `_name`; stdcall as `_name@N`. For same-binary
+	# callees we read the callee's bytes to recover N so target.obj's call-site
+	# symbol matches the ctx.h-declared convention (and the call-site codegen).
 	if site.kind == RelocKind.DIR32:
 		kernel_name = _kernel_import_name_at(site.target_va, parsed)
 		if kernel_name is not None:
@@ -84,7 +124,9 @@ def reloc_symbol_name(site: RelocSite, parsed: ParsedXbe) -> str:
 
 	section = xbe_section_containing_va(parsed, site.target_va)
 	if section is not None and section.is_executable:
-		return f"_fn_{site.target_va:08X}"
+		conv, byte_count = callee_convention_at(parsed, site.target_va)
+		suffix = f"@{byte_count}" if conv == "stdcall" else ""
+		return f"_fn_{site.target_va:08X}{suffix}"
 	return f"_data_{site.target_va:08X}"
 
 
