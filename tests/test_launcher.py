@@ -361,6 +361,14 @@ class TestWarmstartMirrorStructRewrite:
 		zero = (ws.history_dir / "0000.c").read_text()
 		assert "XBE_FILE_HEADER_00010000" in zero
 
+	def test_stdcall_target_pins_definition_in_attempt_zero(self, tmp_path):
+		ws = FunctionWorkspace(root=tmp_path / "fn", function_name="_fn_X@12")
+		ws.initialize()
+		ws.ghidra_warmstart.write_text("void fn_X(int a, int b, int c)\n{\n  return;\n}\n")
+		_mirror_warmstart_as_attempt_zero(ws, stdcall_target="fn_X")
+		zero = (ws.history_dir / "0000.c").read_text()
+		assert "int __stdcall fn_X(int a, int b, int c)" in zero
+
 
 class TestStructDeclsInCtxH:
 	def test_struct_block_injected_after_typedefs(self):

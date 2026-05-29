@@ -372,6 +372,48 @@ class TestStructInstanceRewrite:
 		assert out == "(*(XBE_CERTIFICATE_HEADER *)0x001d0000).TitleID;"
 
 
+class TestStdcallTargetRewrite:
+	# Ghidra emits the function definition with no convention keyword (and often
+	# a `void` return); ctx.h forward-declares stdcall targets as
+	# `int __stdcall <name>(...)`. Left alone the two collide (MSVC C2373/C2371).
+	def test_void_definition_pinned_to_int_stdcall(self):
+		out = ghidra_pseudo_c_normalize(
+			"void fn_X(int a, int b, int c)\n{\n  return;\n}\n", stdcall_target="fn_X"
+		)
+		assert "int __stdcall fn_X(int a, int b, int c)" in out
+		assert "void fn_X(" not in out
+
+	def test_call_sites_left_untouched(self):
+		# Only the definition header (followed by `{`) is rewritten; the
+		# recursive call must keep its original form.
+		draft = "void fn_X(int a)\n{\n  if (a) fn_X(a - 1);\n  return;\n}\n"
+		out = ghidra_pseudo_c_normalize(draft, stdcall_target="fn_X")
+		assert "int __stdcall fn_X(int a)" in out
+		assert "fn_X(a - 1)" in out
+		assert out.count("__stdcall") == 1
+
+	def test_fun_renamed_form_is_matched(self):
+		# Rewrite runs after FUN_xxxxxxxx -> fn_XXXXXXXX, so the caller passes the
+		# post-rename name.
+		out = ghidra_pseudo_c_normalize(
+			"void FUN_00012080(void)\n{\n}\n", stdcall_target="fn_00012080"
+		)
+		assert "int __stdcall fn_00012080(void)" in out
+
+	def test_no_target_leaves_definition_as_is(self):
+		# cdecl targets get no ctx.h forward decl, so nothing to reconcile.
+		src = "void fn_X(int a)\n{\n  return;\n}\n"
+		assert "void fn_X(int a)" in ghidra_pseudo_c_normalize(src)
+		assert "__stdcall" not in ghidra_pseudo_c_normalize(src)
+
+	def test_other_function_definition_not_touched(self):
+		out = ghidra_pseudo_c_normalize(
+			"void fn_OTHER(int a)\n{\n}\n", stdcall_target="fn_X"
+		)
+		assert "void fn_OTHER(int a)" in out
+		assert "__stdcall" not in out
+
+
 class TestPseudoCNormalizeForPrompt:
 	def test_renames_fun_to_fn_with_uppercase_hex(self):
 		out = ghidra_pseudo_c_normalize_for_prompt("FUN_002d0cf5(); FUN_abcdef01();")

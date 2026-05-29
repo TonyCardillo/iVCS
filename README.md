@@ -50,7 +50,9 @@ agent_loop_run                                        ← src/agent_loop.py
   `ctx.h` (byte-exact, `pack(1)`) and rewrites `<Type>_<addr>` struct-instance
   globals in the warm-start to typed absolute derefs, so struct-referencing
   drafts resolve their member offsets instead of erroring on undeclared types
-- Seeds attempt 0 with a Ghidra headless pseudo-C warm-start (optional)
+- Seeds attempt 0 with a Ghidra headless pseudo-C warm-start (optional),
+  pinning the draft's definition to the `@N`-inferred `int __stdcall` so it
+  agrees with ctx.h instead of colliding (MSVC C2373/C2371)
 - Runs a matching-decomp agent loop via LiteLLM
 
 ## Quickstart
@@ -122,11 +124,10 @@ A mix of nostalgia and more greenfield decomp scene!
 
 In rough order of leverage:
 
-1. **Stdcall warm-start signature fix** — Ghidra emits a function *definition*
-   without `__stdcall`, which collides with the `@N`-pinned forward decl in
-   `ctx.h` (MSVC C2373) and stalls attempt 0 for every stdcall function. Pin
-   the convention onto the draft's definition during normalization so the
-   warm-start compiles on the first shot.
+1. **Stdcall callee call-site reconciliation** — `@N`-pinned callee decls are
+   stricter than Ghidra's draft call sites, so a call through a fixed stdcall
+   prototype with fewer args than `@N` implies fails to compile (MSVC C2198).
+   Sibling to the just-shipped target-definition fix, on the callee side.
 2. **Source-tree integrator** — splat-style YAML project layout, with the
    matched C committed back per-function.
 3. **Codebase index + embeddings** — once we have ≥5 matched functions,

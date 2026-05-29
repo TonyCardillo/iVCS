@@ -156,7 +156,11 @@ def launch_decomp_job(
 			_compose_ctx_h(fn.name, mangled, callee_decls, kernel_imports, struct_decls)
 		)
 
-	_mirror_warmstart_as_attempt_zero(workspace, struct_names=struct_names)
+	_mirror_warmstart_as_attempt_zero(
+		workspace,
+		struct_names=struct_names,
+		stdcall_target=fn.name if "@" in mangled else None,
+	)
 
 	job = JobInfo(
 		workspace_path=workspace_path,
@@ -207,7 +211,10 @@ def launch_decomp_job(
 
 
 def _mirror_warmstart_as_attempt_zero(
-	workspace: FunctionWorkspace, *, struct_names: tuple[str, ...] = ()
+	workspace: FunctionWorkspace,
+	*,
+	struct_names: tuple[str, ...] = (),
+	stdcall_target: str | None = None,
 ) -> None:
 	"""Write ghidra_warmstart.c as 0000.c with ctx.h prepended.
 
@@ -217,7 +224,9 @@ def _mirror_warmstart_as_attempt_zero(
 	so the LLM sees Ghidra's "undefined" signal in its system prompt.
 
 	`struct_names` (the layouts harvested into ctx.h) lets the normalizer
-	rewrite the draft's `<Type>_<addr>` struct instances to typed derefs.
+	rewrite the draft's `<Type>_<addr>` struct instances to typed derefs;
+	`stdcall_target` pins the draft's definition to `int __stdcall` so it
+	agrees with the stdcall forward decl in ctx.h.
 	"""
 	if not workspace.ghidra_warmstart.is_file():
 		return
@@ -226,7 +235,9 @@ def _mirror_warmstart_as_attempt_zero(
 		return
 	ctx = workspace.ctx_h.read_text() if workspace.ctx_h.is_file() else ""
 	normalized = ghidra_pseudo_c_normalize(
-		workspace.ghidra_warmstart.read_text(), struct_names=struct_names
+		workspace.ghidra_warmstart.read_text(),
+		struct_names=struct_names,
+		stdcall_target=stdcall_target,
 	)
 	target.write_text(ctx + "\n" + normalized)
 

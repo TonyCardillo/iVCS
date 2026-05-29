@@ -352,17 +352,40 @@ def _pseudo_c_struct_instance_rewrite(c: str, struct_names: tuple[str, ...]) -> 
 	return c
 
 
-def ghidra_pseudo_c_normalize(c: str, *, struct_names: tuple[str, ...] = ()) -> str:
+def _pseudo_c_stdcall_target_rewrite(c: str, name: str) -> str:
+	"""Pin the target's definition to `int __stdcall <name>` to match ctx.h.
+
+	Ghidra emits the definition with no convention keyword and often a `void`
+	return, while ctx.h forward-declares a stdcall target as
+	`int __stdcall <name>(...)`. Left as-is the two collide (MSVC C2373 on the
+	modifier, C2371 on the return type) and attempt 0 never compiles. Only the
+	definition header — the `<name>(...)` occurrence immediately followed by
+	`{` — is rewritten; call sites (which end in `;`) are left untouched.
+	"""
+	pattern = re.compile(
+		r"(?m)^[A-Za-z_][\w \t\*]*?\b" + re.escape(name) + r"(\s*\([^;{}]*\))(?=\s*\{)"
+	)
+	return pattern.sub(lambda m: f"int __stdcall {name}{m.group(1)}", c)
+
+
+def ghidra_pseudo_c_normalize(
+	c: str, *, struct_names: tuple[str, ...] = (), stdcall_target: str | None = None
+) -> str:
 	"""Best-effort rewrite of Ghidra's pseudo-C into something MSVC will parse.
 
 	Handles the common placeholder types, Ghidra's FUN_xxxxxxxx → our
 	fn_XXXXXXXX naming, DAT_xxxxxxxx globals → absolute-address derefs, harvested
 	`<Type>_<addr>` struct instances → typed absolute derefs, and the C99
 	true/false literals. Leaves LAB_ labels alone (valid local goto targets).
+
+	When `stdcall_target` is set (the post-rename target name), the target's
+	definition header is pinned to `int __stdcall` so it agrees with ctx.h.
 	"""
 	c = _PSEUDO_C_TYPE_PATTERN.sub(lambda m: _PSEUDO_C_TYPE_MAP[m.group(1)], c)
 	c = _PSEUDO_C_FUN_PATTERN.sub(lambda m: f"fn_{m.group(1).upper()}", c)
 	c = c.replace("XAPILIB::", "")  # C++ namespace prefix doesn't parse as C
+	if stdcall_target:
+		c = _pseudo_c_stdcall_target_rewrite(c, stdcall_target)
 	c = _pseudo_c_struct_instance_rewrite(c, struct_names)
 	c = _pseudo_c_dat_rewrite(c)
 	c = _PSEUDO_C_BOOL_LITERAL_PATTERN.sub(lambda m: "1" if m.group(1) == "true" else "0", c)
