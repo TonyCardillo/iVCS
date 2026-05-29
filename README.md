@@ -52,7 +52,8 @@ agent_loop_run                                        ← src/agent_loop.py
   drafts resolve their member offsets instead of erroring on undeclared types
 - Seeds attempt 0 with a Ghidra headless pseudo-C warm-start (optional),
   pinning the draft's definition to the `@N`-inferred `int __stdcall` so it
-  agrees with ctx.h instead of colliding (MSVC C2373/C2371)
+  agrees with ctx.h instead of colliding (MSVC C2373/C2371), and padding
+  Ghidra's under-count call sites up to each stdcall callee's `@N` arity
 - Runs a matching-decomp agent loop via LiteLLM
 
 ## Quickstart
@@ -124,15 +125,11 @@ A mix of nostalgia and more greenfield decomp scene!
 
 In rough order of leverage:
 
-1. **Stdcall callee call-site reconciliation** — `@N`-pinned callee decls are
-   stricter than Ghidra's draft call sites, so a call through a fixed stdcall
-   prototype with fewer args than `@N` implies fails to compile (MSVC C2198).
-   Sibling to the just-shipped target-definition fix, on the callee side.
-2. **Source-tree integrator** — splat-style YAML project layout, with the
+1. **Source-tree integrator** — splat-style YAML project layout, with the
    matched C committed back per-function.
-3. **Codebase index + embeddings** — once we have ≥5 matched functions,
+2. **Codebase index + embeddings** — once we have ≥5 matched functions,
    embed them and retrieve similar examples as few-shot prompt context.
-4. **x86 permuter** — non-LLM C-source mutation engine (swap commutative ops,
+3. **x86 permuter** — non-LLM C-source mutation engine (swap commutative ops,
    reorder local declarations, equivalent idioms) to brute-force the
    last-mile register-allocation gap without spending LLM tokens. Original
    `decomp-permuter` is MIPS-focused; an x86 port is real work but pays off

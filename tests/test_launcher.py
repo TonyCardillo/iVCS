@@ -369,6 +369,14 @@ class TestWarmstartMirrorStructRewrite:
 		zero = (ws.history_dir / "0000.c").read_text()
 		assert "int __stdcall fn_X(int a, int b, int c)" in zero
 
+	def test_callee_arities_pad_attempt_zero_call_sites(self, tmp_path):
+		ws = FunctionWorkspace(root=tmp_path / "fn", function_name="_fn_X")
+		ws.initialize()
+		ws.ghidra_warmstart.write_text("void fn_X(void)\n{\n  fn_0012C090();\n}\n")
+		_mirror_warmstart_as_attempt_zero(ws, callee_arities={"fn_0012C090": 2})
+		zero = (ws.history_dir / "0000.c").read_text()
+		assert "fn_0012C090(0, 0);" in zero
+
 
 class TestStructDeclsInCtxH:
 	def test_struct_block_injected_after_typedefs(self):

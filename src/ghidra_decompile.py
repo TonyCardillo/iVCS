@@ -368,8 +368,71 @@ def _pseudo_c_stdcall_target_rewrite(c: str, name: str) -> str:
 	return pattern.sub(lambda m: f"int __stdcall {name}{m.group(1)}", c)
 
 
+def _count_top_level_args(args: str) -> int:
+	"""Number of comma-separated arguments at paren/bracket depth 0."""
+	if not args.strip():
+		return 0
+	depth = 0
+	count = 1
+	for ch in args:
+		if ch in "([{":
+			depth += 1
+		elif ch in ")]}":
+			depth -= 1
+		elif ch == "," and depth == 0:
+			count += 1
+	return count
+
+
+def _pad_call_args(c: str, name: str, arity: int) -> str:
+	"""Pad every `name(...)` call shorter than `arity` with trailing `0` args.
+
+	Balance-scans for the matching close paren so nested calls are spanned
+	correctly. Calls with `>= arity` args are left untouched.
+	"""
+	token = re.compile(r"\b" + re.escape(name) + r"\s*\(")
+	out: list[str] = []
+	i = 0
+	while True:
+		m = token.search(c, i)
+		if m is None:
+			out.append(c[i:])
+			break
+		out.append(c[i : m.end()])
+		depth = 1
+		j = m.end()
+		while j < len(c) and depth:
+			if c[j] == "(":
+				depth += 1
+			elif c[j] == ")":
+				depth -= 1
+				if depth == 0:
+					break
+			j += 1
+		args = c[m.end() : j]
+		n = _count_top_level_args(args)
+		if n < arity:
+			pad = ", ".join(["0"] * (arity - n))
+			args = pad if n == 0 else f"{args.rstrip()}, {pad}"
+		out.append(args)
+		out.append(c[j : j + 1])  # the ')'
+		i = j + 1
+	return "".join(out)
+
+
+def _pseudo_c_pad_stdcall_calls(c: str, callee_arities: dict[str, int]) -> str:
+	for name, arity in callee_arities.items():
+		if arity > 0:
+			c = _pad_call_args(c, name, arity)
+	return c
+
+
 def ghidra_pseudo_c_normalize(
-	c: str, *, struct_names: tuple[str, ...] = (), stdcall_target: str | None = None
+	c: str,
+	*,
+	struct_names: tuple[str, ...] = (),
+	stdcall_target: str | None = None,
+	callee_arities: dict[str, int] | None = None,
 ) -> str:
 	"""Best-effort rewrite of Ghidra's pseudo-C into something MSVC will parse.
 
@@ -380,12 +443,16 @@ def ghidra_pseudo_c_normalize(
 
 	When `stdcall_target` is set (the post-rename target name), the target's
 	definition header is pinned to `int __stdcall` so it agrees with ctx.h.
+	`callee_arities` ({name: arg count}) pads under-count call sites so strict
+	`@N` stdcall callee prototypes are satisfied.
 	"""
 	c = _PSEUDO_C_TYPE_PATTERN.sub(lambda m: _PSEUDO_C_TYPE_MAP[m.group(1)], c)
 	c = _PSEUDO_C_FUN_PATTERN.sub(lambda m: f"fn_{m.group(1).upper()}", c)
 	c = c.replace("XAPILIB::", "")  # C++ namespace prefix doesn't parse as C
 	if stdcall_target:
 		c = _pseudo_c_stdcall_target_rewrite(c, stdcall_target)
+	if callee_arities:
+		c = _pseudo_c_pad_stdcall_calls(c, callee_arities)
 	c = _pseudo_c_struct_instance_rewrite(c, struct_names)
 	c = _pseudo_c_dat_rewrite(c)
 	c = _PSEUDO_C_BOOL_LITERAL_PATTERN.sub(lambda m: "1" if m.group(1) == "true" else "0", c)

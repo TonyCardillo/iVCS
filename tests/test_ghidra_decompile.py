@@ -414,6 +414,48 @@ class TestStdcallTargetRewrite:
 		assert "__stdcall" not in out
 
 
+class TestStdcallCallPadding:
+	# Ghidra under-counts call args; our `@N`-pinned stdcall callee decls are
+	# strict, so a short call fails to compile (MSVC C2198). Pad the call up to
+	# the callee's inferred arity with `0` so the stack arg count matches.
+	ARITIES = {"fn_0012C090": 2, "fn_AAAA0001": 3}
+
+	def test_zero_arg_call_padded_to_arity(self):
+		out = ghidra_pseudo_c_normalize("fn_0012C090();", callee_arities=self.ARITIES)
+		assert out == "fn_0012C090(0, 0);"
+
+	def test_partial_call_padded(self):
+		out = ghidra_pseudo_c_normalize("fn_AAAA0001(x);", callee_arities=self.ARITIES)
+		assert out == "fn_AAAA0001(x, 0, 0);"
+
+	def test_exact_count_unchanged(self):
+		src = "fn_0012C090(a, b);"
+		assert ghidra_pseudo_c_normalize(src, callee_arities=self.ARITIES) == src
+
+	def test_over_count_left_alone(self):
+		# Too-many args is a different (rare) problem; don't drop expressions.
+		src = "fn_0012C090(a, b, c);"
+		assert ghidra_pseudo_c_normalize(src, callee_arities=self.ARITIES) == src
+
+	def test_nested_call_arg_counts_as_one(self):
+		out = ghidra_pseudo_c_normalize("fn_0012C090(g(a, b));", callee_arities=self.ARITIES)
+		assert out == "fn_0012C090(g(a, b), 0);"
+
+	def test_multiple_call_sites_each_padded(self):
+		out = ghidra_pseudo_c_normalize(
+			"fn_0012C090(); x = fn_0012C090(p);", callee_arities=self.ARITIES
+		)
+		assert out == "fn_0012C090(0, 0); x = fn_0012C090(p, 0);"
+
+	def test_unknown_callee_untouched(self):
+		src = "some_other_fn();"
+		assert ghidra_pseudo_c_normalize(src, callee_arities=self.ARITIES) == src
+
+	def test_no_arities_is_noop(self):
+		src = "fn_0012C090();"
+		assert ghidra_pseudo_c_normalize(src) == src
+
+
 class TestPseudoCNormalizeForPrompt:
 	def test_renames_fun_to_fn_with_uppercase_hex(self):
 		out = ghidra_pseudo_c_normalize_for_prompt("FUN_002d0cf5(); FUN_abcdef01();")

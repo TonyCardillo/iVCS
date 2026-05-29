@@ -160,6 +160,7 @@ def launch_decomp_job(
 		workspace,
 		struct_names=struct_names,
 		stdcall_target=fn.name if "@" in mangled else None,
+		callee_arities=_extract_callee_arities(parsed, fn.va, fn.size),
 	)
 
 	job = JobInfo(
@@ -215,6 +216,7 @@ def _mirror_warmstart_as_attempt_zero(
 	*,
 	struct_names: tuple[str, ...] = (),
 	stdcall_target: str | None = None,
+	callee_arities: dict[str, int] | None = None,
 ) -> None:
 	"""Write ghidra_warmstart.c as 0000.c with ctx.h prepended.
 
@@ -226,7 +228,8 @@ def _mirror_warmstart_as_attempt_zero(
 	`struct_names` (the layouts harvested into ctx.h) lets the normalizer
 	rewrite the draft's `<Type>_<addr>` struct instances to typed derefs;
 	`stdcall_target` pins the draft's definition to `int __stdcall` so it
-	agrees with the stdcall forward decl in ctx.h.
+	agrees with the stdcall forward decl in ctx.h; `callee_arities` pads
+	under-count call sites to satisfy strict `@N` callee prototypes.
 	"""
 	if not workspace.ghidra_warmstart.is_file():
 		return
@@ -238,6 +241,7 @@ def _mirror_warmstart_as_attempt_zero(
 		workspace.ghidra_warmstart.read_text(),
 		struct_names=struct_names,
 		stdcall_target=stdcall_target,
+		callee_arities=callee_arities,
 	)
 	target.write_text(ctx + "\n" + normalized)
 
@@ -458,9 +462,12 @@ def _rel32_callee_vas_from_sites(
 	return tuple(sorted(seen))
 
 
-def _extract_rel32_callee_decls(parsed: ParsedXbe, fn_va: int, fn_size: int) -> tuple[str, ...]:
-	"""Forward decls for same-binary callees of fn_va, with convention inferred
-	from the first ret in each callee's bytes."""
+def _rel32_callee_conventions(
+	parsed: ParsedXbe, fn_va: int, fn_size: int
+) -> list[tuple[int, str, int]]:
+	"""[(va, convention, popped_bytes)] for each same-binary REL32 callee of
+	fn_va. Same inference the carver uses for target.obj's call-site symbol, so
+	ctx.h decls and relocation decoration always agree."""
 	body = xbe_function_carve(parsed, fn_va, fn_size)
 	sites = relocs_discover(body, fn_va)
 
@@ -469,13 +476,28 @@ def _extract_rel32_callee_decls(parsed: ParsedXbe, fn_va: int, fn_size: int) -> 
 		return section is not None and section.is_executable
 
 	callee_vas = _rel32_callee_vas_from_sites(sites, is_executable, self_va=fn_va)
-	decls: list[str] = []
-	for va in callee_vas:
-		# Same inference the carver uses for target.obj's call-site symbol, so
-		# the ctx.h decl and the relocation decoration always agree.
-		conv, byte_count = callee_convention_at(parsed, va)
-		decls.append(_format_callee_decl(f"fn_{va:08X}", conv, byte_count))
-	return tuple(decls)
+	return [(va, *callee_convention_at(parsed, va)) for va in callee_vas]
+
+
+def _extract_rel32_callee_decls(parsed: ParsedXbe, fn_va: int, fn_size: int) -> tuple[str, ...]:
+	"""Forward decls for same-binary callees of fn_va, with convention inferred
+	from the first ret in each callee's bytes."""
+	return tuple(
+		_format_callee_decl(f"fn_{va:08X}", conv, byte_count)
+		for va, conv, byte_count in _rel32_callee_conventions(parsed, fn_va, fn_size)
+	)
+
+
+def _extract_callee_arities(parsed: ParsedXbe, fn_va: int, fn_size: int) -> dict[str, int]:
+	"""{callee_name: stdcall arg count} for fn_va's stdcall callees.
+
+	Lets the warm-start normalizer pad under-count Ghidra call sites up to the
+	arity the `@N`-pinned prototype demands (Ghidra routinely under-counts)."""
+	return {
+		f"fn_{va:08X}": byte_count // 4
+		for va, conv, byte_count in _rel32_callee_conventions(parsed, fn_va, fn_size)
+		if conv == "stdcall" and byte_count > 0
+	}
 
 
 def _extract_kernel_imports(parsed: ParsedXbe, fn_va: int, fn_size: int) -> tuple[str, ...]:
