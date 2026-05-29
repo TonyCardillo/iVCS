@@ -28,7 +28,7 @@ FunctionWorkspace                                     ← src/workspace.py
 agent_loop_run                                        ← src/agent_loop.py
    ↻ LLM proposes C → compile_and_view_assembly
                        │
-                       ├─ cl.exe /c /O2 (Wine)        ← src/compile_tool.py
+                       ├─ cl.exe                       ← src/compile_tool.py
                        └─ objdiff-cli diff JSON        ← src/objdiff.py
    exit on 100% match, budget exhausted, or LLM gives up
 ```
@@ -37,11 +37,11 @@ agent_loop_run                                        ← src/agent_loop.py
 
 - Parses XBE: header, sections, XOR-decoded entry-point + kernel-thunk
   table, kernel-ordinal-to-name resolution
-- Carves real functions from arbitrary virtual addresses in real shipped XBEs
+- Carves functions from arbitrary virtual addresses in real XBEs
 - Discovers relocations in carved bytes via Capstone
 - Synthesizes valid Microsoft COFF/i386 `.obj` files that
   `objdiff-cli` parses cleanly and lines up against MSVC-emitted base objects
-- Runs a matching-decomp agent loop via LiteLLM (tested with Anthropic Claude Haiku)
+- Runs a matching-decomp agent loop via LiteLLM
 
 ## Quickstart
 
@@ -61,8 +61,8 @@ Environment:
 
 | variable | purpose | default |
 | --- | --- | --- |
-| `IVCS_MSVC_DIR` | Root of the XDK 5849 VC7.1 toolchain (must contain `bin/cl.exe`). Layout: `bin/`, `include/`, `lib/`. | `<repo>/compilers/xdk5849-vc71` |
-| `IVCS_WINE` | Wine binary to invoke `cl.exe` with. | `wine` (on PATH) |
+| `IVCS_MSVC_DIR` | Root of the XDK 5849 VC7.1 toolchain containing `bin/cl.exe`. | `<repo>/compilers/xdk5849-vc71` |
+| `IVCS_WINE` | Wine binary to invoke `cl.exe`. | `wine` (on PATH) |
 | `IVCS_OBJDIFF_CLI` | Path to the `objdiff-cli` binary. | `objdiff-cli` (on PATH) |
 
 ## Repo layout
@@ -90,11 +90,9 @@ recon/objdiff-smoke/
 data/xboxkrnl_ordinals.json
                     Source of xboxkrnl exports
 compilers/xdk5849-vc71/
-                    XDK 5849 VC7.1 toolchain (cl.exe). Vendored, gitignored;
-                    default IVCS_MSVC_DIR. Install locally.
+                    XDK 5849 VC7.1 toolchain (cl.exe)
 tools/ghidra_12.0.3_PUBLIC/
-                    Ghidra + XBE loader for warm-start decompilation.
-                    Vendored, gitignored; default IVCS_GHIDRA_HOME. See docs/ghidra_setup.md.
+                    Ghidra + XBE loader for warm-start decompilation. See docs/ghidra_setup.md.
 ```
 
 ## Why Xbox
@@ -130,11 +128,7 @@ In rough order of leverage:
 
 ## Known constraints
 
-- **Wine-stable deprecation (2026-09-01).** Migrate to Whisky before then.
-- **Toolchain pinned to XDK 5849 (cl 13.10.3077, VC++ 7.1).** Verified
-  byte-identical to Halo 2 retail's CRT via `__chkstk` extraction from
-  `libcmt.lib`. Titles built on a different XDK family (e.g. 5933) would
-  need the cl from that XDK to match.
+- Wine-stable deprecation on 2026-09-01, migrate to Whisky before then.
 
 ## Out of scope
 
@@ -146,21 +140,12 @@ In rough order of leverage:
 
 ## Acknowledgments
 
-- [Capstone](http://www.capstone-engine.org/) — disassembly
-- [Cxbx-Reloaded](https://github.com/Cxbx-Reloaded/Cxbx-Reloaded) — XBE format
-  reference
+- [Capstone](http://www.capstone-engine.org/)
+- [Cxbx-Reloaded](https://github.com/Cxbx-Reloaded/Cxbx-Reloaded)
 - [abaire/xbdm_gdb_bridge](https://github.com/abaire/xbdm_gdb_bridge) —
-  `xboxkrnl.exe` ordinal table (`src/dyndxt_loader/xboxkrnl_exports.def.h`)
-- [objdiff](https://github.com/encounter/objdiff) — instruction-aware .obj
-  diffing
-- [decomp.me](https://decomp.me) — scratch model + the `ctx.h` + extern
-  pattern this project mirrors
-- [mizuchi](https://github.com/macabeus/mizuchi) — pipeline-stage architecture
-  ideas (m2c → permuter → LLM → compiler → objdiff → integrator)
-- Microsoft Xbox XDK 5849 (Dec 2003) — the original Halo 2 toolchain
-  (cl 13.10.3077, `libcmt.lib`), run under Wine
-- [widberg/msvc8.0p](https://github.com/widberg/msvc8.0p) — initial
-  exploratory toolchain (VC 8.0); superseded
+  `xboxkrnl.exe` ordinal table
+- [objdiff](https://github.com/encounter/objdiff)
+- [decomp.me](https://decomp.me)
+- [mizuchi](https://github.com/macabeus/mizuchi)
 - Chris Lewis, [The Unexpected Effectiveness of One-Shot Decompilation
   with Claude](https://blog.chrislewis.au/the-unexpected-effectiveness-of-one-shot-decompilation-with-claude/)
-- The matching-decomp community at decomp.me
