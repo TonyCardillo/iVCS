@@ -2,12 +2,12 @@
 """End-to-end smoke run of the iVCS agent loop.
 
 Targets `_classify` from recon/objdiff-smoke/target.obj (compiled from
-fixture.c by widberg's MSVC 8). Uses Claude Haiku as a stand-in for a
-real local model — same OpenAI-shape tool-call surface that any local
-LLM endpoint would present.
+fixture.c by the XDK 5849 VC7.1 toolchain, cl 13.10). Uses Claude Haiku as
+a stand-in for a real local model — same OpenAI-shape tool-call surface
+that any local LLM endpoint would present.
 
 Prereqs:
-  - Wine + widberg/msvc8.0p toolchain (matches recon/wine-validation/)
+  - Wine + XDK 5849 VC7.1 toolchain (default IVCS_MSVC_DIR=<repo>/compilers/xdk5849-vc71)
   - objdiff-cli binary (bundled at recon/objdiff-smoke/objdiff-cli)
   - ANTHROPIC_API_KEY set in env
   - From the project root: `.venv/bin/python scripts/smoke_run.py`

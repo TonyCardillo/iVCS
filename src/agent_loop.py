@@ -269,8 +269,8 @@ def _system_prompt_build(workspace: FunctionWorkspace, target_asm: str) -> str:
 	ctx_h = workspace.ctx_h.read_text()
 	warmstart = _warmstart_section(workspace)
 	return f"""You are an automated matching-decompilation system targeting the original Xbox \
-(x86, MSVC 8.0, /O2). You receive an assembly listing and write C code that, when compiled, \
-produces byte-identical machine code.
+(x86, MSVC 7.1 / cl 13.10, /O2). You receive an assembly listing and write C code that, \
+when compiled, produces byte-identical machine code.
 
 # Operating context
 - Fully automated pipeline. No human review. Do not ask for clarification.
@@ -279,7 +279,7 @@ produces byte-identical machine code.
 # Output requirements
 - Provide complete, self-contained C code as the `c_code` argument.
 - Do not include `#include` directives — ctx.h is prepended automatically.
-- MSVC 8 is C89: declare all locals at the top of the function. No `for (int i = ...)`.
+- MSVC 7.1 is C89: declare all locals at the top of the function. No `for (int i = ...)`.
 
 # Success criteria
 - Match score must reach 100.0%. Functional equivalence is insufficient.

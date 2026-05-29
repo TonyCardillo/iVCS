@@ -37,10 +37,12 @@ agent_loop_run                                        ← src/agent_loop.py
 
 - Parses XBE: header, sections, XOR-decoded entry-point + kernel-thunk
   table, kernel-ordinal-to-name resolution
+- Enumerates every function in an XBE into a `project.json` manifest
 - Carves functions from arbitrary virtual addresses in real XBEs
 - Discovers relocations in carved bytes via Capstone
 - Synthesizes valid Microsoft COFF/i386 `.obj` files that
   `objdiff-cli` parses cleanly and lines up against MSVC-emitted base objects
+- Seeds attempt 0 with a Ghidra headless pseudo-C warm-start (optional)
 - Runs a matching-decomp agent loop via LiteLLM
 
 ## Quickstart
@@ -75,20 +77,28 @@ src/
   coff.py           Microsoft COFF/i386 .obj emitter
   carver.py         Three-line orchestrator: carve → resolve → coff
   workspace.py      Per-function filesystem layout
+  project.py        Project manifest (project.json) load/save
   compile_tool.py   The single tool the LLM agent gets; wraps cl.exe + objdiff
   agent_loop.py     LLM loop policy (budget, soft/hard timeouts, best tracking)
+  ghidra_decompile.py  Ghidra-headless warm-start: pseudo-C drafts for attempt 0
+  launcher.py       Carve → synth target.obj → spawn an agent_loop run (UI entry point)
   llm_clients.py    LiteLLM client adapter (works with local/cloud providers)
   objdiff.py        objdiff-cli wrapper + typed JSON parser
 
 tests/
 scripts/
+  enumerate.py      Enumerate all functions in an XBE → project.json manifest
   smoke_run.py      End-to-end agent loop against the bundled objdiff-smoke fixture (no XBE needed)
   halo2_sanity.py   End-to-end pipeline diagnostic against a real Halo 2 XBE
   webui.py          Local web UI for inspecting an XBE (sections, hex, disassembly, kernel ordinals)
+ghidra_scripts/DecompileOne.java
+                    Ghidra postscript: decompile one function by VA (see docs/ghidra_setup.md)
 recon/objdiff-smoke/
                     Real MSVC-emitted .obj fixtures + a bundled objdiff-cli
 data/xboxkrnl_ordinals.json
-                    Source of xboxkrnl exports
+                    Source of xboxkrnl exports (371-entry ordinal → name table)
+data/xboxkrnl_signatures.json
+                    Hand-curated kernel-export signatures for ctx.h synthesis
 compilers/xdk5849-vc71/
                     XDK 5849 VC7.1 toolchain (cl.exe)
 tools/ghidra_12.0.3_PUBLIC/
@@ -110,17 +120,11 @@ In rough order of leverage:
 2. **Auto-`ctx.h` synthesis** — from the `__imp__*` symbol set, look up each
    kernel function's signature from a bundled table and emit
    `__declspec(dllimport)` declarations automatically.
-3. **Function-size discovery** — promote the linear-sweep "scan-until-ret"
-   heuristic from the demo into `src/xbe.py`.
-4. **Warm-start decompiler** — pipe carved bytes through Ghidra headless (or
-   RetDec) for a pseudo-C first draft. The LLM "fixes" instead of "writes
-   from scratch" — drastically higher first-attempt match rates per
-   [mizuchi](https://github.com/macabeus/mizuchi)'s experience with `m2c`.
-5. **Source-tree integrator** — splat-style YAML project layout, with the
+3. **Source-tree integrator** — splat-style YAML project layout, with the
    matched C committed back per-function.
-6. **Codebase index + embeddings** — once we have ≥5 matched functions,
+4. **Codebase index + embeddings** — once we have ≥5 matched functions,
    embed them and retrieve similar examples as few-shot prompt context.
-7. **x86 permuter** — non-LLM C-source mutation engine (swap commutative ops,
+5. **x86 permuter** — non-LLM C-source mutation engine (swap commutative ops,
    reorder local declarations, equivalent idioms) to brute-force the
    last-mile register-allocation gap without spending LLM tokens. Original
    `decomp-permuter` is MIPS-focused; an x86 port is real work but pays off

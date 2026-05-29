@@ -4,8 +4,10 @@ Ghidra is an optional pseudo-C source for the agent's first attempt. The
 LLM "fixes" Ghidra's draft rather than writing from scratch, which
 historically lifts first-attempt match rates significantly.
 
-Status: planned. The integration script (`scripts/ghidra_decompile.py`)
-lands once the install below is verified locally.
+Status: landed. The integration lives in `src/ghidra_decompile.py`
+(headless wrapper) + `ghidra_scripts/DecompileOne.java` (decompile postscript),
+wired into `agent_loop.py` (warm-start prompt + `ghidra_only_run` baseline)
+and the webui launch form. Follow the install below to enable it locally.
 
 ## Why we need it
 
@@ -78,24 +80,12 @@ tools/ghidra_12.0.3_PUBLIC/support/analyzeHeadless \
 A clean run prints "Analysis succeeded" near the end and leaves a
 `halo2.gpr` and `halo2.rep/` under `/tmp/ghidra-projects/`.
 
-## Minimal wrapper plan
+## Wrapper
 
-Once install is verified, add `scripts/ghidra_decompile.py` with this
-shape:
-
-```
-ghidra_decompile(xbe_path, va, *, project_dir, ghidra_home) -> str
-    Returns the pseudo-C for the function at `va`, cached per-VA on disk.
-    First call seeds the project (import + analyze).
-    Subsequent calls re-use the project and only invoke the decompiler.
-```
-
-Cache layout: `<workspace>/ghidra_warmstart.c` (one per function workspace).
-The agent's first user message will prepend the cached draft inside a
-fenced block labelled `// Ghidra draft (machine-generated, may be wrong)`.
-
-UI: an off-by-default checkbox `[ ] use Ghidra warm-start` on the launch
-form. We keep it off until A/B numbers justify default-on.
+Implemented in `src/ghidra_decompile.py` (`ghidra_project_ensure` +
+`ghidra_decompile_function`) + `ghidra_scripts/DecompileOne.java`, with the
+`use Ghidra warm-start` checkbox in `scripts/webui.py`. Drafts cache to
+`<workspace>/ghidra_warmstart.c`.
 
 ## Open questions to revisit after install
 
