@@ -19,6 +19,7 @@ from pathlib import Path
 
 _GHIDRA_SCRIPTS_DIR = Path(__file__).parent.parent / "ghidra_scripts"
 _DECOMPILE_SCRIPT = "DecompileOne.java"
+_DUMP_STRUCTS_SCRIPT = "DumpStructs.java"
 _XBE_LOADER = "XbeLoader"
 _ANALYSIS_SUCCESS_MARKER = "REPORT: Analysis succeeded"
 _IMPORT_SUCCESS_MARKER = "REPORT: Import succeeded"
@@ -50,6 +51,11 @@ class GhidraConfig:
 	@property
 	def project_gpr(self) -> Path:
 		return self.project_dir / f"{self.project_name}.gpr"
+
+	@property
+	def structs_h(self) -> Path:
+		"""Cache path for the harvested struct-layout header (one per project)."""
+		return self.project_dir / f"{self.project_name}.structs.h"
 
 
 AnalyzeHeadlessFn = Callable[[list[str]], "subprocess.CompletedProcess[str]"]
@@ -145,6 +151,55 @@ def ghidra_decompile_function(
 		out_path.unlink(missing_ok=True)
 
 
+def ghidra_structs_dump(
+	config: GhidraConfig,
+	*,
+	analyze_headless_fn: AnalyzeHeadlessFn | None = None,
+	force: bool = False,
+	timeout_seconds: float = 120.0,
+) -> str:
+	"""Harvest Ghidra's composite type layouts as C typedefs.
+
+	Returns the contents of a header declaring every struct/union the
+	XbeLoader symbol DB recognizes (XBE_FILE_HEADER, ...). The result is
+	project-wide and stable, so it is cached at `config.structs_h` and reused
+	across functions; pass `force=True` to re-dump. Project must already be
+	bootstrapped (see ghidra_project_ensure)."""
+	if config.structs_h.is_file() and not force:
+		return config.structs_h.read_text()
+	if not config.project_gpr.is_file():
+		raise GhidraError(
+			f"project not bootstrapped: {config.project_gpr} does not exist. "
+			"Call ghidra_project_ensure first."
+		)
+
+	config.project_dir.mkdir(parents=True, exist_ok=True)
+	with tempfile.NamedTemporaryFile(
+		mode="r", suffix=".h", delete=False, dir=config.project_dir
+	) as f:
+		out_path = Path(f.name)
+	try:
+		argv = _dump_structs_argv(config, out_path)
+		run = analyze_headless_fn or _default_run
+		result = _run_with_lock_retry(argv, run)
+		if result.returncode != 0:
+			raise GhidraError(
+				f"struct dump failed (rc={result.returncode})\n"
+				f"--- stdout (tail) ---\n{_tail(result.stdout)}\n"
+				f"--- stderr (tail) ---\n{_tail(result.stderr)}"
+			)
+		if not out_path.is_file() or out_path.stat().st_size == 0:
+			raise GhidraError(
+				f"struct dump produced no output\n--- stdout (tail) ---\n{_tail(result.stdout)}"
+			)
+		header = out_path.read_text()
+	finally:
+		out_path.unlink(missing_ok=True)
+
+	config.structs_h.write_text(header)
+	return header
+
+
 def _run_with_lock_retry(
 	argv: list[str],
 	run: AnalyzeHeadlessFn,
@@ -192,6 +247,22 @@ def _decompile_argv(config: GhidraConfig, va: int, out_path: Path) -> list[str]:
 		"-postScript",
 		_DECOMPILE_SCRIPT,
 		f"0x{va:08x}",
+		str(out_path),
+	]
+
+
+def _dump_structs_argv(config: GhidraConfig, out_path: Path) -> list[str]:
+	return [
+		str(config.analyze_headless),
+		str(config.project_dir),
+		config.project_name,
+		"-process",
+		config.program_name,
+		"-noanalysis",
+		"-scriptPath",
+		str(config.script_dir),
+		"-postScript",
+		_DUMP_STRUCTS_SCRIPT,
 		str(out_path),
 	]
 
@@ -258,19 +329,58 @@ def _pseudo_c_dat_rewrite(c: str) -> str:
 	return c
 
 
-def ghidra_pseudo_c_normalize(c: str) -> str:
+def _pseudo_c_struct_instance_rewrite(c: str, struct_names: tuple[str, ...]) -> str:
+	"""Rewrite Ghidra's `<Type>_<addr>` struct instances to typed absolute derefs.
+
+	Ghidra names a recognized struct instance at a fixed address as
+	`XBE_FILE_HEADER_00010000`. Xbox images load at a fixed base, so that is an
+	absolute reference carrying no reloc — `(*(XBE_FILE_HEADER *)0x00010000)`
+	emits the same baked disp32 and lets `.member` resolve against the harvested
+	layout. `&inst` collapses to a plain typed pointer cast.
+
+	Driven entirely by the harvested type names, so it stays binary-agnostic;
+	with no names it is a no-op. Names are tried longest-first so a longer type
+	is never clipped to a shorter prefix.
+	"""
+	if not struct_names:
+		return c
+	alt = "|".join(re.escape(n) for n in sorted(struct_names, key=len, reverse=True))
+	addr_of = re.compile(r"&\s*(" + alt + r")_([0-9a-fA-F]{8})\b")
+	value = re.compile(r"\b(" + alt + r")_([0-9a-fA-F]{8})\b")
+	c = addr_of.sub(lambda m: f"(({m.group(1)} *)0x{m.group(2)})", c)
+	c = value.sub(lambda m: f"(*({m.group(1)} *)0x{m.group(2)})", c)
+	return c
+
+
+def ghidra_pseudo_c_normalize(c: str, *, struct_names: tuple[str, ...] = ()) -> str:
 	"""Best-effort rewrite of Ghidra's pseudo-C into something MSVC will parse.
 
 	Handles the common placeholder types, Ghidra's FUN_xxxxxxxx → our
-	fn_XXXXXXXX naming, DAT_xxxxxxxx globals → absolute-address derefs, and the
-	C99 true/false literals. Leaves LAB_ labels alone (valid local goto targets).
+	fn_XXXXXXXX naming, DAT_xxxxxxxx globals → absolute-address derefs, harvested
+	`<Type>_<addr>` struct instances → typed absolute derefs, and the C99
+	true/false literals. Leaves LAB_ labels alone (valid local goto targets).
 	"""
 	c = _PSEUDO_C_TYPE_PATTERN.sub(lambda m: _PSEUDO_C_TYPE_MAP[m.group(1)], c)
 	c = _PSEUDO_C_FUN_PATTERN.sub(lambda m: f"fn_{m.group(1).upper()}", c)
 	c = c.replace("XAPILIB::", "")  # C++ namespace prefix doesn't parse as C
+	c = _pseudo_c_struct_instance_rewrite(c, struct_names)
 	c = _pseudo_c_dat_rewrite(c)
 	c = _PSEUDO_C_BOOL_LITERAL_PATTERN.sub(lambda m: "1" if m.group(1) == "true" else "0", c)
 	return c
+
+
+_STRUCT_TYPEDEF_NAME_PATTERN = re.compile(
+	r"^\}\s*([A-Za-z_]\w*)\s*;", re.MULTILINE
+)
+
+
+def ghidra_struct_names(header: str) -> tuple[str, ...]:
+	"""Names of the typedef'd composites in a harvested struct header, in order.
+
+	Parses the `} NAME;` closer of each `typedef struct/union { ... } NAME;`
+	block emitted by DumpStructs.java.
+	"""
+	return tuple(_STRUCT_TYPEDEF_NAME_PATTERN.findall(header))
 
 
 _PSEUDO_C_WARNING_LINE_RE = re.compile(
@@ -302,6 +412,8 @@ __all__ = [
 	"ghidra_config_from_env",
 	"ghidra_decompile_function",
 	"ghidra_project_ensure",
+	"ghidra_structs_dump",
 	"ghidra_pseudo_c_normalize",
 	"ghidra_pseudo_c_normalize_for_prompt",
+	"ghidra_struct_names",
 ]

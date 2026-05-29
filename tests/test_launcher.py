@@ -13,6 +13,7 @@ from src.launcher import (
 	_infer_mangled_name,
 	_mirror_warmstart_as_attempt_zero,
 	_rel32_callee_vas_from_sites,
+	_select_referenced_structs,
 	_wipe_workspace_history,
 )
 from src.relocs import RelocKind, RelocSite
@@ -292,6 +293,91 @@ class TestWarmstartMirror:
 		_mirror_warmstart_as_attempt_zero(ws)
 		# Pre-existing 0000.c must not be clobbered; user may have hand-edited.
 		assert (ws.history_dir / "0000.c").read_text() == "pre-existing"
+
+
+class TestSelectReferencedStructs:
+	HEADER = (
+		"/* harvested */\n"
+		"#pragma pack(push, 1)\n\n"
+		"typedef struct {\n\tunsigned long a;\n} XBE_FILE_HEADER;\n\n"
+		"typedef struct {\n\tunsigned long b;\n} XBE_CERTIFICATE_HEADER;\n\n"
+		"typedef struct {\n\tunsigned long c;\n} UNREFERENCED;\n\n"
+		"#pragma pack(pop)\n"
+	)
+
+	def test_selects_only_referenced_blocks(self):
+		# The draft names the instance form; selection still picks the type.
+		text, names = _select_referenced_structs(
+			self.HEADER, "x = XBE_FILE_HEADER_00010000.a;"
+		)
+		assert names == ("XBE_FILE_HEADER",)
+		assert "} XBE_FILE_HEADER;" in text
+		assert "UNREFERENCED" not in text
+
+	def test_rewraps_selection_in_pack1(self):
+		# Offsets only hold under pack(1); the selected slice must carry it.
+		text, _ = _select_referenced_structs(self.HEADER, "XBE_FILE_HEADER_00010000.a;")
+		assert "#pragma pack(push, 1)" in text
+		assert "#pragma pack(pop)" in text
+
+	def test_no_reference_yields_empty(self):
+		assert _select_referenced_structs(self.HEADER, "int unrelated_code(void);") == ("", ())
+
+	def test_empty_header_yields_empty(self):
+		assert _select_referenced_structs("", "XBE_FILE_HEADER_00010000.a;") == ("", ())
+
+	def test_pulls_in_by_value_dependency_closure(self):
+		# draft references only OUTER; INNER is a by-value member and must be
+		# carried along, declared before OUTER (harvest emits deps first).
+		header = (
+			"#pragma pack(push, 1)\n\n"
+			"typedef struct {\n\tunsigned long a;\n} INNER;\n\n"
+			"typedef struct {\n\tINNER nested;\n} OUTER;\n\n"
+			"#pragma pack(pop)\n"
+		)
+		text, names = _select_referenced_structs(header, "OUTER_00020000.nested;")
+		assert set(names) == {"OUTER", "INNER"}
+		assert text.index("} INNER;") < text.index("} OUTER;")
+
+
+class TestWarmstartMirrorStructRewrite:
+	def test_struct_names_drive_attempt_zero_rewrite(self, tmp_path):
+		ws = FunctionWorkspace(root=tmp_path / "fn", function_name="_fn_X")
+		ws.initialize()
+		ws.ctx_h.write_text("typedef struct { int x; } XBE_FILE_HEADER;\n")
+		ws.ghidra_warmstart.write_text(
+			"void fn_X(void){ int y = XBE_FILE_HEADER_00010000.x; }\n"
+		)
+		_mirror_warmstart_as_attempt_zero(ws, struct_names=("XBE_FILE_HEADER",))
+		zero = (ws.history_dir / "0000.c").read_text()
+		assert "(*(XBE_FILE_HEADER *)0x00010000).x" in zero
+		assert "XBE_FILE_HEADER_00010000" not in zero
+
+	def test_without_struct_names_instance_is_left_raw(self, tmp_path):
+		ws = FunctionWorkspace(root=tmp_path / "fn", function_name="_fn_X")
+		ws.initialize()
+		ws.ghidra_warmstart.write_text("void fn_X(void){ XBE_FILE_HEADER_00010000.x; }\n")
+		_mirror_warmstart_as_attempt_zero(ws)  # no struct_names
+		zero = (ws.history_dir / "0000.c").read_text()
+		assert "XBE_FILE_HEADER_00010000" in zero
+
+
+class TestStructDeclsInCtxH:
+	def test_struct_block_injected_after_typedefs(self):
+		structs = (
+			"#pragma pack(push, 1)\n"
+			"typedef struct { int a; } XBE_FILE_HEADER;\n"
+			"#pragma pack(pop)\n"
+		)
+		out = _compose_ctx_h("fn_X", "_fn_X", struct_decls=structs)
+		assert "XBE_FILE_HEADER" in out
+		assert "Ghidra-harvested struct layouts" in out
+		# Baseline typedefs precede the harvested layouts.
+		assert out.index("typedef unsigned char") < out.index("XBE_FILE_HEADER")
+
+	def test_no_struct_decls_no_section(self):
+		out = _compose_ctx_h("fn_X", "_fn_X")
+		assert "Ghidra-harvested" not in out
 
 
 class TestKernelImportsInCtxH:

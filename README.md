@@ -46,6 +46,10 @@ agent_loop_run                                        ← src/agent_loop.py
   (`_fn_X@N`, `__imp__Name@N`) so stdcall call sites match
 - Auto-synthesizes `ctx.h`: typedefs, `@N`-pinned target/callee forward decls,
   and `__declspec(dllimport)` kernel decls from a curated signature table
+- Harvests Ghidra's recognized struct layouts (`XBE_FILE_HEADER`, ...) into
+  `ctx.h` (byte-exact, `pack(1)`) and rewrites `<Type>_<addr>` struct-instance
+  globals in the warm-start to typed absolute derefs, so struct-referencing
+  drafts resolve their member offsets instead of erroring on undeclared types
 - Seeds attempt 0 with a Ghidra headless pseudo-C warm-start (optional)
 - Runs a matching-decomp agent loop via LiteLLM
 
@@ -95,8 +99,9 @@ scripts/
   smoke_run.py      End-to-end agent loop against the bundled objdiff-smoke fixture (no XBE needed)
   halo2_sanity.py   End-to-end pipeline diagnostic against a real Halo 2 XBE
   webui.py          Local web UI for inspecting an XBE (sections, hex, disassembly, kernel ordinals)
-ghidra_scripts/DecompileOne.java
-                    Ghidra postscript: decompile one function by VA (see docs/ghidra_setup.md)
+ghidra_scripts/   Ghidra postscripts (see docs/ghidra_setup.md):
+                    DecompileOne.java — decompile one function by VA;
+                    DumpStructs.java  — harvest composite layouts as C typedefs
 recon/objdiff-smoke/
                     Real MSVC-emitted .obj fixtures + a bundled objdiff-cli
 data/xboxkrnl_ordinals.json
@@ -117,12 +122,11 @@ A mix of nostalgia and more greenfield decomp scene!
 
 In rough order of leverage:
 
-1. **Ghidra struct-layout harvest** — `ctx.h` synthesis already covers
-   typedefs, calling-convention-decorated callee/target decls, and kernel
-   imports. The remaining gap is Ghidra-recognized struct layouts
-   (`XBE_FILE_HEADER`, `.CertificateHeader`, …) from the XBE-loader symbol
-   DB — dump them via a Ghidra script so struct-referencing warm-starts
-   compile instead of erroring on undeclared types.
+1. **Stdcall warm-start signature fix** — Ghidra emits a function *definition*
+   without `__stdcall`, which collides with the `@N`-pinned forward decl in
+   `ctx.h` (MSVC C2373) and stalls attempt 0 for every stdcall function. Pin
+   the convention onto the draft's definition during normalization so the
+   warm-start compiles on the first shot.
 2. **Source-tree integrator** — splat-style YAML project layout, with the
    matched C committed back per-function.
 3. **Codebase index + embeddings** — once we have ≥5 matched functions,

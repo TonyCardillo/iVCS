@@ -14,6 +14,7 @@ from src.ghidra_decompile import (
 	GhidraConfig,
 	GhidraError,
 	_decompile_argv,
+	_dump_structs_argv,
 	_import_argv,
 	_run_with_lock_retry,
 	ghidra_config_from_env,
@@ -21,6 +22,8 @@ from src.ghidra_decompile import (
 	ghidra_project_ensure,
 	ghidra_pseudo_c_normalize,
 	ghidra_pseudo_c_normalize_for_prompt,
+	ghidra_struct_names,
+	ghidra_structs_dump,
 )
 
 
@@ -82,6 +85,96 @@ class TestDecompileArgv:
 		argv = _decompile_argv(cfg, 0x1000, tmp_path / "out.c")
 		script_dir = argv[argv.index("-scriptPath") + 1]
 		assert script_dir.endswith("ghidra_scripts")
+
+
+class TestDumpStructsArgv:
+	def test_argv_targets_program_and_skips_analysis(self, tmp_path):
+		cfg = _make_config(tmp_path)
+		argv = _dump_structs_argv(cfg, tmp_path / "structs.h")
+		assert argv[argv.index("-process") + 1] == "halo2_default.xbe"
+		assert "-noanalysis" in argv
+
+	def test_argv_uses_dump_structs_postscript_with_out_path(self, tmp_path):
+		cfg = _make_config(tmp_path)
+		out = tmp_path / "structs.h"
+		argv = _dump_structs_argv(cfg, out)
+		post = argv.index("-postScript")
+		# -postScript DumpStructs.java /path/to/structs.h
+		assert argv[post + 1] == "DumpStructs.java"
+		assert argv[post + 2] == str(out)
+
+	def test_script_path_points_at_repo_ghidra_scripts(self, tmp_path):
+		cfg = _make_config(tmp_path)
+		argv = _dump_structs_argv(cfg, tmp_path / "structs.h")
+		assert argv[argv.index("-scriptPath") + 1].endswith("ghidra_scripts")
+
+
+class TestStructsDump:
+	def _bootstrapped(self, tmp_path):
+		cfg = _make_config(tmp_path)
+		cfg.project_dir.mkdir(parents=True)
+		cfg.project_gpr.write_text("")  # marker
+		return cfg
+
+	def test_raises_when_project_missing_and_no_cache(self, tmp_path):
+		cfg = _make_config(tmp_path)  # no project_dir, no gpr, no cache
+		with pytest.raises(GhidraError, match="not bootstrapped"):
+			ghidra_structs_dump(cfg, analyze_headless_fn=lambda a: _completed(0))
+
+	def test_returns_and_caches_struct_source(self, tmp_path):
+		cfg = self._bootstrapped(tmp_path)
+		header = "typedef struct { int x; } XBE_FILE_HEADER;\n"
+
+		def fake(argv):
+			Path(argv[-1]).write_text(header)
+			return _completed(0, "INFO done")
+
+		out = ghidra_structs_dump(cfg, analyze_headless_fn=fake)
+		assert "XBE_FILE_HEADER" in out
+		# Cached for reuse across functions.
+		assert cfg.structs_h.is_file()
+		assert cfg.structs_h.read_text() == header
+
+	def test_second_call_uses_cache_without_invoking(self, tmp_path):
+		cfg = self._bootstrapped(tmp_path)
+		cfg.structs_h.write_text("typedef struct { int x; } CACHED;\n")
+
+		def fake(argv):  # pragma: no cover — must not run
+			raise AssertionError("should have hit the cache")
+
+		out = ghidra_structs_dump(cfg, analyze_headless_fn=fake)
+		assert "CACHED" in out
+
+	def test_force_rebuilds_even_with_cache(self, tmp_path):
+		cfg = self._bootstrapped(tmp_path)
+		cfg.structs_h.write_text("typedef struct { int x; } STALE;\n")
+
+		def fake(argv):
+			Path(argv[-1]).write_text("typedef struct { int y; } FRESH;\n")
+			return _completed(0)
+
+		out = ghidra_structs_dump(cfg, analyze_headless_fn=fake, force=True)
+		assert "FRESH" in out
+		assert "STALE" not in cfg.structs_h.read_text()
+
+	def test_raises_when_output_empty(self, tmp_path):
+		cfg = self._bootstrapped(tmp_path)
+
+		def fake(argv):
+			Path(argv[-1]).write_text("")
+			return _completed(0)
+
+		with pytest.raises(GhidraError, match="no output"):
+			ghidra_structs_dump(cfg, analyze_headless_fn=fake)
+
+	def test_raises_on_nonzero_return(self, tmp_path):
+		cfg = self._bootstrapped(tmp_path)
+
+		def fake(argv):
+			return _completed(1, stderr="java.lang.RuntimeException: boom")
+
+		with pytest.raises(GhidraError, match="struct dump failed"):
+			ghidra_structs_dump(cfg, analyze_headless_fn=fake)
 
 
 class TestProjectEnsure:
@@ -228,6 +321,55 @@ void FUN_002d0cf5(int param_1, undefined4 param_2)
 		assert "int local_1c" in out
 		assert "USHORT local_10" in out
 		assert "fn_002D0979" in out
+
+
+class TestStructNames:
+	def test_parses_struct_and_union_names_in_order(self):
+		header = (
+			"#pragma pack(push, 1)\n"
+			"typedef struct {\n\tint x;\n} XBE_FILE_HEADER;\n\n"
+			"typedef union {\n\tint y;\n} SOME_UNION;\n"
+			"#pragma pack(pop)\n"
+		)
+		assert ghidra_struct_names(header) == ("XBE_FILE_HEADER", "SOME_UNION")
+
+	def test_empty_header_has_no_names(self):
+		assert ghidra_struct_names("/* nothing here */\n") == ()
+
+
+class TestStructInstanceRewrite:
+	# Ghidra names a recognized struct instance at a fixed address
+	# `<TypeName>_<8hex>`. Xbox images load at a fixed base, so that instance is
+	# an absolute reference with no reloc — rewrite to a typed absolute deref so
+	# member offsets resolve against the harvested layout AND the disp32 matches.
+	NAMES = ("XBE_FILE_HEADER", "XBE_CERTIFICATE_HEADER")
+
+	def test_instance_value_becomes_typed_deref(self):
+		out = ghidra_pseudo_c_normalize(
+			"XBE_FILE_HEADER_00010000.CertificateHeader = 1;", struct_names=self.NAMES
+		)
+		assert out == "(*(XBE_FILE_HEADER *)0x00010000).CertificateHeader = 1;"
+
+	def test_instance_address_of_becomes_typed_cast(self):
+		out = ghidra_pseudo_c_normalize("p = &XBE_FILE_HEADER_00010000;", struct_names=self.NAMES)
+		assert out == "p = ((XBE_FILE_HEADER *)0x00010000);"
+
+	def test_no_struct_names_leaves_instance_untouched(self):
+		# Default (no harvested names) must not invent a rewrite.
+		src = "XBE_FILE_HEADER_00010000.x = 1;"
+		assert ghidra_pseudo_c_normalize(src) == src
+
+	def test_unharvested_identifier_not_rewritten(self):
+		# A name we didn't harvest is left alone even if it looks like an instance.
+		src = "WIDGET_00010000.x = 1;"
+		assert ghidra_pseudo_c_normalize(src, struct_names=self.NAMES) == src
+
+	def test_longest_matching_name_wins(self):
+		# XBE_CERTIFICATE_HEADER must not be clipped to a shorter prefix.
+		out = ghidra_pseudo_c_normalize(
+			"XBE_CERTIFICATE_HEADER_001d0000.TitleID;", struct_names=self.NAMES
+		)
+		assert out == "(*(XBE_CERTIFICATE_HEADER *)0x001d0000).TitleID;"
 
 
 class TestPseudoCNormalizeForPrompt:

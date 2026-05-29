@@ -10,6 +10,7 @@ thread progresses, so the UI can read state/iter/match% by reference.
 from __future__ import annotations
 
 import os
+import re
 import threading
 import time
 from dataclasses import dataclass
@@ -26,6 +27,7 @@ from src.ghidra_decompile import (
 	ghidra_decompile_function,
 	ghidra_project_ensure,
 	ghidra_pseudo_c_normalize,
+	ghidra_structs_dump,
 )
 from src.llm_clients import LiteLLMClient
 from src.project import FunctionEntry, Project
@@ -141,22 +143,20 @@ def launch_decomp_job(
 	if wipe_history:
 		_wipe_workspace_history(workspace)
 	workspace.target_obj.write_bytes(obj_bytes)
+
+	# Fetch the Ghidra draft and harvest the struct layouts it references before
+	# composing ctx.h, so the typedefs the draft needs are in place and the
+	# warm-start's `<Type>_<addr>` instances can be rewritten against them.
+	struct_decls, struct_names = (
+		_prepare_ghidra_warmstart(workspace, project, fn) if use_ghidra_warmstart else ("", ())
+	)
+
 	if reset_ctx_h or not workspace.ctx_h.is_file():
-		workspace.ctx_h.write_text(_compose_ctx_h(fn.name, mangled, callee_decls, kernel_imports))
+		workspace.ctx_h.write_text(
+			_compose_ctx_h(fn.name, mangled, callee_decls, kernel_imports, struct_decls)
+		)
 
-	if use_ghidra_warmstart and not workspace.ghidra_warmstart.is_file():
-		try:
-			cfg = ghidra_config_from_env(project.xbe_path)
-			ghidra_project_ensure(cfg)
-			draft = ghidra_decompile_function(fn.va, cfg)
-			workspace.ghidra_warmstart.write_text(draft)
-		except GhidraError as e:
-			# Best-effort: log and continue without the draft.
-			import sys
-
-			print(f"[launcher] Ghidra warm-start failed for {fn.name}: {e}", file=sys.stderr)
-
-	_mirror_warmstart_as_attempt_zero(workspace)
+	_mirror_warmstart_as_attempt_zero(workspace, struct_names=struct_names)
 
 	job = JobInfo(
 		workspace_path=workspace_path,
@@ -206,13 +206,18 @@ def launch_decomp_job(
 	return job
 
 
-def _mirror_warmstart_as_attempt_zero(workspace: FunctionWorkspace) -> None:
+def _mirror_warmstart_as_attempt_zero(
+	workspace: FunctionWorkspace, *, struct_names: tuple[str, ...] = ()
+) -> None:
 	"""Write ghidra_warmstart.c as 0000.c with ctx.h prepended.
 
 	Ghidra emits pseudo-C (undefined4, byte, FUN_xxxxxxxx...) which MSVC
 	won't accept. We normalize during the mirror so attempt 0 has a real
 	shot at compiling; the un-normalized draft stays at ghidra_warmstart.c
 	so the LLM sees Ghidra's "undefined" signal in its system prompt.
+
+	`struct_names` (the layouts harvested into ctx.h) lets the normalizer
+	rewrite the draft's `<Type>_<addr>` struct instances to typed derefs.
 	"""
 	if not workspace.ghidra_warmstart.is_file():
 		return
@@ -220,8 +225,79 @@ def _mirror_warmstart_as_attempt_zero(workspace: FunctionWorkspace) -> None:
 	if target.is_file():
 		return
 	ctx = workspace.ctx_h.read_text() if workspace.ctx_h.is_file() else ""
-	normalized = ghidra_pseudo_c_normalize(workspace.ghidra_warmstart.read_text())
+	normalized = ghidra_pseudo_c_normalize(
+		workspace.ghidra_warmstart.read_text(), struct_names=struct_names
+	)
 	target.write_text(ctx + "\n" + normalized)
+
+
+def _prepare_ghidra_warmstart(
+	workspace: FunctionWorkspace, project: Project, fn: FunctionEntry
+) -> tuple[str, tuple[str, ...]]:
+	"""Best-effort: fetch the Ghidra pseudo-C draft (if absent) and harvest the
+	struct layouts it references.
+
+	Returns (struct_decls, struct_names) for ctx.h synthesis and warm-start
+	normalization. On any GhidraError, logs and returns empties so the run
+	proceeds without struct context (or without the draft entirely).
+	"""
+	import sys
+
+	cfg = ghidra_config_from_env(project.xbe_path)
+	if not workspace.ghidra_warmstart.is_file():
+		try:
+			ghidra_project_ensure(cfg)
+			draft = ghidra_decompile_function(fn.va, cfg)
+			workspace.ghidra_warmstart.write_text(draft)
+		except GhidraError as e:
+			print(f"[launcher] Ghidra warm-start failed for {fn.name}: {e}", file=sys.stderr)
+			return "", ()
+	try:
+		header = ghidra_structs_dump(cfg)
+	except GhidraError as e:
+		print(f"[launcher] Ghidra struct dump failed for {fn.name}: {e}", file=sys.stderr)
+		return "", ()
+	return _select_referenced_structs(header, workspace.ghidra_warmstart.read_text())
+
+
+_STRUCT_BLOCK_PATTERN = re.compile(
+	r"typedef (?:struct|union) \{.*?\}\s*([A-Za-z_]\w*)\s*;", re.S
+)
+
+
+def _struct_referenced(name: str, text: str) -> bool:
+	"""True if `text` uses `name` as a type or as a `<name>_<8hex>` instance."""
+	return re.search(rf"\b{re.escape(name)}(?:_[0-9a-fA-F]{{8}})?\b", text) is not None
+
+
+def _select_referenced_structs(struct_header: str, draft: str) -> tuple[str, tuple[str, ...]]:
+	"""Pick the harvested typedef blocks the draft references, plus their
+	by-value dependency closure, re-wrapped in pack(1) (offsets depend on it).
+
+	Returns (header_text, names). Selection is driven entirely by the harvested
+	names, so it is binary-agnostic — no fixed struct list. Empty when nothing
+	matches, so ctx.h stays lean for functions that touch no structs."""
+	blocks = [(m.group(1), m.group(0)) for m in _STRUCT_BLOCK_PATTERN.finditer(struct_header)]
+	if not blocks:
+		return "", ()
+	by_name = dict(blocks)
+	referenced = {name for name, _ in blocks if _struct_referenced(name, draft)}
+	# Pull in any harvested struct used by-value inside an already-selected one.
+	changed = True
+	while changed:
+		changed = False
+		for name, _block in blocks:
+			if name in referenced:
+				continue
+			if any(_struct_referenced(name, by_name[r]) for r in referenced):
+				referenced.add(name)
+				changed = True
+	if not referenced:
+		return "", ()
+	selected = [block for name, block in blocks if name in referenced]
+	text = "#pragma pack(push, 1)\n\n" + "\n\n".join(selected) + "\n\n#pragma pack(pop)\n"
+	names = tuple(name for name, _ in blocks if name in referenced)
+	return text, names
 
 
 def _wipe_workspace_history(workspace: FunctionWorkspace) -> None:
@@ -285,10 +361,13 @@ def _compose_ctx_h(
 	mangled: str,
 	callee_decls: tuple[str, ...] = (),
 	kernel_imports: tuple[str, ...] = (),
+	struct_decls: str = "",
 ) -> str:
-	"""Build the auto-stub ctx.h: typedefs, target forward decl, kernel
-	import decls, same-binary callee decls."""
+	"""Build the auto-stub ctx.h: typedefs, Ghidra-harvested struct layouts,
+	target forward decl, kernel import decls, same-binary callee decls."""
 	parts = [_DEFAULT_CTX_H]
+	if struct_decls:
+		parts.append("\n/* Ghidra-harvested struct layouts. */\n" + struct_decls)
 	forward = _format_target_forward_decl(name, mangled)
 	if forward is not None:
 		parts.append("\n/* Target — pins mangling. */\n" + forward + "\n")
