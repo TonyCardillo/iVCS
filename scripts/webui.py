@@ -149,7 +149,7 @@ header nav a {
   text-transform: uppercase;
   font-size: 11px;
 }
-header nav a.active, header nav a:hover { color: var(--cyan); }
+header nav a:hover { color: var(--cyan); }
 main { padding: 24px; max-width: 1400px; margin: 0 auto; }
 .crumbs {
   color: var(--fg-faint);
@@ -667,18 +667,9 @@ def page(
 	title: str,
 	body: str,
 	current_path: str | None,
-	active: str = "",
 	refresh_seconds: int | None = None,
 ) -> str:
-	nav_items = [
-		("overview", "/"),
-		("sections", "/xbe" + (f"?path={html.escape(current_path)}" if current_path else "")),
-		("progress", "/progress"),
-	]
-	nav_html = "".join(
-		f'<a class="{"active" if active == name else ""}" href="{href}">{name}</a>'
-		for name, href in nav_items
-	)
+	nav_html = '<a href="/">overview</a>'
 	path_chip = (
 		f'<span class="muted tight">[ xbe ]</span> '
 		f'<span style="color: var(--amber);">{html.escape(current_path)}</span>'
@@ -784,7 +775,7 @@ def view_index(default_path: str = "") -> str:
 		)
 	}
 """
-	return page("iVCS", body, current_path=None, active="overview")
+	return page("iVCS", body, current_path=None)
 
 
 def view_xbe(path: str) -> str:
@@ -850,7 +841,7 @@ def view_xbe(path: str) -> str:
 		+ panel("Sections", sections_table, meta=f"{len(parsed.sections)} entries")
 		+ panel("Function explorer", fn_form, meta="carve + disassemble")
 	)
-	return page("XBE", body, current_path=path, active="sections")
+	return page("XBE", body, current_path=path)
 
 
 def _va_strip_html(parsed: ParsedXbe) -> str:
@@ -901,7 +892,7 @@ def view_section(path: str, name: str) -> str:
 		+ panel(f"Section · {name}", info)
 		+ panel("Hex (first 1 KiB)", f'<pre class="code">{hex_lines}</pre>')
 	)
-	return page(f"§{name}", body, current_path=path, active="sections")
+	return page(f"§{name}", body, current_path=path)
 
 
 def _flag_words(flags: int) -> str:
@@ -980,7 +971,7 @@ def view_function(path: str, va_str: str, size: int) -> str:
 		+ panel("Function", info)
 		+ panel("Disassembly", asm_block, meta=f"{size}B · x86 32-bit")
 	)
-	return page(f"fn {va:#x}", body, current_path=path, active="sections")
+	return page(f"fn {va:#x}", body, current_path=path)
 
 
 # ── Decomp workspace views ──────────────────────────────────────────────────
@@ -1287,7 +1278,6 @@ def view_decomp_run(root_str: str, current_path: str | None) -> str:
 		f"decomp · {root.name}",
 		body,
 		current_path=current_path,
-		active="progress",
 		refresh_seconds=refresh,
 	)
 
@@ -1381,7 +1371,7 @@ def view_decomp_attempt(root_str: str, n: int, current_path: str | None) -> str:
 		f'<p class="tight" style="display: flex; gap: 18px; padding: 4px 0;">{"  ".join(nav)}</p>'
 	)
 
-	return page(f"#{n:04d}", body="".join(sections), current_path=current_path, active="progress")
+	return page(f"#{n:04d}", body="".join(sections), current_path=current_path)
 
 
 _KIND_GLYPHS: dict[DiffKind, str] = {
@@ -1617,7 +1607,7 @@ def view_progress_index(current_path: str | None) -> str:
 """.replace("{autofocus}", " autofocus" if not projects else ""),
 	)
 	body = crumbs(("home", "/"), ("progress", None)) + recent + open_form
-	return page("progress", body, current_path=current_path, active="progress")
+	return page("progress", body, current_path=current_path)
 
 
 def view_progress(
@@ -1665,7 +1655,7 @@ def view_progress(
 		+ panel("Match distribution", histogram, meta="function count per 10% bucket")
 		+ panel("Functions", filter_bar + table, meta=f"{rng} · page {page_n}/{total_pages}")
 	)
-	return page(f"progress · {project.name}", body, current_path=current_path, active="progress")
+	return page(f"progress · {project.name}", body, current_path=current_path)
 
 
 _STATE_SORT_ORDER = {"matched": 0, "partial": 1, "untouched": 2}
@@ -2203,7 +2193,7 @@ def view_launch_form(project_path_str: str, va_str: str) -> str:
 		+ "".join(warnings)
 		+ panel("Launch decomp run", form, meta=f"active jobs: {active}/{_MAX_CONCURRENT_JOBS}")
 	)
-	return page(f"launch · {fn.name}", body, current_path=None, active="progress")
+	return page(f"launch · {fn.name}", body, current_path=None)
 
 
 def launch_job_from_form(
