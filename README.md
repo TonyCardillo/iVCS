@@ -55,6 +55,9 @@ agent_loop_run                                        ← src/agent_loop.py
   agrees with ctx.h instead of colliding (MSVC C2373/C2371), and padding
   Ghidra's under-count call sites up to each stdcall callee's `@N` arity
 - Runs a matching-decomp agent loop via LiteLLM
+- Integrates matched functions into a segment-organized source tree (grouped by
+  the XBE section each lives in), reporting per-segment matched/committed
+  coverage and flagging enumeration gaps/overlaps — `scripts/integrate.py`
 
 ## Quickstart
 
@@ -88,7 +91,8 @@ src/
   coff.py           Microsoft COFF/i386 .obj emitter
   carver.py         Three-line orchestrator: carve → resolve → coff
   workspace.py      Per-function filesystem layout
-  project.py        Project manifest (project.json) load/save
+  project.py        Project manifest (project.json) load/save + match aggregation
+  integrator.py     Segment model + commit matched C into the source tree + coverage
   compile_tool.py   The single tool the LLM agent gets; wraps cl.exe + objdiff
   agent_loop.py     LLM loop policy (budget, soft/hard timeouts, best tracking)
   ghidra_decompile.py  Ghidra-headless warm-start: pseudo-C drafts for attempt 0
@@ -99,6 +103,7 @@ src/
 tests/
 scripts/
   enumerate.py      Enumerate all functions in an XBE → project.json manifest
+  integrate.py      Commit matched functions into the source tree; coverage report
   smoke_run.py      End-to-end agent loop against the bundled objdiff-smoke fixture (no XBE needed)
   halo2_sanity.py   End-to-end pipeline diagnostic against a real Halo 2 XBE
   webui.py          Local web UI for inspecting an XBE (sections, hex, disassembly, kernel ordinals)
@@ -125,8 +130,13 @@ A mix of nostalgia and more greenfield decomp scene!
 
 In rough order of leverage:
 
-1. **Source-tree integrator** — splat-style YAML project layout, with the
-   matched C committed back per-function.
+1. **Whole-image relink + verify** — the integrator's hard half. Place each
+   matched function's compiled+relocated bytes back into a copy of the image
+   and byte-diff against the original, for a whole-image verified-matched %
+   (catches absolute-disp32 mismatches the relocation-aware per-function diff
+   masks). The `Link.Exe`/`Lib.Exe`-based real relink to a candidate XBE is the
+   stretch goal beyond byte-splice verification. (The segment model, commit, and
+   coverage report — `src/integrator.py` — already shipped.)
 2. **Codebase index + embeddings** — once we have ≥5 matched functions,
    embed them and retrieve similar examples as few-shot prompt context.
 3. **x86 permuter** — non-LLM C-source mutation engine (swap commutative ops,

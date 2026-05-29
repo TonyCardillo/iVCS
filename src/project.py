@@ -25,6 +25,7 @@ class Project:
 	xbe_path: Path
 	workspace_root: Path
 	functions: tuple[FunctionEntry, ...]
+	src_root: Path = Path("src_tree")
 
 	def workspace_for(self, fn: FunctionEntry) -> Path:
 		return self.workspace_root / fn.name
@@ -89,11 +90,60 @@ def project_load(path: Path | str) -> Project:
 	ws_raw = Path(raw.get("workspace_root", "./functions"))
 	workspace_root = ws_raw if ws_raw.is_absolute() else (base / ws_raw).resolve()
 
+	src_raw = Path(raw.get("src_root", "./src_tree"))
+	src_root = src_raw if src_raw.is_absolute() else (base / src_raw).resolve()
+
 	return Project(
 		name=raw["name"],
 		xbe_path=xbe_path,
 		workspace_root=workspace_root,
 		functions=tuple(functions),
+		src_root=src_root,
+	)
+
+
+def function_status(project: Project, fn: FunctionEntry) -> FunctionStatus:
+	"""Classify one function from its workspace `result.json`.
+
+	matched   = success flag set, or best_match_percent >= 100
+	partial   = some positive match but not complete
+	untouched = no result, or zero/None match
+	"""
+	ws_path = project.workspace_for(fn)
+	result = _load_json_or_none(ws_path / "result.json")
+	if result is None:
+		return FunctionStatus(
+			name=fn.name,
+			va=fn.va,
+			size=fn.size,
+			state="untouched",
+			best_match_percent=None,
+			iterations=0,
+			workspace_path=ws_path,
+			termination_reason=None,
+		)
+
+	best = result.get("best_match_percent")
+	success = bool(result.get("success"))
+	if success or (isinstance(best, (int, float)) and best >= 100.0):
+		state = "matched"
+	elif isinstance(best, (int, float)) and best > 0.0:
+		state = "partial"
+	else:
+		state = "untouched"
+
+	reason = result.get("termination_reason")
+	model = result.get("model")
+	return FunctionStatus(
+		name=fn.name,
+		va=fn.va,
+		size=fn.size,
+		state=state,
+		best_match_percent=float(best) if isinstance(best, (int, float)) else None,
+		iterations=int(result.get("iterations") or 0),
+		workspace_path=ws_path,
+		termination_reason=reason if isinstance(reason, str) else None,
+		model=model if isinstance(model, str) else None,
 	)
 
 
@@ -104,56 +154,16 @@ def project_aggregate(project: Project) -> ProjectStats:
 	total_bytes = sum(f.size for f in project.functions)
 
 	for fn in project.functions:
-		ws_path = project.workspace_for(fn)
-		result = _load_json_or_none(ws_path / "result.json")
-
-		if result is None:
-			statuses.append(
-				FunctionStatus(
-					name=fn.name,
-					va=fn.va,
-					size=fn.size,
-					state="untouched",
-					best_match_percent=None,
-					iterations=0,
-					workspace_path=ws_path,
-					termination_reason=None,
-				)
-			)
-			untouched_fns += 1
-			continue
-
-		best = result.get("best_match_percent")
-		iters = int(result.get("iterations") or 0)
-		success = bool(result.get("success"))
-		reason = result.get("termination_reason")
-		model = result.get("model")
-
-		if success or (isinstance(best, (int, float)) and best >= 100.0):
-			state = "matched"
+		status = function_status(project, fn)
+		statuses.append(status)
+		if status.state == "matched":
 			matched_fns += 1
 			matched_bytes += fn.size
-		elif isinstance(best, (int, float)) and best > 0.0:
-			state = "partial"
+		elif status.state == "partial":
 			partial_fns += 1
 			partial_bytes += fn.size
 		else:
-			state = "untouched"
 			untouched_fns += 1
-
-		statuses.append(
-			FunctionStatus(
-				name=fn.name,
-				va=fn.va,
-				size=fn.size,
-				state=state,
-				best_match_percent=float(best) if isinstance(best, (int, float)) else None,
-				iterations=iters,
-				workspace_path=ws_path,
-				termination_reason=reason if isinstance(reason, str) else None,
-				model=model if isinstance(model, str) else None,
-			)
-		)
 
 	return ProjectStats(
 		total_functions=len(project.functions),
