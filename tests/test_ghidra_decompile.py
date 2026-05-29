@@ -192,6 +192,15 @@ class TestPseudoCNormalize:
 		out = ghidra_pseudo_c_normalize("p = &DAT_004618c8;")
 		assert out == "p = ((int *)0x004618c8);"
 
+	def test_dat_underscore_and_ptr_variants(self):
+		# Ghidra's _DAT_ (overlap) and PTR_DAT_ (pointer-at-addr) name variants.
+		assert ghidra_pseudo_c_normalize("_DAT_005107fc = 0;") == "(*(int *)0x005107fc) = 0;"
+		assert ghidra_pseudo_c_normalize("x = PTR_DAT_0043e86c;") == "x = (*(int *)0x0043e86c);"
+
+	def test_c99_bool_literals_mapped(self):
+		out = ghidra_pseudo_c_normalize("bVar1 = true; bVar2 = false;")
+		assert out == "bVar1 = 1; bVar2 = 0;"
+
 	def test_leaves_LAB_references_alone(self):
 		# LAB_ are valid local goto labels; leave them untouched.
 		src = "goto LAB_002d0d7c;"

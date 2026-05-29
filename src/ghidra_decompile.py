@@ -235,8 +235,11 @@ _PSEUDO_C_TYPE_PATTERN = re.compile(
 	r"\b(" + "|".join(re.escape(k) for k in _PSEUDO_C_TYPE_MAP) + r")\b"
 )
 _PSEUDO_C_FUN_PATTERN = re.compile(r"\bFUN_([0-9a-fA-F]{8})\b")
-_PSEUDO_C_DAT_ADDR_PATTERN = re.compile(r"&\s*DAT_([0-9a-fA-F]{8})\b")
-_PSEUDO_C_DAT_PATTERN = re.compile(r"\bDAT_([0-9a-fA-F]{8})\b")
+# Match DAT_, _DAT_ (overlap variant), and PTR_DAT_ (pointer-at-address) globals.
+_DAT_PREFIX = r"_?(?:PTR_)?DAT_"
+_PSEUDO_C_DAT_ADDR_PATTERN = re.compile(r"&\s*" + _DAT_PREFIX + r"([0-9a-fA-F]{8})\b")
+_PSEUDO_C_DAT_PATTERN = re.compile(r"\b" + _DAT_PREFIX + r"([0-9a-fA-F]{8})\b")
+_PSEUDO_C_BOOL_LITERAL_PATTERN = re.compile(r"\b(true|false)\b")
 
 
 def _pseudo_c_dat_rewrite(c: str) -> str:
@@ -259,13 +262,14 @@ def ghidra_pseudo_c_normalize(c: str) -> str:
 	"""Best-effort rewrite of Ghidra's pseudo-C into something MSVC will parse.
 
 	Handles the common placeholder types, Ghidra's FUN_xxxxxxxx → our
-	fn_XXXXXXXX naming, and DAT_xxxxxxxx globals → absolute-address derefs.
-	Leaves LAB_ labels alone (valid local goto targets).
+	fn_XXXXXXXX naming, DAT_xxxxxxxx globals → absolute-address derefs, and the
+	C99 true/false literals. Leaves LAB_ labels alone (valid local goto targets).
 	"""
 	c = _PSEUDO_C_TYPE_PATTERN.sub(lambda m: _PSEUDO_C_TYPE_MAP[m.group(1)], c)
 	c = _PSEUDO_C_FUN_PATTERN.sub(lambda m: f"fn_{m.group(1).upper()}", c)
 	c = c.replace("XAPILIB::", "")  # C++ namespace prefix doesn't parse as C
 	c = _pseudo_c_dat_rewrite(c)
+	c = _PSEUDO_C_BOOL_LITERAL_PATTERN.sub(lambda m: "1" if m.group(1) == "true" else "0", c)
 	return c
 
 
