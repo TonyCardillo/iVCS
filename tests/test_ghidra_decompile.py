@@ -168,6 +168,18 @@ class TestPseudoCNormalize:
 		assert "int my_byte = 0" in out
 		assert "BYTE" not in out  # nothing matched
 
+	def test_bool_and_code_types_mapped(self):
+		# Ghidra emits C99 `bool` and the `code` function-pointer type; neither
+		# parses under MSVC 7.1 /TC (C89).
+		out = ghidra_pseudo_c_normalize("bool bVar1; code *pcVar2;")
+		assert "int bVar1" in out
+		assert "void *pcVar2" in out
+		assert "bool" not in out and "code" not in out
+
+	def test_strips_xapilib_namespace(self):
+		out = ghidra_pseudo_c_normalize("XAPILIB::CloseHandle(h);")
+		assert out == "CloseHandle(h);"
+
 	def test_dat_value_becomes_absolute_deref(self):
 		# Xbox images load at a fixed base, so DAT_<addr> globals are absolute
 		# references with no reloc in target.obj. Rewrite to absolute derefs so

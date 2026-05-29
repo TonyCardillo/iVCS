@@ -227,6 +227,8 @@ _PSEUDO_C_TYPE_MAP = {
 	"qword": "ULONGLONG",
 	"longlong": "__int64",
 	"ulonglong": "ULONGLONG",
+	"bool": "int",  # Ghidra emits C99 bool; MSVC 7.1 /TC is C89
+	"code": "void",  # Ghidra's `code *` function-pointer element type
 }
 
 _PSEUDO_C_TYPE_PATTERN = re.compile(
@@ -262,6 +264,7 @@ def ghidra_pseudo_c_normalize(c: str) -> str:
 	"""
 	c = _PSEUDO_C_TYPE_PATTERN.sub(lambda m: _PSEUDO_C_TYPE_MAP[m.group(1)], c)
 	c = _PSEUDO_C_FUN_PATTERN.sub(lambda m: f"fn_{m.group(1).upper()}", c)
+	c = c.replace("XAPILIB::", "")  # C++ namespace prefix doesn't parse as C
 	c = _pseudo_c_dat_rewrite(c)
 	return c
 
