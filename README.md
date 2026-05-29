@@ -11,7 +11,7 @@ default.xbe (4.6 MB)
    │
    ├─ xbe_load + xbe_function_carve(va, size)        ← src/xbe.py
    ├─ relocs_resolve                                  ← src/relocs.py
-   │     ├─ REL32  call rel32/jmp rel32/jcc rel32  →  _sub_*   or  _data_*
+   │     ├─ REL32  call rel32/jmp rel32/jcc rel32  →  _fn_*@N (conv-inferred)  or  _data_*
    │     └─ DIR32  call/jmp [imm32]                →  __imp__<mangled>  for kernel-thunk slots
    ├─ coff_object_build → target.obj                  ← src/coff.py
    │     (one .text section + IMAGE_REL_I386_{REL32,DIR32} relocs +
@@ -42,6 +42,10 @@ agent_loop_run                                        ← src/agent_loop.py
 - Discovers relocations in carved bytes via Capstone
 - Synthesizes valid Microsoft COFF/i386 `.obj` files that
   `objdiff-cli` parses cleanly and lines up against MSVC-emitted base objects
+- Infers callee calling conventions from their bytes and decorates symbols
+  (`_fn_X@N`, `__imp__Name@N`) so stdcall call sites match
+- Auto-synthesizes `ctx.h`: typedefs, `@N`-pinned target/callee forward decls,
+  and `__declspec(dllimport)` kernel decls from a curated signature table
 - Seeds attempt 0 with a Ghidra headless pseudo-C warm-start (optional)
 - Runs a matching-decomp agent loop via LiteLLM
 
@@ -113,18 +117,17 @@ A mix of nostalgia and more greenfield decomp scene!
 
 In rough order of leverage:
 
-1. **Calling-convention inference for internal callees** — disassemble the
-   first/last bytes of each REL32 target, detect `ret imm16` → emit
-   `_sub_*@N` symbol name. Closes the `__stdcall` `@N` decoration
-   mismatches observed on every Halo 2 function tried so far.
-2. **Auto-`ctx.h` synthesis** — from the `__imp__*` symbol set, look up each
-   kernel function's signature from a bundled table and emit
-   `__declspec(dllimport)` declarations automatically.
-3. **Source-tree integrator** — splat-style YAML project layout, with the
+1. **Ghidra struct-layout harvest** — `ctx.h` synthesis already covers
+   typedefs, calling-convention-decorated callee/target decls, and kernel
+   imports. The remaining gap is Ghidra-recognized struct layouts
+   (`XBE_FILE_HEADER`, `.CertificateHeader`, …) from the XBE-loader symbol
+   DB — dump them via a Ghidra script so struct-referencing warm-starts
+   compile instead of erroring on undeclared types.
+2. **Source-tree integrator** — splat-style YAML project layout, with the
    matched C committed back per-function.
-4. **Codebase index + embeddings** — once we have ≥5 matched functions,
+3. **Codebase index + embeddings** — once we have ≥5 matched functions,
    embed them and retrieve similar examples as few-shot prompt context.
-5. **x86 permuter** — non-LLM C-source mutation engine (swap commutative ops,
+4. **x86 permuter** — non-LLM C-source mutation engine (swap commutative ops,
    reorder local declarations, equivalent idioms) to brute-force the
    last-mile register-allocation gap without spending LLM tokens. Original
    `decomp-permuter` is MIPS-focused; an x86 port is real work but pays off
