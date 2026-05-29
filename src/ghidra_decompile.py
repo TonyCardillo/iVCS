@@ -233,17 +233,36 @@ _PSEUDO_C_TYPE_PATTERN = re.compile(
 	r"\b(" + "|".join(re.escape(k) for k in _PSEUDO_C_TYPE_MAP) + r")\b"
 )
 _PSEUDO_C_FUN_PATTERN = re.compile(r"\bFUN_([0-9a-fA-F]{8})\b")
+_PSEUDO_C_DAT_ADDR_PATTERN = re.compile(r"&\s*DAT_([0-9a-fA-F]{8})\b")
+_PSEUDO_C_DAT_PATTERN = re.compile(r"\bDAT_([0-9a-fA-F]{8})\b")
+
+
+def _pseudo_c_dat_rewrite(c: str) -> str:
+	"""Rewrite Ghidra's DAT_<addr> globals to absolute-address references.
+
+	Xbox images load at a fixed base, so a global accessed as DAT_004618c8 is
+	an absolute disp32 in the original — target.obj carries no relocation for
+	it. An `extern` decl would emit one (mismatch); an absolute-address deref
+	emits the same baked disp32, so the draft both compiles and can match.
+
+	`int` is a 4-byte default; byte/word accesses may read too wide, but the
+	agent refines from there. `&DAT_x` collapses to a plain pointer cast.
+	"""
+	c = _PSEUDO_C_DAT_ADDR_PATTERN.sub(lambda m: f"((int *)0x{m.group(1)})", c)
+	c = _PSEUDO_C_DAT_PATTERN.sub(lambda m: f"(*(int *)0x{m.group(1)})", c)
+	return c
 
 
 def ghidra_pseudo_c_normalize(c: str) -> str:
 	"""Best-effort rewrite of Ghidra's pseudo-C into something MSVC will parse.
 
-	Handles the common placeholder types and Ghidra's FUN_xxxxxxxx → our
-	fn_XXXXXXXX naming. Does NOT touch DAT_/LAB_ references; those still
-	need typed declarations the LLM provides.
+	Handles the common placeholder types, Ghidra's FUN_xxxxxxxx → our
+	fn_XXXXXXXX naming, and DAT_xxxxxxxx globals → absolute-address derefs.
+	Leaves LAB_ labels alone (valid local goto targets).
 	"""
 	c = _PSEUDO_C_TYPE_PATTERN.sub(lambda m: _PSEUDO_C_TYPE_MAP[m.group(1)], c)
 	c = _PSEUDO_C_FUN_PATTERN.sub(lambda m: f"fn_{m.group(1).upper()}", c)
+	c = _pseudo_c_dat_rewrite(c)
 	return c
 
 

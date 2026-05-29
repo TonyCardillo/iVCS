@@ -168,9 +168,26 @@ class TestPseudoCNormalize:
 		assert "int my_byte = 0" in out
 		assert "BYTE" not in out  # nothing matched
 
-	def test_leaves_DAT_and_LAB_references_alone(self):
-		# Those still need typed decls / are valid labels; not our job.
-		src = "x = &DAT_004618c8; goto LAB_002d0d7c;"
+	def test_dat_value_becomes_absolute_deref(self):
+		# Xbox images load at a fixed base, so DAT_<addr> globals are absolute
+		# references with no reloc in target.obj. Rewrite to absolute derefs so
+		# the draft compiles and can match the baked disp32.
+		out = ghidra_pseudo_c_normalize("DAT_00485aa0 = 1;")
+		assert out == "(*(int *)0x00485aa0) = 1;"
+
+	def test_dat_address_of_becomes_pointer_cast(self):
+		# &DAT_x must become a plain pointer cast, not &(*(int *)x).
+		out = ghidra_pseudo_c_normalize("p = &DAT_004618c8;")
+		assert out == "p = ((int *)0x004618c8);"
+
+	def test_leaves_LAB_references_alone(self):
+		# LAB_ are valid local goto labels; leave them untouched.
+		src = "goto LAB_002d0d7c;"
+		assert ghidra_pseudo_c_normalize(src) == src
+
+	def test_preserves_identifiers_that_contain_DAT(self):
+		# A 6-hex-digit or non-DAT_ token must not be rewritten.
+		src = "int my_DAT_thing = 0; DAT_12ab = 0;"
 		assert ghidra_pseudo_c_normalize(src) == src
 
 	def test_realistic_excerpt(self):
