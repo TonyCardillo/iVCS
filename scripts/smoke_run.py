@@ -69,9 +69,9 @@ def check_prereqs() -> None:
 	if not OBJDIFF_CLI.is_file():
 		missing.append(f"objdiff-cli missing at {OBJDIFF_CLI}")
 
-	msvc_dir = Path(os.environ.get("IVCS_MSVC_DIR", "/Users/entmoot/Code/msvc8.0p"))
+	msvc_dir = Path(os.environ.get("IVCS_MSVC_DIR", "/Users/entmoot/Code/xdk5849-vc71"))
 	if not (msvc_dir / "bin" / "cl.exe").is_file():
-		missing.append(f"widberg cl.exe not at {msvc_dir}/bin/cl.exe")
+		missing.append(f"cl.exe not at {msvc_dir}/bin/cl.exe")
 
 	import shutil
 

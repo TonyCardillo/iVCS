@@ -83,12 +83,13 @@ def _function_match_percent(diff: DiffResult, function_name: str) -> float | Non
 
 
 def default_compile_fn(c_source: Path, out_obj: Path, workspace_root: Path) -> CompileOutput:
-	"""Spawn widberg/msvc8.0p cl.exe under Wine.
+	"""Spawn XDK 5849's cl.exe 13.10.3077 (VC++ 7.1) under Wine.
 
-	IVCS_MSVC_DIR (default /Users/entmoot/Code/msvc8.0p) and IVCS_WINE
-	(default "wine") override the toolchain location.
+	IVCS_MSVC_DIR (default /Users/entmoot/Code/xdk5849-vc71) and IVCS_WINE
+	(default "wine") override the toolchain location. The layout expected
+	under IVCS_MSVC_DIR is `bin/`, `include/`, `lib/`.
 	"""
-	msvc_dir = Path(os.environ.get("IVCS_MSVC_DIR", "/Users/entmoot/Code/msvc8.0p"))
+	msvc_dir = Path(os.environ.get("IVCS_MSVC_DIR", "/Users/entmoot/Code/xdk5849-vc71"))
 	wine = os.environ.get("IVCS_WINE", "wine")
 
 	msvc_w = _winepath(wine, str(msvc_dir))
@@ -96,9 +97,9 @@ def default_compile_fn(c_source: Path, out_obj: Path, workspace_root: Path) -> C
 	obj_w = _winepath(wine, str(out_obj.absolute()))
 
 	env = os.environ.copy()
-	env["WINEPATH"] = f"{msvc_w}\\bin;{msvc_w}\\PlatformSDK\\bin"
-	env["INCLUDE"] = f"{msvc_w}\\ATLMFC\\INCLUDE;{msvc_w}\\INCLUDE;{msvc_w}\\PlatformSDK\\include"
-	env["LIB"] = f"{msvc_w}\\ATLMFC\\LIB;{msvc_w}\\LIB;{msvc_w}\\PlatformSDK\\lib"
+	env["WINEPATH"] = f"{msvc_w}\\bin"
+	env["INCLUDE"] = f"{msvc_w}\\include"
+	env["LIB"] = f"{msvc_w}\\lib"
 	env.setdefault("WINEDEBUG", "err+all,fixme-all")
 
 	completed = subprocess.run(

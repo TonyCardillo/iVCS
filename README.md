@@ -53,9 +53,9 @@ pip install -r requirements.txt
 # 2. Run the test suite
 pytest
 
-# 3. End-to-end demo on a real Halo 2 function (requires Wine + msvc8.0p + ANTHROPIC_API_KEY)
+# 3. End-to-end demo on a real Halo 2 function (requires Wine + XDK 5849 cl.exe + ANTHROPIC_API_KEY)
 # Place a Halo 2 default.xbe at /tmp/halo2_default.xbe first.
-IVCS_MSVC_DIR=/path/to/widberg/msvc8.0p \
+IVCS_MSVC_DIR=/path/to/xdk5849-vc71 \
 IVCS_WINE=wine \
 IVCS_OBJDIFF_CLI=$(pwd)/recon/objdiff-smoke/objdiff-cli \
 ANTHROPIC_API_KEY=sk-ant-... \
@@ -66,7 +66,7 @@ Environment:
 
 | variable | purpose | default |
 |---|---|---|
-| `IVCS_MSVC_DIR` | Root of the widberg/msvc8.0p toolchain (must contain `bin/cl.exe`). | `/Users/entmoot/Code/msvc8.0p` |
+| `IVCS_MSVC_DIR` | Root of the XDK 5849 VC7.1 toolchain (must contain `bin/cl.exe`). Layout: `bin/`, `include/`, `lib/`. | `/Users/entmoot/Code/xdk5849-vc71` |
 | `IVCS_WINE` | Wine binary to invoke `cl.exe` with. | `wine` (on PATH) |
 | `IVCS_OBJDIFF_CLI` | Path to the `objdiff-cli` binary. | `objdiff-cli` (on PATH) |
 
@@ -107,7 +107,8 @@ In rough order of leverage:
 
 1. **Calling-convention inference for internal callees** — disassemble the
    first/last bytes of each REL32 target, detect `ret imm16` → emit
-   `_sub_*@N` symbol name. Fixes a real chunk of the current 68% gap.
+   `_sub_*@N` symbol name. Closes the `__stdcall` `@N` decoration
+   mismatches observed on every Halo 2 function tried so far.
 2. **Auto-`ctx.h` synthesis** — from the `__imp__*` symbol set, look up each
    kernel function's signature from a bundled table and emit
    `__declspec(dllimport)` declarations automatically.
@@ -130,9 +131,10 @@ In rough order of leverage:
 ## Known constraints
 
 - **Wine-stable deprecation (2026-09-01).** Migrate to Whisky before then.
-- **VC8 only.** `widberg/msvc8.0p` packages MSVC 8.0 (XDK 5849+). Earlier
-  Xbox titles need VC 7.1.
-- Unclear whether Stock VC80 will have perfect byte-matching versus XDK VC80.
+- **Toolchain pinned to XDK 5849 (cl 13.10.3077, VC++ 7.1).** Verified
+  byte-identical to Halo 2 retail's CRT via `__chkstk` extraction from
+  `libcmt.lib`. Titles built on a different XDK family (e.g. 5933) would
+  need the cl from that XDK to match.
 
 ## Out of scope
 
@@ -155,8 +157,10 @@ In rough order of leverage:
   pattern this project mirrors
 - [mizuchi](https://github.com/macabeus/mizuchi) — pipeline-stage architecture
   ideas (m2c → permuter → LLM → compiler → objdiff → integrator)
-- [widberg/msvc8.0p](https://github.com/widberg/msvc8.0p) — packaged
-  MSVC 8.0 toolchain that runs under Wine
+- Microsoft Xbox XDK 5849 (Dec 2003) — the original Halo 2 toolchain
+  (cl 13.10.3077, `libcmt.lib`), run under Wine
+- [widberg/msvc8.0p](https://github.com/widberg/msvc8.0p) — initial
+  exploratory toolchain (VC 8.0); superseded
 - Chris Lewis, [The Unexpected Effectiveness of One-Shot Decompilation
   with Claude](https://blog.chrislewis.au/the-unexpected-effectiveness-of-one-shot-decompilation-with-claude/)
 - The matching-decomp community at decomp.me
