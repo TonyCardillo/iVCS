@@ -2311,7 +2311,7 @@ def view_launch_form(project_path_str: str, va_str: str) -> str:
       <input type="number" name="max_iterations" value="8" min="1" max="50">
     </div>
     <div class="k">hard timeout (s)</div> <div class="v">
-      <input type="number" name="hard_timeout_seconds" value="180" min="10" max="3600">
+      <input type="number" name="hard_timeout_seconds" value="300" min="10" max="3600">
     </div>
   </div>
   {existing_state_html}
@@ -2376,7 +2376,7 @@ def launch_job_from_form(
 
 	model = form.get("model", "claude-haiku-4-5").strip() or "claude-haiku-4-5"
 	max_iter = max(1, min(50, int(form.get("max_iterations", "8") or "8")))
-	timeout = max(10.0, min(3600.0, float(form.get("hard_timeout_seconds", "180") or "180")))
+	timeout = max(10.0, min(3600.0, float(form.get("hard_timeout_seconds", "300") or "300")))
 	wipe = form.get("wipe_history", "").lower() in ("1", "on", "true", "yes")
 	reset_ctx = form.get("reset_ctx_h", "").lower() in ("1", "on", "true", "yes")
 	use_ghidra = form.get("use_ghidra_warmstart", "").lower() in ("1", "on", "true", "yes")
