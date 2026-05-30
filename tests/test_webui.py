@@ -7,6 +7,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
 from webui import (  # noqa: E402
+	_attempt_model_label,
 	_attempt_status_labels,
 	_best_attempt,
 	_handle_notes_save,
@@ -172,6 +173,24 @@ def test_run_action_bar_hidden_without_project_path(tmp_path):
 
 def test_run_action_bar_hidden_when_va_undecodable(tmp_path):
 	assert _run_action_bar(tmp_path / "scratch", "/p/project.json", None, has_attempts=False) == ""
+
+
+def test_attempt_model_label_uses_own_sidecar():
+	got = _attempt_model_label({"n": 1, "model": "qwen/qwen3.5-9b"}, "fallback")
+	assert got == "qwen/qwen3.5-9b"
+
+
+def test_attempt_model_label_falls_back_to_run_model():
+	# Legacy attempt with no sidecar → the run's recorded model.
+	assert _attempt_model_label({"n": 2, "model": None}, "claude-haiku-4-5") == "claude-haiku-4-5"
+
+
+def test_attempt_model_label_none_for_baseline():
+	assert _attempt_model_label({"n": 0, "model": "ghidra"}, "claude-haiku-4-5") is None
+
+
+def test_attempt_model_label_none_when_nothing_known():
+	assert _attempt_model_label({"n": 1, "model": None}, None) is None
 
 
 def _att(n, mp, model=None):

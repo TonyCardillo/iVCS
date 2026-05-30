@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.llm_clients import LiteLLMClient, llm_client_for
+from src.llm_clients import LiteLLMClient, llm_client_for, llm_recorded_model
 
 
 def _mock_response(content: str | None = None, tool_calls: list[dict] | None = None) -> MagicMock:
@@ -134,3 +134,19 @@ class TestLlmClientFor:
 		monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
 		with pytest.raises(RuntimeError, match="ANTHROPIC_API_KEY"):
 			llm_client_for("claude-haiku-4-5")
+
+
+class TestRecordedModel:
+	def test_local_resolves_to_lm_studio_model_id(self, monkeypatch):
+		monkeypatch.setenv("IVCS_LLM_MODEL", "qwen/qwen3.5-9b")
+		assert llm_recorded_model("local") == "qwen/qwen3.5-9b"
+
+	def test_local_default_when_env_unset(self, monkeypatch):
+		monkeypatch.delenv("IVCS_LLM_MODEL", raising=False)
+		assert llm_recorded_model("local") == "qwen3-coder-30b"
+
+	def test_cloud_model_unchanged(self):
+		assert llm_recorded_model("claude-haiku-4-5") == "claude-haiku-4-5"
+
+	def test_ghidra_unchanged(self):
+		assert llm_recorded_model("ghidra") == "ghidra"

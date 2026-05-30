@@ -1173,6 +1173,17 @@ def _attempts_listing(workspace_root: Path) -> list[dict]:
 	return [_attempt_info(workspace_root, n) for n in sorted(numbers)]
 
 
+def _attempt_model_label(attempt: dict, fallback: str | None) -> str | None:
+	"""Model to show for one attempt row: its own `.model` sidecar, else the
+	run's recorded model — the fallback covers legacy attempts written before
+	per-attempt tagging (a single-model run's attempts all share that model).
+	The Ghidra baseline (#0000) carries its own badge, so it gets no chip.
+	"""
+	if attempt["n"] == 0:
+		return None
+	return attempt.get("model") or fallback
+
+
 def _best_attempt(attempts: list[dict]) -> dict | None:
 	"""The attempt that owns best.c: highest match%, ties broken by earliest.
 
@@ -1339,9 +1350,11 @@ def view_decomp_run(root_str: str, current_path: str | None) -> str:
 			if a["n"] == 0
 			else ""
 		)
+		attempt_model = _attempt_model_label(a, (result or {}).get("model"))
 		model_chip = (
-			f'<span class="attempt-model" title="model for this attempt">{html.escape(a["model"])}</span>'
-			if a.get("model") and a["n"] != 0
+			f'<span class="attempt-model" title="model for this attempt">'
+			f"{html.escape(attempt_model)}</span>"
+			if attempt_model
 			else ""
 		)
 		timeline_rows.append(

@@ -30,7 +30,7 @@ from src.ghidra_decompile import (
 	ghidra_pseudo_c_normalize,
 	ghidra_structs_dump,
 )
-from src.llm_clients import llm_client_for
+from src.llm_clients import llm_client_for, llm_recorded_model
 from src.project import FunctionEntry, Project
 from src.relocs import (
 	RelocKind,
@@ -195,12 +195,15 @@ def launch_decomp_job(
 		use_ghidra_warmstart=use_ghidra_warmstart,
 	)
 
+	# Record the resolved model name (e.g. the LM Studio model id for "local"),
+	# so attempts, best.c, and the banner name the real AI, not the run mode.
+	recorded_model = llm_recorded_model(model)
 	job = JobInfo(
 		workspace_path=workspace.root,
 		function_name=workspace.function_name,
 		va=fn.va,
 		size=fn.size,
-		model=model,
+		model=recorded_model,
 		max_iterations=max_iterations,
 		hard_timeout_seconds=hard_timeout_seconds,
 	)
@@ -218,7 +221,7 @@ def launch_decomp_job(
 			else:
 				llm = llm_client_for(model, api_key=key)
 				config = AgentConfig(
-					model=model,
+					model=recorded_model,
 					api_base="",
 					max_iterations=max_iterations,
 					hard_timeout_seconds=hard_timeout_seconds,

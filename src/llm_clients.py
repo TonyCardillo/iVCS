@@ -53,6 +53,18 @@ class LiteLLMClient:
 		return result
 
 
+def llm_recorded_model(model: str) -> str:
+	"""The model name to record and display for a run mode.
+
+	`"local"` resolves to the actual LM Studio model id (`IVCS_LLM_MODEL`, e.g.
+	`qwen/qwen3.5-9b`) so reports name the real AI rather than the generic mode.
+	Cloud models and `"ghidra"` pass through unchanged.
+	"""
+	if model == "local":
+		return os.environ.get("IVCS_LLM_MODEL", _LM_STUDIO_MODEL)
+	return model
+
+
 def llm_client_for(model: str, *, api_key: str | None = None) -> LiteLLMClient:
 	"""Build the LLM client for a run mode.
 

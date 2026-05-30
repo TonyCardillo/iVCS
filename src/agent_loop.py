@@ -364,10 +364,10 @@ def _extract_c_code(response: dict) -> str | None:
 	if isinstance(content, str):
 		match = re.search(r"```c\s*\n(.*?)```", content, re.DOTALL)
 		if match:
-			return match.group(1)
+			return match.group(1).strip()
 		match = re.search(r"```\s*\n(.*?)```", content, re.DOTALL)
 		if match:
-			return match.group(1)
+			return match.group(1).strip()
 
 	return None
 

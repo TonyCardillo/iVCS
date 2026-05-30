@@ -48,7 +48,7 @@ from src.compile_tool import default_compile_fn, default_diff_fn  # noqa: E402
 from src.fingerprint import project_fingerprints  # noqa: E402
 from src.launcher import prepare_decomp_workspace  # noqa: E402
 from src.libmatch import sdk_manifest_load  # noqa: E402
-from src.llm_clients import llm_client_for  # noqa: E402
+from src.llm_clients import llm_client_for, llm_recorded_model  # noqa: E402
 from src.project import FunctionEntry, function_status, project_load  # noqa: E402
 from src.relocs import relocs_discover  # noqa: E402
 from src.symbols import symbol_map_load  # noqa: E402
@@ -75,7 +75,7 @@ def _make_run_one(project, parsed, symbols, *, max_iterations: int, timeout: flo
 				project, fn, parsed=parsed, label_for=symbols.label_for
 			)
 			config = AgentConfig(
-				model="local",
+				model=llm_recorded_model("local"),
 				api_base="",
 				max_iterations=max_iterations,
 				hard_timeout_seconds=timeout,
