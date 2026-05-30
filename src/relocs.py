@@ -201,3 +201,40 @@ def _kernel_import_name_at(target_va: int, parsed: ParsedXbe) -> str | None:
 	if ordinal is None:
 		return None
 	return xboxkrnl_mangled_get(ordinal) or xboxkrnl_name_get(ordinal)
+
+
+_THUNK_SLOT_LIMIT = 4096  # null-terminated table; a bound against runaway scans
+
+
+def relocs_kernel_import_va_map(parsed: ParsedXbe) -> dict[str, int]:
+	"""Map each kernel-import decorated name to its thunk-table slot VA.
+
+	The inverse of `_kernel_import_name_at`: the whole-image relocator resolves an
+	`__imp__<name>` symbol back to the slot address it occupied. Keyed by the same
+	decorated name `reloc_symbol_name` emits after the `__imp__` prefix. Walks the
+	null-terminated thunk table from its base; non-ordinal slots are skipped.
+	"""
+	try:
+		thunk_va = xbe_kernel_thunk_address_get(parsed)
+	except XbeFormatError:
+		return {}
+	section = xbe_section_containing_va(parsed, thunk_va)
+	if section is None:
+		return {}
+
+	out: dict[str, int] = {}
+	for i in range(_THUNK_SLOT_LIMIT):
+		slot_va = thunk_va + i * 4
+		file_offset = section.raw_address + (slot_va - section.virtual_address)
+		if file_offset + 4 > len(parsed.data):
+			break
+		raw = struct.unpack_from("<I", parsed.data, file_offset)[0]
+		if raw == 0:
+			break  # null terminator ends the table
+		if not (raw & _IMAGE_ORDINAL_FLAG32):
+			continue
+		ordinal = raw & 0x7FFFFFFF
+		name = xboxkrnl_mangled_get(ordinal) or xboxkrnl_name_get(ordinal)
+		if name:
+			out[name] = slot_va
+	return out

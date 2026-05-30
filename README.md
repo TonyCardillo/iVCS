@@ -58,6 +58,11 @@ agent_loop_run                                        ← src/agent_loop.py
 - Integrates matched functions into a segment-organized source tree (grouped by
   the XBE section each lives in), reporting per-segment matched/committed
   coverage and flagging enumeration gaps/overlaps — `scripts/integrate.py`
+- Byte-splice verifies matched functions against the original image: recompiles
+  each matched `best.c`, relocates it to the VA it actually occupies (a
+  one-function linker over the compiled COFF), and byte-compares — a whole-image
+  verified-matched % that catches address mistakes the relocation-aware
+  per-function diff masks (`scripts/integrate.py verify`)
 
 ## Quickstart
 
@@ -89,6 +94,8 @@ src/
   xboxkrnl.py       371-entry ordinal → name table (ports abaire/xbdm_gdb_bridge data)
   relocs.py         REL32 + DIR32 discovery via Capstone; __imp__ resolution
   coff.py           Microsoft COFF/i386 .obj emitter
+  coff_read.py      COFF/i386 .obj reader (inverse of coff.py) for whole-image verify
+  relink.py         One-function linker: place compiled bytes at their real VA
   carver.py         Three-line orchestrator: carve → resolve → coff
   workspace.py      Per-function filesystem layout
   project.py        Project manifest (project.json) load/save + match aggregation
@@ -130,13 +137,13 @@ A mix of nostalgia and more greenfield decomp scene!
 
 In rough order of leverage:
 
-1. **Whole-image relink + verify** — the integrator's hard half. Place each
-   matched function's compiled+relocated bytes back into a copy of the image
-   and byte-diff against the original, for a whole-image verified-matched %
-   (catches absolute-disp32 mismatches the relocation-aware per-function diff
-   masks). The `Link.Exe`/`Lib.Exe`-based real relink to a candidate XBE is the
-   stretch goal beyond byte-splice verification. (The segment model, commit, and
-   coverage report — `src/integrator.py` — already shipped.)
+1. **Real relink via `Link.Exe`** — drive the XDK linker over the committed
+   `.obj`s into a candidate section image and diff against the original at the
+   section-bytes level, so the match is proven by the real linker rather than
+   our one-function relocator. Producing a bootable XBE (headers/cert) stays out
+   of scope; verification is at section-bytes level only. (The byte-splice
+   verifier — `scripts/integrate.py verify`, `src/relink.py`, `src/coff_read.py`
+   — and the segment model / commit / coverage report already shipped.)
 2. **Codebase index + embeddings** — once we have ≥5 matched functions,
    embed them and retrieve similar examples as few-shot prompt context.
 3. **x86 permuter** — non-LLM C-source mutation engine (swap commutative ops,

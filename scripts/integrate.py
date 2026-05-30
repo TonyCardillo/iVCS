@@ -5,11 +5,14 @@ Usage:
     python scripts/integrate.py report path/to/project.json
     python scripts/integrate.py commit path/to/project.json [--function NAME]
                                                              [--force] [--no-compile]
+    python scripts/integrate.py verify path/to/project.json
 
 `report` prints per-segment matched / committed coverage (the splat-style
 progress view). `commit` promotes matched functions' best.c into
 <src_root>/<section>/<name>.c — all matched functions, or one named via
---function (with --force to commit a partial).
+--function (with --force to commit a partial). `verify` recompiles each matched
+function, relocates it to its real VA, and byte-compares against the original
+image — a whole-image verified-matched % (needs Wine + cl.exe).
 """
 
 from __future__ import annotations
@@ -23,6 +26,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
 from src.integrator import (  # noqa: E402
+	image_splice_verify,
 	integrate_commit,
 	project_coverage,
 )
@@ -82,9 +86,23 @@ def _commit(project, parsed, *, function: str | None, force: bool, no_compile: b
 	return 0
 
 
+def _verify(project, parsed) -> int:
+	result = image_splice_verify(project, parsed)
+	pct = result.verified_percent
+	print(
+		f"{project.name}: {result.verified_bytes:,}/{result.matched_bytes:,} "
+		f"matched bytes splice-verified against the original image ({pct:.1f}%)"
+	)
+	for fv in result.functions:
+		mark = "ok  " if fv.is_verified else "FAIL"
+		detail = "" if fv.reason is None else f"  ({fv.reason})"
+		print(f"  {mark} {fv.name} @ {fv.va:#010x}  {fv.size:>6,} B{detail}")
+	return 0
+
+
 def main() -> int:
 	parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-	parser.add_argument("command", choices=("report", "commit"))
+	parser.add_argument("command", choices=("report", "commit", "verify"))
 	parser.add_argument("project", type=Path, help="Path to project.json")
 	parser.add_argument("--function", default=None, help="Commit only this function")
 	parser.add_argument("--force", action="store_true", help="Commit even if not matched")
@@ -102,6 +120,8 @@ def main() -> int:
 
 	if args.command == "report":
 		return _report(project, parsed)
+	if args.command == "verify":
+		return _verify(project, parsed)
 	return _commit(
 		project, parsed, function=args.function, force=args.force, no_compile=args.no_compile
 	)

@@ -14,6 +14,7 @@ from src.relocs import (
 	convention_from_bytes,
 	reloc_symbol_name,
 	relocs_discover,
+	relocs_kernel_import_va_map,
 	relocs_resolve,
 )
 from src.xbe import (
@@ -356,3 +357,55 @@ class TestRelocsResolveCombines:
 				symbol_name="_fn_00012000",
 			)
 		]
+
+
+class TestKernelImportVaMap:
+	BASE = 0x00010000
+	IMAGE_SIZE = 0x00100000
+
+	def test_maps_decorated_name_to_slot_va(self):
+		thunk_va = 0x00012000
+		# Two ordinals then a null terminator: 187=NtClose@4,
+		# 184=NtAllocateVirtualMemory@20.
+		thunk_bytes = (
+			struct.pack("<I", 187 | 0x80000000)
+			+ struct.pack("<I", 184 | 0x80000000)
+			+ struct.pack("<I", 0)
+		)
+		parsed = xbe_parse(
+			build_minimal_xbe(
+				base_addr=self.BASE,
+				size_of_image=self.IMAGE_SIZE,
+				entry_point_xor=0x00011000 ^ XBE_EP_KEY_RETAIL,
+				kernel_thunk_address_xor=thunk_va ^ XBE_KT_KEY_RETAIL,
+				sections=[
+					(".text", SECTION_FLAG_EXECUTABLE, b"\x90", 0x00011000),
+					(".rdata", SECTION_FLAG_EXECUTABLE, thunk_bytes, thunk_va),
+				],
+			)
+		)
+		va_map = relocs_kernel_import_va_map(parsed)
+		assert va_map["NtClose@4"] == thunk_va
+		assert va_map["NtAllocateVirtualMemory@20"] == thunk_va + 4
+
+	def test_stops_at_null_terminator(self):
+		thunk_va = 0x00012000
+		thunk_bytes = (
+			struct.pack("<I", 187 | 0x80000000)
+			+ struct.pack("<I", 0)  # terminator
+			+ struct.pack("<I", 184 | 0x80000000)  # past the table — must be ignored
+		)
+		parsed = xbe_parse(
+			build_minimal_xbe(
+				base_addr=self.BASE,
+				size_of_image=self.IMAGE_SIZE,
+				entry_point_xor=0x00011000 ^ XBE_EP_KEY_RETAIL,
+				kernel_thunk_address_xor=thunk_va ^ XBE_KT_KEY_RETAIL,
+				sections=[
+					(".text", SECTION_FLAG_EXECUTABLE, b"\x90", 0x00011000),
+					(".rdata", SECTION_FLAG_EXECUTABLE, thunk_bytes, thunk_va),
+				],
+			)
+		)
+		va_map = relocs_kernel_import_va_map(parsed)
+		assert va_map == {"NtClose@4": thunk_va}

@@ -13,16 +13,20 @@ authoritative, so nothing is hand-authored or duplicated into config.
 Phase 1 (here): the segment model — grouping, gaps, overlaps, source paths.
 """
 
+import re
 import shutil
 import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from src.coff_read import CoffObject, coff_object_read
 from src.compile_tool import CompileOutput, default_compile_fn
 from src.project import FunctionEntry, Project, function_status
+from src.relink import RelinkError, relink_place
+from src.relocs import relocs_kernel_import_va_map
 from src.workspace import FunctionWorkspace
-from src.xbe import ParsedXbe, xbe_section_containing_va
+from src.xbe import ParsedXbe, XbeFormatError, xbe_function_carve, xbe_section_containing_va
 
 CompileFn = Callable[[Path, Path, Path], CompileOutput]
 """(c_source, out_obj, workspace_root) -> CompileOutput. Injected for testing."""
@@ -146,6 +150,11 @@ def function_source_path(project: Project, parsed: ParsedXbe, fn: FunctionEntry)
 	return project.src_root / section_dir / f"{fn.name}.c"
 
 
+def _self_contained_source(ctx_filename: str, best_c: str) -> str:
+	"""best.c carries no include; prepend its copied ctx.h so it builds alone."""
+	return f'#include "{ctx_filename}"\n\n{best_c}'
+
+
 @dataclass(frozen=True)
 class CommitResult:
 	"""Outcome of committing one function's source into the tree.
@@ -190,7 +199,7 @@ def integrate_commit(
 	dest.parent.mkdir(parents=True, exist_ok=True)
 	ctx_dest = dest.with_name(f"{fn.name}.ctx.h")
 	ctx_dest.write_text(workspace.ctx_h.read_text())
-	dest.write_text(f'#include "{ctx_dest.name}"\n\n{workspace.best_c.read_text()}')
+	dest.write_text(_self_contained_source(ctx_dest.name, workspace.best_c.read_text()))
 
 	obj_dir = Path(tempfile.mkdtemp())
 	try:
@@ -251,3 +260,137 @@ def project_coverage(project: Project, parsed: ParsedXbe) -> tuple[SegmentCovera
 			)
 		)
 	return tuple(coverage)
+
+
+# --- Phase 4a: whole-image byte-splice verification -------------------------
+#
+# The per-function objdiff is relocation-aware: it masks the rel32/disp32 fields
+# so a function can read "100% matched" even if a symbol resolves to the wrong
+# address. Splice verification closes that gap — recompile the matched source,
+# relocate it to the VA the function actually occupies, and byte-compare against
+# the original image. A whole-image "verified %" is a stronger claim than the
+# sum of per-function match percents.
+
+_FN_OR_DATA_SYMBOL = re.compile(r"^_?(?:fn|data)_([0-9A-Fa-f]{8})(?:@\d+)?$")
+_IMP_PREFIX = "__imp__"
+
+
+def _image_symbol_resolver(parsed: ParsedXbe) -> Callable[[str], int | None]:
+	"""Resolve a compiled object's external symbol names back to image VAs.
+
+	`_fn_<va>` / `_data_<va>` carry the absolute VA in the name itself (that's how
+	`relocs.reloc_symbol_name` minted them); `__imp__<export>` resolves to the
+	kernel thunk-table slot the import occupied.
+	"""
+	imports = relocs_kernel_import_va_map(parsed)
+
+	def resolve(name: str) -> int | None:
+		if name.startswith(_IMP_PREFIX):
+			return imports.get(name[len(_IMP_PREFIX) :])
+		match = _FN_OR_DATA_SYMBOL.match(name)
+		if match is not None:
+			return int(match.group(1), 16)
+		return None
+
+	return resolve
+
+
+def _compiled_function_object(
+	project: Project, fn: FunctionEntry, compile_fn: CompileFn
+) -> CoffObject | None:
+	"""Recompile a matched function's best.c standalone; return the parsed object.
+
+	None when the workspace lacks inputs or the recompile fails — the verifier
+	records that as an unverified function rather than raising.
+	"""
+	workspace = FunctionWorkspace(root=project.workspace_for(fn), function_name=fn.name)
+	if not workspace.best_c.is_file() or not workspace.ctx_h.is_file():
+		return None
+
+	build_dir = Path(tempfile.mkdtemp())
+	try:
+		ctx = build_dir / f"{fn.name}.ctx.h"
+		ctx.write_text(workspace.ctx_h.read_text())
+		src = build_dir / f"{fn.name}.c"
+		src.write_text(_self_contained_source(ctx.name, workspace.best_c.read_text()))
+		obj = build_dir / f"{fn.name}.obj"
+		if not compile_fn(src, obj, build_dir).success or not obj.is_file():
+			return None
+		return coff_object_read(obj.read_bytes())
+	finally:
+		shutil.rmtree(build_dir, ignore_errors=True)
+
+
+@dataclass(frozen=True)
+class FunctionVerify:
+	"""One matched function's splice result: how many of its bytes, placed at
+	its real VA, reproduce the original image. `reason` is None on a full match."""
+
+	name: str
+	va: int
+	size: int
+	verified_bytes: int
+	reason: str | None
+
+	@property
+	def is_verified(self) -> bool:
+		return self.reason is None and self.verified_bytes == self.size
+
+
+@dataclass(frozen=True)
+class ImageVerify:
+	functions: tuple[FunctionVerify, ...]
+	matched_bytes: int
+	verified_bytes: int
+
+	@property
+	def verified_percent(self) -> float:
+		return (self.verified_bytes / self.matched_bytes * 100.0) if self.matched_bytes else 0.0
+
+
+def _function_splice_verify(
+	project: Project,
+	parsed: ParsedXbe,
+	fn: FunctionEntry,
+	resolve: Callable[[str], int | None],
+	compile_fn: CompileFn,
+) -> FunctionVerify:
+	try:
+		original = xbe_function_carve(parsed, fn.va, fn.size)
+	except XbeFormatError as exc:
+		return FunctionVerify(fn.name, fn.va, fn.size, 0, f"carve failed: {exc}")
+
+	obj = _compiled_function_object(project, fn, compile_fn)
+	if obj is None:
+		return FunctionVerify(fn.name, fn.va, fn.size, 0, "recompile failed or missing inputs")
+
+	try:
+		placed = relink_place(obj, fn.va, resolve)
+	except RelinkError as exc:
+		return FunctionVerify(fn.name, fn.va, fn.size, 0, f"relink failed: {exc}")
+
+	verified = sum(1 for i in range(fn.size) if i < len(placed) and placed[i] == original[i])
+	reason = None if verified == fn.size else f"{verified}/{fn.size} bytes match"
+	return FunctionVerify(fn.name, fn.va, fn.size, verified, reason)
+
+
+def image_splice_verify(
+	project: Project,
+	parsed: ParsedXbe,
+	*,
+	compile_fn: CompileFn = default_compile_fn,
+) -> ImageVerify:
+	"""Recompile every matched function, relocate it to its VA, and byte-compare
+	against the original image. Returns per-function and whole-image verified
+	byte counts."""
+	resolve = _image_symbol_resolver(parsed)
+	results = [
+		_function_splice_verify(project, parsed, fn, resolve, compile_fn)
+		for fn in project.functions
+		if function_status(project, fn).state == "matched"
+	]
+	return ImageVerify(
+		functions=tuple(results),
+		matched_bytes=sum(r.size for r in results),
+		verified_bytes=sum(r.verified_bytes for r in results),
+	)
