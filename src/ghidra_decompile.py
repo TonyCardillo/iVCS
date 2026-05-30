@@ -15,6 +15,7 @@ import tempfile
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 
 _GHIDRA_SCRIPTS_DIR = Path(__file__).parent.parent / "ghidra_scripts"
@@ -101,7 +102,7 @@ def ghidra_project_ensure(
 
 	config.project_dir.mkdir(parents=True, exist_ok=True)
 	argv = _import_argv(config)
-	run = analyze_headless_fn or _default_run
+	run = analyze_headless_fn or partial(_default_run, timeout_seconds=timeout_seconds)
 	result = run(argv)
 
 	if result.returncode != 0 or _ANALYSIS_SUCCESS_MARKER not in (result.stdout or ""):
@@ -133,7 +134,7 @@ def ghidra_decompile_function(
 		out_path = Path(f.name)
 	try:
 		argv = _decompile_argv(config, va, out_path)
-		run = analyze_headless_fn or _default_run
+		run = analyze_headless_fn or partial(_default_run, timeout_seconds=timeout_seconds)
 		result = _run_with_lock_retry(argv, run)
 		if result.returncode != 0:
 			raise GhidraError(
@@ -180,7 +181,7 @@ def ghidra_structs_dump(
 		out_path = Path(f.name)
 	try:
 		argv = _dump_structs_argv(config, out_path)
-		run = analyze_headless_fn or _default_run
+		run = analyze_headless_fn or partial(_default_run, timeout_seconds=timeout_seconds)
 		result = _run_with_lock_retry(argv, run)
 		if result.returncode != 0:
 			raise GhidraError(
@@ -267,13 +268,15 @@ def _dump_structs_argv(config: GhidraConfig, out_path: Path) -> list[str]:
 	]
 
 
-def _default_run(argv: list[str]) -> subprocess.CompletedProcess[str]:
+def _default_run(
+	argv: list[str], timeout_seconds: float = 600.0
+) -> subprocess.CompletedProcess[str]:
 	return subprocess.run(
 		argv,
 		capture_output=True,
 		text=True,
 		check=False,
-		timeout=600,
+		timeout=timeout_seconds,
 	)
 
 
@@ -459,9 +462,7 @@ def ghidra_pseudo_c_normalize(
 	return c
 
 
-_STRUCT_TYPEDEF_NAME_PATTERN = re.compile(
-	r"^\}\s*([A-Za-z_]\w*)\s*;", re.MULTILINE
-)
+_STRUCT_TYPEDEF_NAME_PATTERN = re.compile(r"^\}\s*([A-Za-z_]\w*)\s*;", re.MULTILINE)
 
 
 def ghidra_struct_names(header: str) -> tuple[str, ...]:

@@ -113,6 +113,29 @@ class TestImmediateMatch:
 		assert result.termination_reason == "matched"
 		assert result.iterations == 1
 
+	def test_match_at_or_above_100_finalizes_matched_example(self, tmp_path):
+		# A diff percent at/above 100 (objdiff emits an unclamped float) must
+		# finalize as matched, consistent with project.py's `>= 100.0` aggregator
+		# threshold. An exact `== 100.0` check would loop forever on float noise.
+		ws = _make_workspace(tmp_path)
+		llm = FakeLLMClient(
+			[
+				assistant_tool_call(
+					"compile_and_view_assembly", {"c_code": "int classify(int x){return x;}\n"}
+				)
+			]
+		)
+		result = agent_loop_run(
+			workspace=ws,
+			target_asm="ret",
+			config=_make_config(),
+			llm_client=llm,
+			compile_fn=_compile_ok,
+			diff_fn=_scripted_diff(100.0000001),
+		)
+		assert result.termination_reason == "matched"
+		assert result.success is True
+
 	def test_best_c_written_on_match(self, tmp_path):
 		ws = _make_workspace(tmp_path)
 		c_code = "int classify(int x){return x;}\n"
@@ -403,6 +426,19 @@ class TestGhidraOnlyRun:
 			workspace=ws,
 			compile_fn=_compile_ok,
 			diff_fn=_scripted_diff(100.0),
+		)
+		assert result.success is True
+
+	def test_full_match_at_or_above_100_reports_success_example(self, tmp_path):
+		# Same `>= 100.0` threshold as the agent loop / aggregator: a float at or
+		# just above 100 still counts as a full ghidra-only match.
+		ws = _make_workspace(tmp_path, fn_name="_classify")
+		ws.attempt_paths(0).c.write_text("// matches perfectly\n")
+		ws.ghidra_warmstart.write_text("// matches perfectly\n")
+		result = ghidra_only_run(
+			workspace=ws,
+			compile_fn=_compile_ok,
+			diff_fn=_scripted_diff(100.0000001),
 		)
 		assert result.success is True
 		assert result.termination_reason == "matched"

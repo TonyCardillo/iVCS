@@ -156,6 +156,31 @@ def _self_contained_source(ctx_filename: str, best_c: str) -> str:
 	return f'#include "{ctx_filename}"\n\n{best_c}'
 
 
+_COMMON_HEADER_DIR = "include"
+_COMMON_HEADER_NAME = "ivcs_common.h"
+
+
+def _split_ctx_preamble(ctx_text: str) -> tuple[str, str]:
+	"""Split a workspace ctx.h into (shared preamble, per-function tail).
+
+	The preamble is the leading run of scalar `typedef ...;` lines the launcher
+	emits identically for every function (BYTE, ULONG, HANDLE, ...). Everything
+	from the first section comment on (the `/* Target */`, `/* xboxkrnl imports */`,
+	`/* Callees */`, `/* Ghidra ... */` blocks) is function-specific. Extracting
+	the preamble lets every committed source share one `include/ivcs_common.h`
+	instead of carrying its own copy of ~25 identical typedefs.
+	"""
+	lines = ctx_text.splitlines()
+	cut = 0
+	for line in lines:
+		stripped = line.strip()
+		if stripped == "" or (stripped.startswith("typedef ") and stripped.endswith(";")):
+			cut += 1
+		else:
+			break
+	return "\n".join(lines[:cut]).strip(), "\n".join(lines[cut:]).strip()
+
+
 @dataclass(frozen=True)
 class CommitResult:
 	"""Outcome of committing one function's source into the tree.
@@ -180,11 +205,12 @@ def integrate_commit(
 ) -> CommitResult:
 	"""Promote a matched function's `best.c` into the source tree.
 
-	Writes a self-contained `<name>.c` (`#include "<name>.ctx.h"` + the body,
-	since `best.c` carries no include) alongside a copied `<name>.ctx.h`, then
+	Writes `<name>.c` that includes the shared `include/ivcs_common.h` (the typedef
+	preamble every function shares) plus, when the function needs them, a slim
+	`<name>.ctx.h` carrying only its own target/kernel/callee/struct decls. Then
 	recompiles it to confirm it still builds outside its workspace. Only matched
 	functions are committed unless `force=True`. Idempotent — re-committing
-	overwrites.
+	overwrites, and drops a now-unneeded per-function header.
 	"""
 	dest = function_source_path(project, parsed, fn)
 	status = function_status(project, fn)
@@ -198,9 +224,22 @@ def integrate_commit(
 		return CommitResult(dest, False, "no ctx.h in workspace")
 
 	dest.parent.mkdir(parents=True, exist_ok=True)
+	common, tail = _split_ctx_preamble(workspace.ctx_h.read_text())
+
+	# The shared preamble lives once per project; every committed source includes it.
+	common_dir = project.src_root / _COMMON_HEADER_DIR
+	common_dir.mkdir(parents=True, exist_ok=True)
+	common_body = f"#pragma once\n\n{common}\n" if common else "#pragma once\n"
+	(common_dir / _COMMON_HEADER_NAME).write_text(common_body)
+
+	includes = [f'#include "../{_COMMON_HEADER_DIR}/{_COMMON_HEADER_NAME}"']
 	ctx_dest = dest.with_name(f"{fn.name}.ctx.h")
-	ctx_dest.write_text(workspace.ctx_h.read_text())
-	dest.write_text(_self_contained_source(ctx_dest.name, workspace.best_c.read_text()))
+	if tail:
+		ctx_dest.write_text(tail + "\n")
+		includes.append(f'#include "{ctx_dest.name}"')
+	else:
+		ctx_dest.unlink(missing_ok=True)  # idempotent: drop a stale per-fn header
+	dest.write_text("\n".join(includes) + f"\n\n{workspace.best_c.read_text()}")
 
 	obj_dir = Path(tempfile.mkdtemp())
 	try:
@@ -272,6 +311,7 @@ def project_coverage(project: Project, parsed: ParsedXbe) -> tuple[SegmentCovera
 # the original image. A whole-image "verified %" is a stronger claim than the
 # sum of per-function match percents.
 
+
 def _compiled_function_object(
 	project: Project, fn: FunctionEntry, compile_fn: CompileFn
 ) -> CoffObject | None:
@@ -326,8 +366,21 @@ class ImageVerify:
 
 
 def _byte_match_verify(fn: FunctionEntry, placed: bytes, original: bytes) -> FunctionVerify:
-	"""Count how many of fn's bytes the placed bytes reproduce, as a FunctionVerify."""
-	verified = sum(1 for i in range(fn.size) if i < len(placed) and placed[i] == original[i])
+	"""Count how many of fn's bytes the placed bytes reproduce, as a FunctionVerify.
+
+	A relink that produces the wrong number of bytes is a hard failure: a short
+	relink must not read as a partial/near match, and a long relink whose prefix
+	happens to match must not read as fully verified. Both surface as a distinct
+	'size mismatch' reason with zero verified bytes.
+	"""
+	if len(placed) != fn.size:
+		reason = f"size mismatch: relink produced {len(placed)} bytes, expected {fn.size}"
+		return FunctionVerify(fn.name, fn.va, fn.size, 0, reason)
+	if len(original) != fn.size:
+		reason = f"size mismatch: carved {len(original)} original bytes, expected {fn.size}"
+		return FunctionVerify(fn.name, fn.va, fn.size, 0, reason)
+
+	verified = sum(1 for i in range(fn.size) if placed[i] == original[i])
 	reason = None if verified == fn.size else f"{verified}/{fn.size} bytes match"
 	return FunctionVerify(fn.name, fn.va, fn.size, verified, reason)
 
@@ -401,9 +454,7 @@ def image_real_relink_verify(
 	against the original image."""
 	results: list[FunctionVerify] = []
 	for fn in _matched_functions(project):
-		relinked = function_real_relink(
-			project, parsed, fn, compile_fn=compile_fn, link_fn=link_fn
-		)
+		relinked = function_real_relink(project, parsed, fn, compile_fn=compile_fn, link_fn=link_fn)
 		if not relinked.ok:
 			results.append(FunctionVerify(fn.name, fn.va, fn.size, 0, relinked.reason))
 			continue

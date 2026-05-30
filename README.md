@@ -56,8 +56,10 @@ agent_loop_run                                        ← src/agent_loop.py
   Ghidra's under-count call sites up to each stdcall callee's `@N` arity
 - Runs a matching-decomp agent loop via LiteLLM
 - Integrates matched functions into a segment-organized source tree (grouped by
-  the XBE section each lives in), reporting per-segment matched/committed
-  coverage and flagging enumeration gaps/overlaps — `scripts/integrate.py`
+  the XBE section each lives in), sharing one `include/ivcs_common.h` typedef
+  preamble across all committed sources (each keeps only a slim per-function
+  header for its own decls), reporting per-segment matched/committed coverage and
+  flagging enumeration gaps/overlaps — `scripts/integrate.py`
 - Byte-splice verifies matched functions against the original image: recompiles
   each matched `best.c`, relocates it to the VA it actually occupies (a
   one-function linker over the compiled COFF), and byte-compares — a whole-image

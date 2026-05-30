@@ -183,7 +183,7 @@ class TestIntegrateCommit:
 		ws.result_json.write_text(json.dumps({"best_match_percent": pct, "success": success}))
 		return ws
 
-	def test_commits_matched_self_contained_file(self, tmp_path):
+	def test_commits_with_shared_common_header(self, tmp_path):
 		fn = FunctionEntry("fn_00001000", 0x1000, 0x10)
 		proj = self._project(tmp_path, fn)
 		self._workspace(
@@ -195,11 +195,53 @@ class TestIntegrateCommit:
 		assert res.compiled is True
 		assert res.path == function_source_path(proj, self._parsed_text(), fn)
 		body = res.path.read_text()
-		# Self-contained: includes its own ctx header (best.c carries none).
-		assert body.startswith('#include "fn_00001000.ctx.h"')
+		# The shared typedef preamble lives once, in include/ivcs_common.h.
+		assert body.startswith('#include "../include/ivcs_common.h"')
 		assert "int fn_00001000(void){return 0;}" in body
-		ctx_file = res.path.with_name("fn_00001000.ctx.h")
-		assert ctx_file.read_text() == "typedef int X;\n"
+		common = proj.src_root / "include" / "ivcs_common.h"
+		assert "typedef int X;" in common.read_text()
+		# An all-preamble ctx has no function-specific tail → no per-function header.
+		assert not res.path.with_name("fn_00001000.ctx.h").exists()
+		assert 'fn_00001000.ctx.h' not in body
+
+	def test_function_specific_decls_kept_in_per_function_header(self, tmp_path):
+		fn = FunctionEntry("fn_00001000", 0x1000, 0x10)
+		proj = self._project(tmp_path, fn)
+		ctx = "typedef int X;\n\n/* Target — pins mangling. */\nint fn_00001000(void);\n"
+		self._workspace(
+			proj, fn, best="int fn_00001000(void){return 0;}\n",
+			ctx=ctx, pct=100.0, success=True,
+		)
+		res = integrate_commit(proj, self._parsed_text(), fn, compile_fn=_ok_compile)
+		body = res.path.read_text()
+		assert '#include "../include/ivcs_common.h"' in body
+		assert '#include "fn_00001000.ctx.h"' in body
+		# Shared part in the common header, specific part in the per-fn header.
+		assert "typedef int X;" in (proj.src_root / "include" / "ivcs_common.h").read_text()
+		tail = res.path.with_name("fn_00001000.ctx.h").read_text()
+		assert "int fn_00001000(void);" in tail
+		assert "typedef int X;" not in tail  # not duplicated
+
+	def test_common_header_shared_across_functions(self, tmp_path):
+		parsed = self._parsed_text()
+		preamble = "typedef int X;\n"
+		fns = [
+			FunctionEntry("fn_00001000", 0x1000, 0x10),
+			FunctionEntry("fn_00001100", 0x1100, 0x10),
+		]
+		proj = Project(
+			name="t", xbe_path=Path("/x.xbe"), workspace_root=tmp_path / "ws",
+			functions=tuple(fns), src_root=tmp_path / "src_tree",
+		)
+		for fn in fns:
+			self._workspace(proj, fn, best=f"int {fn.name}(void){{return 0;}}\n",
+				ctx=preamble, pct=100.0, success=True)
+			integrate_commit(proj, parsed, fn, compile_fn=_ok_compile)
+		# Exactly one shared header; neither function carries its own typedef copy.
+		commons = list((proj.src_root / "include").glob("*.h"))
+		assert [p.name for p in commons] == ["ivcs_common.h"]
+		for fn in fns:
+			assert not function_source_path(proj, parsed, fn).with_name(f"{fn.name}.ctx.h").exists()
 
 	def test_unmatched_not_committed_without_force(self, tmp_path):
 		fn = FunctionEntry("fn_00001000", 0x1000, 0x10)

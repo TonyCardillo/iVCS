@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+from src import ghidra_decompile
 from src.ghidra_decompile import (
 	GhidraConfig,
 	GhidraError,
@@ -407,9 +408,7 @@ class TestStdcallTargetRewrite:
 		assert "__stdcall" not in ghidra_pseudo_c_normalize(src)
 
 	def test_other_function_definition_not_touched(self):
-		out = ghidra_pseudo_c_normalize(
-			"void fn_OTHER(int a)\n{\n}\n", stdcall_target="fn_X"
-		)
+		out = ghidra_pseudo_c_normalize("void fn_OTHER(int a)\n{\n}\n", stdcall_target="fn_X")
 		assert "void fn_OTHER(int a)" in out
 		assert "__stdcall" not in out
 
@@ -619,3 +618,48 @@ class TestDecompileFunction:
 		with pytest.raises(GhidraError):
 			ghidra_decompile_function(0x12000, cfg, analyze_headless_fn=fake)
 		assert not captured["out_path"].exists()
+
+
+class TestDefaultRunTimeout:
+	"""The public functions accept timeout_seconds; it must reach subprocess.run."""
+
+	def _patch_subprocess_run(self, monkeypatch, captured, stdout=""):
+		def fake_run(argv, **kwargs):
+			captured.update(kwargs)
+			return _completed(0, stdout=stdout)
+
+		monkeypatch.setattr(ghidra_decompile.subprocess, "run", fake_run)
+
+	def test_default_run_passes_timeout_to_subprocess_example(self, monkeypatch):
+		captured = {}
+		self._patch_subprocess_run(monkeypatch, captured)
+		ghidra_decompile._default_run(["x"], timeout_seconds=42.0)
+		assert captured["timeout"] == 42.0
+
+	def test_default_run_timeout_defaults_to_600_example(self, monkeypatch):
+		captured = {}
+		self._patch_subprocess_run(monkeypatch, captured)
+		ghidra_decompile._default_run(["x"])
+		assert captured["timeout"] == 600.0
+
+	def test_project_ensure_threads_timeout_into_default_run_example(self, monkeypatch, tmp_path):
+		cfg = _make_config(tmp_path)
+		captured = {}
+		self._patch_subprocess_run(monkeypatch, captured, stdout="REPORT: Analysis succeeded")
+		ghidra_project_ensure(cfg, timeout_seconds=123.0)
+		assert captured["timeout"] == 123.0
+
+	def test_decompile_threads_timeout_into_default_run_example(self, monkeypatch, tmp_path):
+		cfg = _make_config(tmp_path)
+		cfg.project_dir.mkdir(parents=True)
+		cfg.project_gpr.write_text("")
+		captured = {}
+
+		def fake_run(argv, **kwargs):
+			captured.update(kwargs)
+			Path(argv[-1]).write_text("void f(void){}")
+			return _completed(0)
+
+		monkeypatch.setattr(ghidra_decompile.subprocess, "run", fake_run)
+		ghidra_decompile_function(0x12000, cfg, timeout_seconds=77.0)
+		assert captured["timeout"] == 77.0

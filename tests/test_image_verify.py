@@ -120,6 +120,44 @@ class TestRel32Relocated:
 		assert result.verified_percent == 100.0
 
 
+class TestSizeMismatch:
+	"""A relink that produces the wrong number of bytes is a hard failure, not a
+	partial/near match — otherwise a too-short relink reads as 'almost matched'
+	and a too-long one whose prefix matches reads as fully verified."""
+
+	def test_short_relink_is_size_mismatch_not_partial_example(self, tmp_path):
+		original = b"\x55\x8b\xec\x5d\x90\xc3"  # 6 bytes
+		compiled = b"\x55\x8b\xec\xc3"  # 4 bytes — relink lost two bytes
+		parsed = _parsed_with_text(original)
+		fn = FunctionEntry("fn_00011000", TEXT_VA, len(original))
+		project = _project(tmp_path, [fn])
+		_matched_workspace(project.workspace_for(fn), fn.name)
+
+		obj = coff_object_build(compiled, "f", relocations=[])
+		result = image_splice_verify(project, parsed, compile_fn=_fake_compiler(obj))
+
+		fv = result.functions[0]
+		assert not fv.is_verified
+		assert fv.verified_bytes == 0
+		assert "size mismatch" in fv.reason
+
+	def test_long_relink_with_matching_prefix_is_not_verified_example(self, tmp_path):
+		original = b"\x55\x8b\xec\x5d\x90\xc3"  # 6 bytes
+		compiled = original + b"\x90\x90"  # 8 bytes — prefix matches exactly
+		parsed = _parsed_with_text(original)
+		fn = FunctionEntry("fn_00011000", TEXT_VA, len(original))
+		project = _project(tmp_path, [fn])
+		_matched_workspace(project.workspace_for(fn), fn.name)
+
+		obj = coff_object_build(compiled, "f", relocations=[])
+		result = image_splice_verify(project, parsed, compile_fn=_fake_compiler(obj))
+
+		fv = result.functions[0]
+		assert not fv.is_verified  # must NOT be a false positive
+		assert fv.verified_bytes == 0
+		assert "size mismatch" in fv.reason
+
+
 class TestUntouchedSkipped:
 	def test_only_matched_functions_are_verified(self, tmp_path):
 		body = b"\xc3"
