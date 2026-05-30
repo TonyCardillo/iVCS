@@ -68,6 +68,12 @@ agent_loop_run                                        ← src/agent_loop.py
   its externals through an absolute-symbol stub, links, reads the placed bytes
   back out of the PE, and byte-compares — agreeing with our own relocator to the
   byte (`scripts/integrate.py relink`)
+- Builds a structural code index (a coddog-style port to x86): fingerprints every
+  function by exact bytes, opcode skeleton, and operand-shape, then clusters
+  duplicates and ranks similar functions by opcode edit-distance — surfacing how
+  much work collapses (Halo 2: 14.2% of functions are opcode-redundant, one
+  match each covers a whole cluster) and feeding few-shot retrieval, with no
+  LLM/embedding model (`scripts/codindex.py`)
 
 ## Quickstart
 
@@ -114,11 +120,13 @@ src/
   launcher.py       Carve → synth target.obj → spawn an agent_loop run (UI entry point)
   llm_clients.py    LiteLLM client adapter (works with local/cloud providers)
   objdiff.py        objdiff-cli wrapper + typed JSON parser
+  fingerprint.py    x86 structural index: exact/opcode/equiv hashes, cluster, similarity
 
 tests/
 scripts/
   enumerate.py      Enumerate all functions in an XBE → project.json manifest
   integrate.py      Commit matched functions into the source tree; coverage report
+  codindex.py       Structural code index: cluster duplicates, find similar functions
   smoke_run.py      End-to-end agent loop against the bundled objdiff-smoke fixture (no XBE needed)
   halo2_sanity.py   End-to-end pipeline diagnostic against a real Halo 2 XBE
   webui.py          Local web UI for inspecting an XBE (sections, hex, disassembly, kernel ordinals)
@@ -145,9 +153,16 @@ A mix of nostalgia and more greenfield decomp scene!
 
 In rough order of leverage:
 
-1. **Codebase index + embeddings** — once we have ≥5 matched functions,
-   embed them and retrieve similar examples as few-shot prompt context.
-2. **x86 permuter** — non-LLM C-source mutation engine (swap commutative ops,
+1. **Cluster-aware matching** — wire the structural index (`src/fingerprint.py`)
+   into the loop: when a function matches, auto-propagate to its byte-exact
+   cluster (the lone Halo 2 match already covers an 11-member exact cluster), and
+   seed the agent with the nearest already-matched function's source as few-shot
+   context. (The index itself — fingerprints, clustering, similarity search —
+   already shipped via `scripts/codindex.py`.)
+2. **Semantic embeddings (later)** — the structural index finds same-skeleton
+   code; embeddings would add *semantic* retrieval (similar intent, different
+   shape). Worth it only once structural retrieval is exhausted.
+3. **x86 permuter** — non-LLM C-source mutation engine (swap commutative ops,
    reorder local declarations, equivalent idioms) to brute-force the
    last-mile register-allocation gap without spending LLM tokens. Original
    `decomp-permuter` is MIPS-focused; an x86 port is real work but pays off
