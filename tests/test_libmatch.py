@@ -3,8 +3,11 @@
 from src.coff import coff_object_build
 from src.fingerprint import function_fingerprint
 from src.libmatch import (
+	LibMatch,
 	library_signatures,
 	match_fingerprints,
+	sdk_manifest_load,
+	sdk_manifest_write,
 	signature_index,
 )
 from tests.test_archive import _archive
@@ -63,6 +66,17 @@ class TestMatching:
 		other = b"\x53\x56\x57\x33\xc0\x40\x40\x5f\x5e\x5b\xc3"
 		game = function_fingerprint("fn_1", 0x1000, len(other), other)
 		assert match_fingerprints([game], index, min_size=4) == []
+
+	def test_manifest_round_trip_keeps_only_confident(self, tmp_path):
+		matches = [
+			LibMatch("fn_00400000", 0x00400000, 40, ("_memcpy",), "exact"),
+			LibMatch("fn_00400100", 0x00400100, 20, ("_a", "_b"), "skeleton"),  # ambiguous
+		]
+		path = tmp_path / "sdk.json"
+		written = sdk_manifest_write(path, matches)
+		assert written == 1  # ambiguous one excluded
+		loaded = sdk_manifest_load(path)
+		assert loaded == {0x00400000: "_memcpy"}
 
 	def test_ambiguous_signature_lists_all_names(self):
 		# Two library functions with the same skeleton but different names.

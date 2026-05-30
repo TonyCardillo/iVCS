@@ -24,7 +24,7 @@ from src.compile_tool import CompileOutput, default_compile_fn
 from src.link_tool import default_link_fn
 from src.project import FunctionEntry, Project, function_status
 from src.relink import RelinkError, relink_place
-from src.relink_image import LinkFn, function_real_relink
+from src.relink_image import LinkFn, function_object_compile, function_real_relink
 from src.relocs import relocs_image_va_resolver
 from src.workspace import FunctionWorkspace
 from src.xbe import ParsedXbe, XbeFormatError, xbe_function_carve, xbe_section_containing_va
@@ -151,11 +151,6 @@ def function_source_path(project: Project, parsed: ParsedXbe, fn: FunctionEntry)
 	return project.src_root / section_dir / f"{fn.name}.c"
 
 
-def _self_contained_source(ctx_filename: str, best_c: str) -> str:
-	"""best.c carries no include; prepend its copied ctx.h so it builds alone."""
-	return f'#include "{ctx_filename}"\n\n{best_c}'
-
-
 _COMMON_HEADER_DIR = "include"
 _COMMON_HEADER_NAME = "ivcs_common.h"
 
@@ -265,22 +260,36 @@ class SegmentCoverage:
 	committed: int
 	gaps: tuple[SegmentGap, ...]
 	overlaps: tuple[SegmentOverlap, ...]
+	sdk_bytes: int = 0  # SDK-identified functions in this segment, excluded from target
+	sdk_count: int = 0
+
+	@property
+	def game_bytes(self) -> int:
+		"""The real target in this segment: function bytes that aren't SDK code."""
+		return self.function_bytes - self.sdk_bytes
 
 	@property
 	def matched_percent(self) -> float:
-		return (self.matched_bytes / self.function_bytes * 100.0) if self.function_bytes else 0.0
+		return (self.matched_bytes / self.game_bytes * 100.0) if self.game_bytes else 0.0
 
 
-def project_coverage(project: Project, parsed: ParsedXbe) -> tuple[SegmentCoverage, ...]:
+def project_coverage(
+	project: Project, parsed: ParsedXbe, *, sdk_vas: frozenset[int] = frozenset()
+) -> tuple[SegmentCoverage, ...]:
 	"""Per-segment matched/partial/committed coverage, with gaps and overlaps.
 
 	Joins each segment's tiling with the matched-state classification from
-	`function_status` — the splat-style "X% of this segment is done" view.
+	`function_status` — the splat-style "X% of this segment is done" view. Functions
+	whose VA is in `sdk_vas` are counted as SDK and excluded from the match target.
 	"""
 	coverage: list[SegmentCoverage] = []
 	for segment in project_segments(project, parsed):
-		matched = partial = committed = 0
+		matched = partial = committed = sdk_bytes = sdk_count = 0
 		for fn in segment.functions:
+			if fn.va in sdk_vas:
+				sdk_bytes += fn.size
+				sdk_count += 1
+				continue
 			state = function_status(project, fn).state
 			if state == "matched":
 				matched += fn.size
@@ -297,6 +306,8 @@ def project_coverage(project: Project, parsed: ParsedXbe) -> tuple[SegmentCovera
 				committed=committed,
 				gaps=segment_gaps(segment),
 				overlaps=segment_overlaps(segment),
+				sdk_bytes=sdk_bytes,
+				sdk_count=sdk_count,
 			)
 		)
 	return tuple(coverage)
@@ -321,19 +332,10 @@ def _compiled_function_object(
 	records that as an unverified function rather than raising.
 	"""
 	workspace = FunctionWorkspace(root=project.workspace_for(fn), function_name=fn.name)
-	if not workspace.best_c.is_file() or not workspace.ctx_h.is_file():
-		return None
-
 	build_dir = Path(tempfile.mkdtemp())
 	try:
-		ctx = build_dir / f"{fn.name}.ctx.h"
-		ctx.write_text(workspace.ctx_h.read_text())
-		src = build_dir / f"{fn.name}.c"
-		src.write_text(_self_contained_source(ctx.name, workspace.best_c.read_text()))
-		obj = build_dir / f"{fn.name}.obj"
-		if not compile_fn(src, obj, build_dir).success or not obj.is_file():
-			return None
-		return coff_object_read(obj.read_bytes())
+		obj = function_object_compile(workspace, build_dir, fn.name, compile_fn)
+		return coff_object_read(obj.read_bytes()) if obj is not None else None
 	finally:
 		shutil.rmtree(build_dir, ignore_errors=True)
 
@@ -413,6 +415,21 @@ def _function_splice_verify(
 	return _byte_match_verify(fn, placed, original)
 
 
+def _image_verify(
+	project: Project, verify_one: Callable[[FunctionEntry], FunctionVerify]
+) -> ImageVerify:
+	"""Assemble an ImageVerify by running `verify_one` over every matched function.
+
+	The two verifiers differ only in how they check one function; this owns the
+	shared per-image tally so neither has to repeat it."""
+	results = [verify_one(fn) for fn in _matched_functions(project)]
+	return ImageVerify(
+		functions=tuple(results),
+		matched_bytes=sum(r.size for r in results),
+		verified_bytes=sum(r.verified_bytes for r in results),
+	)
+
+
 def image_splice_verify(
 	project: Project,
 	parsed: ParsedXbe,
@@ -423,14 +440,8 @@ def image_splice_verify(
 	against the original image. Returns per-function and whole-image verified
 	byte counts."""
 	resolve = relocs_image_va_resolver(parsed)
-	results = [
-		_function_splice_verify(project, parsed, fn, resolve, compile_fn)
-		for fn in _matched_functions(project)
-	]
-	return ImageVerify(
-		functions=tuple(results),
-		matched_bytes=sum(r.size for r in results),
-		verified_bytes=sum(r.verified_bytes for r in results),
+	return _image_verify(
+		project, lambda fn: _function_splice_verify(project, parsed, fn, resolve, compile_fn)
 	)
 
 
@@ -443,6 +454,23 @@ def image_splice_verify(
 # evidence; disagreement points at a relocation our own placement got wrong.
 
 
+def _function_real_relink_verify(
+	project: Project,
+	parsed: ParsedXbe,
+	fn: FunctionEntry,
+	compile_fn: CompileFn,
+	link_fn: LinkFn,
+) -> FunctionVerify:
+	relinked = function_real_relink(project, parsed, fn, compile_fn=compile_fn, link_fn=link_fn)
+	if not relinked.ok:
+		return FunctionVerify(fn.name, fn.va, fn.size, 0, relinked.reason)
+	try:
+		original = xbe_function_carve(parsed, fn.va, fn.size)
+	except XbeFormatError as exc:
+		return FunctionVerify(fn.name, fn.va, fn.size, 0, f"carve failed: {exc}")
+	return _byte_match_verify(fn, relinked.function_bytes, original)
+
+
 def image_real_relink_verify(
 	project: Project,
 	parsed: ParsedXbe,
@@ -452,20 +480,6 @@ def image_real_relink_verify(
 ) -> ImageVerify:
 	"""Relink every matched function with Link.Exe at its true VA and byte-compare
 	against the original image."""
-	results: list[FunctionVerify] = []
-	for fn in _matched_functions(project):
-		relinked = function_real_relink(project, parsed, fn, compile_fn=compile_fn, link_fn=link_fn)
-		if not relinked.ok:
-			results.append(FunctionVerify(fn.name, fn.va, fn.size, 0, relinked.reason))
-			continue
-		try:
-			original = xbe_function_carve(parsed, fn.va, fn.size)
-		except XbeFormatError as exc:
-			results.append(FunctionVerify(fn.name, fn.va, fn.size, 0, f"carve failed: {exc}"))
-			continue
-		results.append(_byte_match_verify(fn, relinked.function_bytes, original))
-	return ImageVerify(
-		functions=tuple(results),
-		matched_bytes=sum(r.size for r in results),
-		verified_bytes=sum(r.verified_bytes for r in results),
+	return _image_verify(
+		project, lambda fn: _function_real_relink_verify(project, parsed, fn, compile_fn, link_fn)
 	)

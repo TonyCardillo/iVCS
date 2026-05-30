@@ -33,6 +33,7 @@ if "IVCS_OBJDIFF_CLI" not in os.environ and _BUNDLED_OBJDIFF.is_file():
 import capstone  # noqa: E402
 
 from src.launcher import JobInfo, launch_decomp_job  # noqa: E402
+from src.libmatch import sdk_manifest_load  # noqa: E402
 from src.objdiff import DiffKind, objdiff_parse  # noqa: E402
 from src.project import (  # noqa: E402
 	Project,
@@ -1619,7 +1620,7 @@ def view_progress(
 	filters: dict[str, str] | None = None,
 ) -> str:
 	project = project_load(project_path_str)
-	stats = project_aggregate(project)
+	stats = project_aggregate(project, sdk_vas=_sdk_vas_for(project_path_str))
 	filters = filters or {}
 
 	all_statuses = list(stats.function_statuses)
@@ -1767,42 +1768,69 @@ def _progress_filter_bar(
 """
 
 
+_SDK_SWATCH = "#5b7da6"  # a category colour, distinct from the matched/partial/untouched scale
+
+
+def _sdk_vas_for(project_path_str: str) -> frozenset[int]:
+	"""Load the SDK manifest sitting next to project.json (scripts/libmatch.py
+	--save), if present. Empty otherwise → progress is reported over the whole image."""
+	sdk_path = Path(project_path_str).parent / "sdk.json"
+	return frozenset(sdk_manifest_load(sdk_path)) if sdk_path.is_file() else frozenset()
+
+
 def _progress_summary(project: Project, stats: ProjectStats) -> str:
 	m = stats.matched_functions
 	p = stats.partial_functions
 	u = stats.untouched_functions
+	sdk = stats.sdk_functions
 	total = stats.total_functions or 1
-	m_pct = m / total * 100
-	p_pct = p / total * 100
-	u_pct = u / total * 100
+	# The match bar spans the whole image (m + p + u + sdk == total); progress
+	# percentages below are measured against the *game* target (image minus SDK).
+	game = stats.game_functions or 1
 
 	seg_html = []
-	for label, count, pct, cls in (
-		("matched", m, m_pct, "seg-matched"),
-		("partial", p, p_pct, "seg-partial"),
-		("untouched", u, u_pct, "seg-untouched"),
+	for label, count, cls, inline in (
+		("matched", m, "seg-matched", ""),
+		("partial", p, "seg-partial", ""),
+		("untouched", u, "seg-untouched", ""),
+		("sdk", sdk, "", f"background:{_SDK_SWATCH};"),
 	):
+		pct = count / total * 100
 		if pct <= 0:
 			continue
 		text = f"{label} {count}" if pct > 7 else ""
-		seg_html.append(f'<div class="{cls}" style="flex: {pct:.4f};">{text}</div>')
+		cls_attr = f' class="{cls}"' if cls else ""
+		seg_html.append(f'<div{cls_attr} style="flex: {pct:.4f};{inline}">{text}</div>')
 
 	bar = '<div class="stacked-bar">' + "".join(seg_html) + "</div>"
-	legend = (
-		'<div class="legend">'
-		f'<span><span class="swatch matched"></span>matched · {m} ({m_pct:.1f}%)</span>'
-		f'<span><span class="swatch partial"></span>partial · {p} ({p_pct:.1f}%)</span>'
-		f'<span><span class="swatch untouched"></span>untouched · {u} ({u_pct:.1f}%)</span>'
-		"</div>"
-	)
+	legend_items = [
+		f'<span><span class="swatch matched"></span>matched · {m} ({m / game * 100:.1f}%)</span>',
+		f'<span><span class="swatch partial"></span>partial · {p} ({p / game * 100:.1f}%)</span>',
+		f'<span><span class="swatch untouched"></span>untouched · {u} ({u / game * 100:.1f}%)</span>',
+	]
+	if sdk:
+		legend_items.append(
+			f'<span><span class="swatch" style="background:{_SDK_SWATCH};"></span>'
+			f"SDK · {sdk} (linked, not a target)</span>"
+		)
+	legend = '<div class="legend">' + "".join(legend_items) + "</div>"
+
+	sdk_row = ""
+	if sdk:
+		sdk_row = (
+			'  <div class="k">SDK (XDK, excluded)</div>'
+			f'  <div class="v" style="color:{_SDK_SWATCH};">{sdk:,} functions / '
+			f"{stats.sdk_bytes:,} bytes</div>\n"
+		)
 
 	return f"""
 <div class="kv">
   <div class="k">name</div>           <div class="v amber">{html.escape(project.name)}</div>
   <div class="k">xbe</div>            <div class="v">{html.escape(str(project.xbe_path))}</div>
   <div class="k">workspaces</div>     <div class="v">{html.escape(str(project.workspace_root))}</div>
-  <div class="k">functions matched</div><div class="v green">{m} / {stats.total_functions}  ({stats.matched_function_percent:.2f}%)</div>
-  <div class="k">bytes matched</div>  <div class="v green">{stats.matched_bytes:,} / {stats.total_bytes:,}  ({stats.matched_byte_percent:.2f}%)</div>
+  <div class="k">game target</div>    <div class="v">{stats.game_functions:,} functions / {stats.game_bytes:,} bytes</div>
+{sdk_row}  <div class="k">functions matched</div><div class="v green">{m} / {stats.game_functions}  ({m / game * 100:.2f}%)</div>
+  <div class="k">bytes matched</div>  <div class="v green">{stats.matched_bytes:,} / {stats.game_bytes:,}  ({stats.game_matched_byte_percent:.2f}%)</div>
 </div>
 {bar}
 {legend}

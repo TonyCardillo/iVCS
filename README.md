@@ -81,7 +81,9 @@ agent_loop_run                                        ← src/agent_loop.py
   the image against them on relocation-invariant hashes — naming the SDK portion
   and scoping it out of the real decomp target (Halo 2: 538 functions confidently
   named against 6 libs in ~12 s, e.g. `_XGetLaunchInfo@8`, `_D3DIndexBuffer_GetDesc@8`)
-  — `scripts/libmatch.py`
+  — `scripts/libmatch.py --save` writes an `sdk.json` the coverage report and web
+  UI consume, so progress is measured against the *game target* (image minus SDK)
+  with SDK shown separately as linked-not-decompiled
 
 ## Quickstart
 

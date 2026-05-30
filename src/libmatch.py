@@ -17,8 +17,10 @@ name, because library code sections are not always called `.text` (d3d8 uses
 `D3D`/`D3D_RD`).
 """
 
+import json
 import struct
 from dataclasses import dataclass
+from pathlib import Path
 
 from src.archive import archive_members
 from src.coff import IMAGE_SYM_CLASS_EXTERNAL, IMAGE_SYM_TYPE_FUNCTION
@@ -140,3 +142,27 @@ def match_fingerprints(
 				LibMatch(fp.name, fp.va, fp.size, tuple(sorted(names)), confidence)
 			)
 	return matches
+
+
+# --- Persistence: an SDK manifest the coverage report and web UI consume -----
+#
+# Only *confident* (single-name) matches are persisted as the excludable SDK set:
+# excluding a function from the real decomp target must be high-precision, so an
+# ambiguous skeleton-shared match is left out rather than risk hiding game code.
+
+
+def sdk_manifest_write(path: Path, matches: list[LibMatch]) -> int:
+	"""Write the confident SDK identifications to `path` as JSON; return the count."""
+	entries = [
+		{"va": f"0x{m.va:08X}", "name": m.names[0], "size": m.size, "confidence": m.confidence}
+		for m in matches
+		if m.is_confident
+	]
+	path.write_text(json.dumps({"sdk": entries}, indent=2) + "\n")
+	return len(entries)
+
+
+def sdk_manifest_load(path: Path) -> dict[int, str]:
+	"""Load an SDK manifest into {virtual_address: library_name}."""
+	raw = json.loads(path.read_text())
+	return {int(entry["va"], 16): entry["name"] for entry in raw.get("sdk", [])}

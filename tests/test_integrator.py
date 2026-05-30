@@ -310,6 +310,28 @@ class TestProjectCoverage:
 		assert c.function_bytes == 0x60 + 0x20 + 0x20
 		assert round(c.matched_percent, 2) == round(0x60 / 0xA0 * 100, 2)
 
+	def test_sdk_functions_split_out_of_the_target(self, tmp_path):
+		parsed = _parsed(_section(".text", 0x1000, 0x1000))
+		fns = [
+			FunctionEntry("m", 0x1000, 0x60),  # matched game fn
+			FunctionEntry("sdk", 0x1100, 0x40),  # identified SDK (also "matched" state)
+		]
+		proj = Project(
+			name="t", xbe_path=Path("/x.xbe"), workspace_root=tmp_path / "ws",
+			functions=tuple(fns), src_root=tmp_path / "src",
+		)
+		self._write_result(proj, fns[0], 100.0, True)
+		self._write_result(proj, fns[1], 100.0, True)
+
+		cov = project_coverage(proj, parsed, sdk_vas=frozenset({0x1100}))[0]
+		assert cov.sdk_count == 1
+		assert cov.sdk_bytes == 0x40
+		assert cov.matched_bytes == 0x60  # SDK fn not counted as matched target
+		assert cov.function_bytes == 0x60 + 0x40
+		assert cov.game_bytes == 0x60
+		# 100% of the *game* target is matched, even though SDK fills the segment.
+		assert cov.matched_percent == 100.0
+
 	def test_committed_counts_files_present_in_tree(self, tmp_path):
 		parsed = _parsed(_section(".text", 0x1000, 0x1000))
 		fn = FunctionEntry("m", 0x1000, 0x40)

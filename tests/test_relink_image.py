@@ -91,6 +91,50 @@ def _linker_placing(fn_bytes: bytes):
 	return link_fn
 
 
+class TestFunctionObjectCompile:
+	"""The shared recompile primitive used by both verifiers."""
+
+	def test_writes_self_contained_source_and_returns_obj_example(self, tmp_path):
+		ws_root = tmp_path / "ws"
+		_matched_workspace(ws_root, "f")
+		workspace = FunctionWorkspace(root=ws_root, function_name="f")
+		build = tmp_path / "build"
+		build.mkdir()
+		captured = {}
+
+		def compile_fn(c_source, out_obj, workspace_root):
+			captured["src"] = c_source.read_text()
+			out_obj.write_bytes(b"OBJ")
+			return types.SimpleNamespace(success=True)
+
+		obj = function_object_compile(workspace, build, "f", compile_fn)
+		assert obj is not None
+		assert obj.read_bytes() == b"OBJ"
+		# best.c carries no include; the primitive prepends the copied ctx.h.
+		assert '#include "f.ctx.h"' in captured["src"]
+		assert "void f(void)" in captured["src"]
+
+	def test_returns_none_when_inputs_missing_example(self, tmp_path):
+		ws_root = tmp_path / "ws"
+		workspace = FunctionWorkspace(root=ws_root, function_name="f")
+		workspace.initialize()  # no best.c / ctx.h written
+		build = tmp_path / "build"
+		build.mkdir()
+		assert function_object_compile(workspace, build, "f", _compiler_emitting(b"X")) is None
+
+	def test_returns_none_when_compile_fails_example(self, tmp_path):
+		ws_root = tmp_path / "ws"
+		_matched_workspace(ws_root, "f")
+		workspace = FunctionWorkspace(root=ws_root, function_name="f")
+		build = tmp_path / "build"
+		build.mkdir()
+
+		def failing(c_source, out_obj, workspace_root):
+			return types.SimpleNamespace(success=False)
+
+		assert function_object_compile(workspace, build, "f", failing) is None
+
+
 class TestFunctionRealRelink:
 	def test_relocation_free_function_extracted_at_va(self, tmp_path):
 		fn_bytes = b"\x55\x8b\xec\x5d\xc3"

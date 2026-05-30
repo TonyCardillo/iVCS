@@ -111,7 +111,7 @@ def function_real_relink(
 
 	build = Path(tempfile.mkdtemp())
 	try:
-		fobj = _recompile(workspace, build, fn, compile_fn)
+		fobj = function_object_compile(workspace, build, fn.name, compile_fn)
 		if fobj is None:
 			return RealRelinkResult(fn.name, fn.va, fn.size, None, "recompile failed")
 		obj = coff_object_read(fobj.read_bytes())
@@ -133,17 +133,31 @@ def function_real_relink(
 		shutil.rmtree(build, ignore_errors=True)
 
 
-def _recompile(
-	workspace: FunctionWorkspace, build: Path, fn: FunctionEntry, compile_fn: CompileFn
+def _self_contained_source(ctx_filename: str, best_c: str) -> str:
+	"""best.c carries no include; prepend its copied ctx.h so it builds alone."""
+	return f'#include "{ctx_filename}"\n\n{best_c}'
+
+
+def function_object_compile(
+	workspace: FunctionWorkspace, build_dir: Path, fn_name: str, compile_fn: CompileFn
 ) -> Path | None:
-	ctx = build / f"{fn.name}.ctx.h"
-	ctx.write_text(workspace.ctx_h.read_text())
-	src = build / f"{fn.name}.c"
-	src.write_text(f'#include "{ctx.name}"\n\n{workspace.best_c.read_text()}')
-	fobj = build / f"{fn.name}.obj"
-	if not compile_fn(src, fobj, build).success or not fobj.is_file():
+	"""Write a matched function's ctx.h + self-contained best.c into `build_dir`,
+	compile it, and return the `.obj` path.
+
+	None when the workspace lacks inputs or the compile fails — callers treat that
+	as an unverified function rather than raising. The caller owns `build_dir`'s
+	lifecycle (this is the shared primitive behind both image verifiers).
+	"""
+	if not workspace.best_c.is_file() or not workspace.ctx_h.is_file():
 		return None
-	return fobj
+	ctx = build_dir / f"{fn_name}.ctx.h"
+	ctx.write_text(workspace.ctx_h.read_text())
+	src = build_dir / f"{fn_name}.c"
+	src.write_text(_self_contained_source(ctx.name, workspace.best_c.read_text()))
+	obj = build_dir / f"{fn_name}.obj"
+	if not compile_fn(src, obj, build_dir).success or not obj.is_file():
+		return None
+	return obj
 
 
 def _link_place_extract(
@@ -195,9 +209,7 @@ def _link_place_extract(
 
 		landed_va = text.virtual_address + pad
 		if landed_va == fn.va:
-			return RealRelinkResult(
-				fn.name, fn.va, fn.size, text.raw[pad : pad + fn.size], None
-			)
+			return RealRelinkResult(fn.name, fn.va, fn.size, text.raw[pad : pad + fn.size], None)
 		# The guessed RVA was off; correct it from the real layout and retry once.
 		text_rva = text.virtual_address - base
 		last_reason = f"placed at {landed_va:#x}, expected {fn.va:#x}"

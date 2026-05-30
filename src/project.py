@@ -54,6 +54,8 @@ class ProjectStats:
 	matched_bytes: int
 	partial_bytes: int
 	function_statuses: tuple[FunctionStatus, ...]
+	sdk_functions: int = 0  # identified as XDK library code, excluded from the target
+	sdk_bytes: int = 0
 
 	@property
 	def matched_function_percent(self) -> float:
@@ -64,6 +66,21 @@ class ProjectStats:
 	@property
 	def matched_byte_percent(self) -> float:
 		return (self.matched_bytes / self.total_bytes * 100.0) if self.total_bytes else 0.0
+
+	@property
+	def game_functions(self) -> int:
+		"""The real decomp target: enumerated functions that aren't SDK library code."""
+		return self.total_functions - self.sdk_functions
+
+	@property
+	def game_bytes(self) -> int:
+		return self.total_bytes - self.sdk_bytes
+
+	@property
+	def game_matched_byte_percent(self) -> float:
+		"""Matched share of the *game* target — the honest progress number, since
+		SDK code is linked from the XDK, not decompiled."""
+		return (self.matched_bytes / self.game_bytes * 100.0) if self.game_bytes else 0.0
 
 
 def project_load(path: Path | str) -> Project:
@@ -147,15 +164,29 @@ def function_status(project: Project, fn: FunctionEntry) -> FunctionStatus:
 	)
 
 
-def project_aggregate(project: Project) -> ProjectStats:
+def project_aggregate(
+	project: Project, *, sdk_vas: frozenset[int] = frozenset()
+) -> ProjectStats:
+	"""Aggregate per-function match state into project stats.
+
+	Functions whose VA is in `sdk_vas` (identified as XDK library code) are tallied
+	separately and excluded from the matched/partial/untouched target counts — they
+	are linked from the XDK, not decompiled, so they shouldn't inflate progress.
+	With an empty `sdk_vas` the result is unchanged.
+	"""
 	statuses: list[FunctionStatus] = []
 	matched_fns = partial_fns = untouched_fns = 0
 	matched_bytes = partial_bytes = 0
+	sdk_fns = sdk_bytes = 0
 	total_bytes = sum(f.size for f in project.functions)
 
 	for fn in project.functions:
 		status = function_status(project, fn)
 		statuses.append(status)
+		if fn.va in sdk_vas:
+			sdk_fns += 1
+			sdk_bytes += fn.size
+			continue
 		if status.state == "matched":
 			matched_fns += 1
 			matched_bytes += fn.size
@@ -174,6 +205,8 @@ def project_aggregate(project: Project) -> ProjectStats:
 		matched_bytes=matched_bytes,
 		partial_bytes=partial_bytes,
 		function_statuses=tuple(statuses),
+		sdk_functions=sdk_fns,
+		sdk_bytes=sdk_bytes,
 	)
 
 

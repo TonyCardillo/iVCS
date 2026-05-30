@@ -34,28 +34,43 @@ from src.integrator import (  # noqa: E402
 	integrate_commit,
 	project_coverage,
 )
+from src.libmatch import sdk_manifest_load  # noqa: E402
 from src.project import function_status, project_load  # noqa: E402
 from src.xbe import xbe_load  # noqa: E402
 
 
-def _report(project, parsed) -> int:
-	coverage = project_coverage(project, parsed)
+def _sdk_vas_for(project_path: Path) -> frozenset[int]:
+	"""Load the SDK manifest sitting next to project.json, if any (see
+	scripts/libmatch.py --save). Empty when absent → coverage is unchanged."""
+	sdk_path = project_path.parent / "sdk.json"
+	return frozenset(sdk_manifest_load(sdk_path)) if sdk_path.is_file() else frozenset()
+
+
+def _report(project, parsed, sdk_vas: frozenset[int]) -> int:
+	coverage = project_coverage(project, parsed, sdk_vas=sdk_vas)
 	matched = sum(c.matched_bytes for c in coverage)
-	total = sum(c.function_bytes for c in coverage)
+	game = sum(c.game_bytes for c in coverage)
+	sdk_bytes = sum(c.sdk_bytes for c in coverage)
+	sdk_count = sum(c.sdk_count for c in coverage)
 	committed = sum(c.committed for c in coverage)
-	fns = sum(len(c.segment.functions) for c in coverage)
-	pct = (matched / total * 100.0) if total else 0.0
+	pct = (matched / game * 100.0) if game else 0.0
 	print(
-		f"{project.name}: {matched:,}/{total:,} matched bytes ({pct:.1f}%), "
-		f"{committed}/{fns} functions committed"
+		f"{project.name}: {matched:,}/{game:,} game bytes matched ({pct:.1f}%), "
+		f"{committed} committed"
 	)
+	if sdk_vas:
+		print(
+			f"  SDK identified: {sdk_count:,} functions / {sdk_bytes:,} bytes "
+			f"(linked from the XDK, excluded from the target)"
+		)
 	for c in coverage:
 		warn = f"  !! {len(c.overlaps)} overlap(s)" if c.overlaps else ""
+		sdk = f"  sdk {c.sdk_count}" if c.sdk_count else ""
 		print(
 			f"  {c.segment.section:<12} {c.matched_percent:5.1f}%  "
-			f"{c.matched_bytes:>10,}/{c.function_bytes:<10,} B  "
+			f"{c.matched_bytes:>10,}/{c.game_bytes:<10,} B  "
 			f"committed {c.committed:>4}/{len(c.segment.functions):<4}  "
-			f"gaps {len(c.gaps)}{warn}"
+			f"gaps {len(c.gaps)}{sdk}{warn}"
 		)
 	return 0
 
@@ -130,7 +145,7 @@ def main() -> int:
 	parsed = xbe_load(project.xbe_path)
 
 	if args.command == "report":
-		return _report(project, parsed)
+		return _report(project, parsed, _sdk_vas_for(args.project))
 	if args.command == "verify":
 		return _verify(project, parsed)
 	if args.command == "relink":

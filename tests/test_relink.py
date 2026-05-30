@@ -31,6 +31,20 @@ def _unsigned32(b: bytes) -> int:
 	return struct.unpack("<I", b)[0]
 
 
+class TestMalformedReloc:
+	def test_reloc_field_past_text_raises_relink_error_example(self):
+		# A reloc whose 4-byte field runs past the end of .text must raise the
+		# module's own RelinkError, not an opaque struct.error. The splice
+		# verifier catches RelinkError per-function; a bare struct.error would
+		# escape and abort the whole image-verify loop.
+		text = b"\xe8\x00\x00\x00\x00\xc3"  # 6 bytes
+		relocs = [CoffReloc(offset=4, symbol_index=2, type=IMAGE_REL_I386_REL32)]  # 4+4 > 6
+		symbols = {0: _extern(".text"), 1: _extern("fn_1"), 2: _extern("_fn_00410000")}
+		obj = _obj(text, relocs, symbols)
+		with pytest.raises(RelinkError):
+			relink_place(obj, 0x00400000, lambda n: 0x00410000)
+
+
 class TestNoRelocations:
 	def test_text_unchanged(self):
 		text = b"\x55\x8b\xec\x5d\xc3"

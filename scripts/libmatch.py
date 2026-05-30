@@ -24,6 +24,7 @@ from src.fingerprint import project_fingerprints  # noqa: E402
 from src.libmatch import (  # noqa: E402
 	library_signatures,
 	match_fingerprints,
+	sdk_manifest_write,
 	signature_index,
 )
 from src.project import project_load  # noqa: E402
@@ -36,6 +37,12 @@ def main() -> int:
 	parser.add_argument("libs", type=Path, nargs="+", help="XDK .lib archives to match against")
 	parser.add_argument("--min-size", type=int, default=16, help="Skip functions below N bytes")
 	parser.add_argument("--show", type=int, default=20, help="How many named matches to print")
+	parser.add_argument(
+		"--save",
+		action="store_true",
+		help="Write confident matches to sdk.json next to project.json "
+		"(consumed by the coverage report and web UI)",
+	)
 	args = parser.parse_args()
 
 	if not args.project.is_file():
@@ -70,6 +77,11 @@ def main() -> int:
 	ambiguous = len(matches) - len(confident)
 	if ambiguous:
 		print(f"  ... and {ambiguous:,} ambiguous (skeleton shared by several library functions)")
+
+	if args.save:
+		sdk_path = args.project.parent / "sdk.json"
+		written = sdk_manifest_write(sdk_path, matches)
+		print(f"wrote {written:,} confident SDK identifications to {sdk_path}", file=sys.stderr)
 	return 0
 
 

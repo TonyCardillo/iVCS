@@ -34,6 +34,9 @@ class RelinkError(ValueError):
 	pass
 
 
+_RELOC_FIELD_SIZE = 4  # every REL32/DIR32 field we patch is a 4-byte little-endian word
+
+
 def relink_place(obj: CoffObject, placement_va: int, resolve: SymbolVaResolve) -> bytes:
 	"""Return the `.text` bytes patched to be correct at `placement_va`."""
 	section = obj.text_section()
@@ -42,6 +45,10 @@ def relink_place(obj: CoffObject, placement_va: int, resolve: SymbolVaResolve) -
 
 	buf = bytearray(section.raw)
 	for reloc in section.relocations:
+		if reloc.offset < 0 or reloc.offset + _RELOC_FIELD_SIZE > len(buf):
+			raise RelinkError(
+				f"relocation field at offset {reloc.offset} runs past .text ({len(buf)} bytes)"
+			)
 		symbol = obj.symbol_at(reloc.symbol_index)
 		addend = struct.unpack_from("<i", buf, reloc.offset)[0]
 

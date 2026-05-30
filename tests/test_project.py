@@ -195,6 +195,31 @@ class TestProjectAggregate:
 		assert stats.matched_function_percent == pytest.approx(20.0)
 		assert stats.matched_byte_percent == pytest.approx(32 / 248 * 100)
 
+	def test_no_sdk_set_is_unchanged(self, tmp_path: Path):
+		path = _write_manifest(tmp_path)
+		_setup_workspaces(tmp_path)
+		stats = project_aggregate(project_load(path))
+		assert stats.sdk_functions == 0
+		assert stats.sdk_bytes == 0
+		assert stats.game_functions == stats.total_functions
+		assert stats.game_bytes == stats.total_bytes
+
+	def test_sdk_functions_excluded_from_target(self, tmp_path: Path):
+		path = _write_manifest(tmp_path)
+		_setup_workspaces(tmp_path)
+		project = project_load(path)
+		# Mark the untouched 8-byte function at 0x1300 as identified SDK code.
+		stats = project_aggregate(project, sdk_vas=frozenset({0x1300}))
+
+		assert stats.sdk_functions == 1
+		assert stats.sdk_bytes == 8
+		assert stats.untouched_functions == 1  # was 2; the SDK one no longer counts
+		assert stats.total_functions == 5  # total still counts everything
+		assert stats.game_functions == 4
+		assert stats.game_bytes == 248 - 8
+		# Honest progress is measured against the game target, not the whole image.
+		assert stats.game_matched_byte_percent == pytest.approx(32 / (248 - 8) * 100)
+
 	def test_function_status_carries_workspace_path(self, tmp_path: Path):
 		path = _write_manifest(tmp_path)
 		_setup_workspaces(tmp_path)
