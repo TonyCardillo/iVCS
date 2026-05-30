@@ -236,8 +236,6 @@ class TestKernelDecl:
 		assert decl == "__declspec(dllimport) int NotARealKernelExport();"
 
 
-
-
 class TestFormatCalleeDecl:
 	def test_cdecl_kr_style(self):
 		assert _format_callee_decl("fn_X", "cdecl", 0) == "int fn_X();"
@@ -256,6 +254,23 @@ class TestFormatCalleeDecl:
 		assert "WARN" in out
 		assert "pops 6 bytes" in out
 		assert "int __stdcall fn_X(int);" in out
+
+	def test_label_appended_as_comment(self):
+		# The machine symbol stays fn_X (compile/diff anchor); the human label
+		# rides along as a trailing comment so the model reads the real name.
+		out = _format_callee_decl("fn_00175F40", "cdecl", 0, label="CPlayer__Update")
+		assert out == "int fn_00175F40();  // CPlayer__Update"
+
+	def test_label_on_stdcall_decl(self):
+		out = _format_callee_decl("fn_X", "stdcall", 4, label="DoThing")
+		assert out == "int __stdcall fn_X(int);  // DoThing"
+
+	def test_default_label_adds_no_comment(self):
+		# A label equal to the machine name is the default — no noise.
+		assert _format_callee_decl("fn_X", "cdecl", 0, label="fn_X") == "int fn_X();"
+
+	def test_no_label_unchanged(self):
+		assert _format_callee_decl("fn_X", "cdecl", 0, label=None) == "int fn_X();"
 
 
 class TestWarmstartMirror:
@@ -307,9 +322,7 @@ class TestSelectReferencedStructs:
 
 	def test_selects_only_referenced_blocks(self):
 		# The draft names the instance form; selection still picks the type.
-		text, names = _select_referenced_structs(
-			self.HEADER, "x = XBE_FILE_HEADER_00010000.a;"
-		)
+		text, names = _select_referenced_structs(self.HEADER, "x = XBE_FILE_HEADER_00010000.a;")
 		assert names == ("XBE_FILE_HEADER",)
 		assert "} XBE_FILE_HEADER;" in text
 		assert "UNREFERENCED" not in text
@@ -345,9 +358,7 @@ class TestWarmstartMirrorStructRewrite:
 		ws = FunctionWorkspace(root=tmp_path / "fn", function_name="_fn_X")
 		ws.initialize()
 		ws.ctx_h.write_text("typedef struct { int x; } XBE_FILE_HEADER;\n")
-		ws.ghidra_warmstart.write_text(
-			"void fn_X(void){ int y = XBE_FILE_HEADER_00010000.x; }\n"
-		)
+		ws.ghidra_warmstart.write_text("void fn_X(void){ int y = XBE_FILE_HEADER_00010000.x; }\n")
 		_mirror_warmstart_as_attempt_zero(ws, struct_names=("XBE_FILE_HEADER",))
 		zero = (ws.history_dir / "0000.c").read_text()
 		assert "(*(XBE_FILE_HEADER *)0x00010000).x" in zero
@@ -381,9 +392,7 @@ class TestWarmstartMirrorStructRewrite:
 class TestStructDeclsInCtxH:
 	def test_struct_block_injected_after_typedefs(self):
 		structs = (
-			"#pragma pack(push, 1)\n"
-			"typedef struct { int a; } XBE_FILE_HEADER;\n"
-			"#pragma pack(pop)\n"
+			"#pragma pack(push, 1)\ntypedef struct { int a; } XBE_FILE_HEADER;\n#pragma pack(pop)\n"
 		)
 		out = _compose_ctx_h("fn_X", "_fn_X", struct_decls=structs)
 		assert "XBE_FILE_HEADER" in out

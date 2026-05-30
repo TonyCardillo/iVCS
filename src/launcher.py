@@ -13,6 +13,7 @@ import os
 import re
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -111,6 +112,7 @@ def launch_decomp_job(
 	wipe_history: bool = False,
 	reset_ctx_h: bool = False,
 	use_ghidra_warmstart: bool = False,
+	label_for: Callable[[int], str] | None = None,
 ) -> JobInfo:
 	"""Carve, prepare workspace, and spawn the agent loop in a daemon thread.
 
@@ -134,7 +136,7 @@ def launch_decomp_job(
 	mangled = _infer_mangled_name(body, fn.name)
 	obj_bytes = carver_target_obj_build(parsed, fn.va, fn.size, mangled)
 	target_asm = _disassemble_listing(parsed, fn.va, fn.size)
-	callee_decls = _extract_rel32_callee_decls(parsed, fn.va, fn.size)
+	callee_decls = _extract_rel32_callee_decls(parsed, fn.va, fn.size, label_for=label_for)
 	kernel_imports = _extract_kernel_imports(parsed, fn.va, fn.size)
 
 	workspace_path = project.workspace_for(fn)
@@ -275,9 +277,7 @@ def _prepare_ghidra_warmstart(
 	return _select_referenced_structs(header, workspace.ghidra_warmstart.read_text())
 
 
-_STRUCT_BLOCK_PATTERN = re.compile(
-	r"typedef (?:struct|union) \{.*?\}\s*([A-Za-z_]\w*)\s*;", re.S
-)
+_STRUCT_BLOCK_PATTERN = re.compile(r"typedef (?:struct|union) \{.*?\}\s*([A-Za-z_]\w*)\s*;", re.S)
 
 
 def _struct_referenced(name: str, text: str) -> bool:
@@ -399,22 +399,31 @@ def _compose_ctx_h(
 	return "".join(parts)
 
 
-def _format_callee_decl(name: str, conv: str, byte_count: int) -> str:
+def _format_callee_decl(name: str, conv: str, byte_count: int, *, label: str | None = None) -> str:
 	"""Forward decl for a same-binary callee given its inferred convention.
 
 	Return is always `int` — for call sites that don't use the result this
 	is identical to `void`; for ones that consume EAX it's correct.
 	K&R `int name()` (cdecl) accepts any arg list, so the LLM can call it
 	with whatever count it infers from the target asm without a redecl.
+
+	`label`, when it differs from the machine `name`, is appended as a trailing
+	comment — the symbol the compiler/diff sees stays `fn_<va>` (the verification
+	anchor), while the human name rides along so the model reads it in context.
 	"""
 	if conv == "stdcall":
 		if byte_count == 0:
-			return f"int __stdcall {name}(void);"
-		if byte_count % 4 == 0:
+			decl = f"int __stdcall {name}(void);"
+		elif byte_count % 4 == 0:
 			args = ", ".join(["int"] * (byte_count // 4))
-			return f"int __stdcall {name}({args});"
-		return f"int __stdcall {name}(int);  /* WARN: target pops {byte_count} bytes */"
-	return f"int {name}();"
+			decl = f"int __stdcall {name}({args});"
+		else:
+			decl = f"int __stdcall {name}(int);  /* WARN: target pops {byte_count} bytes */"
+	else:
+		decl = f"int {name}();"
+	if label and label != name:
+		decl += f"  // {label}"
+	return decl
 
 
 def _format_kernel_decl(name: str) -> str:
@@ -479,11 +488,26 @@ def _rel32_callee_conventions(
 	return [(va, *callee_convention_at(parsed, va)) for va in callee_vas]
 
 
-def _extract_rel32_callee_decls(parsed: ParsedXbe, fn_va: int, fn_size: int) -> tuple[str, ...]:
+def _extract_rel32_callee_decls(
+	parsed: ParsedXbe,
+	fn_va: int,
+	fn_size: int,
+	*,
+	label_for: Callable[[int], str] | None = None,
+) -> tuple[str, ...]:
 	"""Forward decls for same-binary callees of fn_va, with convention inferred
-	from the first ret in each callee's bytes."""
+	from the first ret in each callee's bytes.
+
+	`label_for(va)` supplies the human label for each callee; when it differs
+	from `fn_<va>` it is appended as a comment so a renamed callee reads by name.
+	"""
 	return tuple(
-		_format_callee_decl(f"fn_{va:08X}", conv, byte_count)
+		_format_callee_decl(
+			f"fn_{va:08X}",
+			conv,
+			byte_count,
+			label=label_for(va) if label_for else None,
+		)
 		for va, conv, byte_count in _rel32_callee_conventions(parsed, fn_va, fn_size)
 	)
 

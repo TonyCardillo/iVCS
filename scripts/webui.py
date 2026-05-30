@@ -11,6 +11,7 @@ import argparse
 import html
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -34,6 +35,7 @@ import capstone  # noqa: E402
 
 from src.launcher import JobInfo, launch_decomp_job  # noqa: E402
 from src.libmatch import sdk_manifest_load  # noqa: E402
+from src.notes import notes_load, notes_save  # noqa: E402
 from src.objdiff import DiffKind, objdiff_parse  # noqa: E402
 from src.project import (  # noqa: E402
 	Project,
@@ -41,6 +43,7 @@ from src.project import (  # noqa: E402
 	project_aggregate,
 	project_load,
 )
+from src.symbols import symbol_map_load, symbol_rename  # noqa: E402
 from src.xbe import (  # noqa: E402
 	ParsedXbe,
 	XbeFormatError,
@@ -510,6 +513,20 @@ pre.code .ascii  { color: var(--violet); }
 .fn-state.matched   { color: var(--green); }
 .fn-state.partial   { color: var(--amber); }
 .fn-state.untouched { color: var(--fg-faint); }
+
+.fn-label { color: var(--amber); }
+.mono { font-family: var(--mono, monospace); }
+.prov { font-size: 9px; letter-spacing: 0.12em; padding: 0 4px; border-radius: 3px; vertical-align: middle; }
+.prov.user { color: var(--cyan); }
+.prov.sdk  { color: var(--fg-dim); border: 1px solid var(--fg-faint); }
+
+.rename-form, .notes-form { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 6px 0; }
+.rename-form input[type=text] { width: 260px; }
+.notes-form textarea {
+  width: 100%; font-family: var(--mono, monospace); font-size: 12px;
+  background: var(--bg-dim, #11151c); color: var(--fg); border: 1px solid var(--fg-faint);
+  border-radius: 4px; padding: 8px; resize: vertical;
+}
 
 .pager {
   display: flex;
@@ -1144,6 +1161,52 @@ def _sparkline_svg(attempts: list[dict]) -> str:
 	)
 
 
+def _symbol_notes_panel(root: Path, current_path: str | None) -> str:
+	"""Rename box + free-text notes for the function this workspace decompiles.
+
+	The rename is a display label only — the machine symbol stays `fn_<va>`, so
+	nothing here touches the matching or relink path. Notes are keyed by the
+	workspace dir, so they work even without a project path; rename needs the
+	project path to locate `symbols.json`.
+	"""
+	va = _va_from_workspace(root)
+	notes_text = notes_load(root)
+
+	rename_form = ""
+	if current_path and va is not None:
+		symbols = symbol_map_load(current_path)
+		label = symbols.label_for(va)
+		provenance = symbols.provenance(va)
+		current = (
+			f'<span class="muted tight">current: <span class="amber">{html.escape(label)}</span>'
+			f" · {provenance}</span>"
+			if provenance != "default"
+			else '<span class="muted tight">no custom name yet</span>'
+		)
+		rename_form = f"""
+<form class="rename-form" method="post" action="/symbol/rename">
+  <input type="hidden" name="path" value="{html.escape(current_path)}">
+  <input type="hidden" name="va"   value="0x{va:08X}">
+  <input type="hidden" name="root" value="{html.escape(str(root))}">
+  <label>name <input type="text" name="label" value="{html.escape(label)}" placeholder="CPlayer__Update"></label>
+  <button type="submit">rename</button>
+  <span class="muted tight">blank to revert to fn_{va:08X}</span>
+  {current}
+</form>
+"""
+
+	notes_form = f"""
+<form class="notes-form" method="post" action="/notes/save">
+  <input type="hidden" name="root" value="{html.escape(str(root))}">
+  <input type="hidden" name="path" value="{html.escape(current_path or "")}">
+  <textarea name="notes" rows="5" placeholder="calling convention, struct layout, what this function does…">{html.escape(notes_text)}</textarea>
+  <button type="submit">save notes</button>
+</form>
+"""
+	meta = "display label · machine symbol stays fn_<va>" if va is not None else "notes"
+	return panel("Symbol &amp; notes", rename_form + notes_form, meta=meta)
+
+
 def view_decomp_run(root_str: str, current_path: str | None) -> str:
 	root = Path(root_str)
 	if not root.is_dir():
@@ -1261,6 +1324,7 @@ def view_decomp_run(root_str: str, current_path: str | None) -> str:
 		crumbs(("home", "/"), _project_crumb(current_path), (root.name, None))
 		+ banner
 		+ panel("Run", header_body, meta=fn_name)
+		+ _symbol_notes_panel(root, current_path)
 		+ panel("Attempts", timeline, meta=f"{len(attempts)} total")
 		+ '<div class="split">'
 		+ panel(
@@ -1548,6 +1612,16 @@ def _guess_function_name(root: Path) -> str | None:
 	return None
 
 
+def _va_from_workspace(root: Path) -> int | None:
+	"""Recover a function's VA from its `fn_<hex>` workspace dir name.
+
+	The dir is keyed by the machine name (never renamed), so the VA is decodable
+	straight out of it — the same anchor the symbol map and relink oracle use.
+	"""
+	m = re.search(r"fn_([0-9A-Fa-f]{8})", root.name)
+	return int(m.group(1), 16) if m else None
+
+
 # ── Whole-game progress views ──────────────────────────────────────────────
 def _discover_projects() -> list[tuple[str, str, int]]:
 	"""Find project manifests under projects/ and examples/.
@@ -1621,10 +1695,11 @@ def view_progress(
 ) -> str:
 	project = project_load(project_path_str)
 	stats = project_aggregate(project, sdk_vas=_sdk_vas_for(project_path_str))
+	symbols = symbol_map_load(project_path_str)
 	filters = filters or {}
 
 	all_statuses = list(stats.function_statuses)
-	filtered = _apply_filters(all_statuses, filters)
+	filtered = _apply_filters(all_statuses, filters, symbols)
 	filtered = _apply_sort(filtered, filters.get("sort", "va"), filters.get("order", "asc"))
 
 	total_unfiltered = stats.total_functions
@@ -1640,6 +1715,7 @@ def view_progress(
 	table = _progress_function_table(
 		page_slice,
 		project_path_str,
+		symbols=symbols,
 		page=page_n,
 		total_pages=total_pages,
 		total=total,
@@ -1662,14 +1738,19 @@ def view_progress(
 _STATE_SORT_ORDER = {"matched": 0, "partial": 1, "untouched": 2}
 
 
-def _apply_filters(statuses: list, f: dict[str, str]) -> list:
+def _apply_filters(statuses: list, f: dict[str, str], symbols=None) -> list:
 	out = statuses
 	state = f.get("state") or ""
 	if state in ("matched", "partial", "untouched"):
 		out = [s for s in out if s.state == state]
 	query = (f.get("q") or "").strip().lower()
 	if query:
-		out = [s for s in out if query in s.name.lower()]
+		# Match the machine name or the human label, so a search finds either.
+		def hit(s) -> bool:
+			label = symbols.label_for(s.va).lower() if symbols else ""
+			return query in s.name.lower() or query in label
+
+		out = [s for s in out if hit(s)]
 	try:
 		min_size = int(f.get("min_size") or "")
 		out = [s for s in out if s.size >= min_size]
@@ -1937,10 +2018,33 @@ def _progress_histogram(stats: ProjectStats) -> str:
 	)
 
 
+_PROVENANCE_TAG = {
+	"user": '<span class="prov user" title="renamed by you">✎</span>',
+	"sdk": '<span class="prov sdk" title="XDK library name (libmatch)">SDK</span>',
+}
+
+
+def _name_cell(s, symbols) -> str:
+	"""Render the function name column: the human label up front, the machine
+	`fn_<va>` name underneath when they differ, plus a provenance tag."""
+	if symbols is None:
+		return html.escape(s.name)
+	label = symbols.label_for(s.va)
+	provenance = symbols.provenance(s.va)
+	tag = _PROVENANCE_TAG.get(provenance, "")
+	if label == s.name:  # default — nothing renamed
+		return html.escape(s.name)
+	return (
+		f'<span class="fn-label">{html.escape(label)}</span> {tag}'
+		f'<div class="muted tight mono">{html.escape(s.name)}</div>'
+	)
+
+
 def _progress_function_table(
 	page_slice,
 	project_path_str: str,
 	*,
+	symbols=None,
 	page: int,
 	total_pages: int,
 	total: int,
@@ -1978,7 +2082,7 @@ def _progress_function_table(
 		model = s.model or (job.model if job else "") or ""
 		rows.append(
 			f"<tr>"
-			f"<td>{html.escape(s.name)}</td>"
+			f"<td>{_name_cell(s, symbols)}</td>"
 			f'<td class="num">0x{s.va:08x}</td>'
 			f'<td class="size">{s.size}</td>'
 			f"<td>{state_label}</td>"
@@ -2224,6 +2328,28 @@ def view_launch_form(project_path_str: str, va_str: str) -> str:
 	return page(f"launch · {fn.name}", body, current_path=None)
 
 
+def _run_redirect(root: str, path: str) -> str:
+	"""Redirect back to a workspace's run page, preserving the project path."""
+	suffix = f"&path={quote(path)}" if path else ""
+	return f"/decomp/run?root={quote(root)}{suffix}"
+
+
+def _handle_symbol_rename(form: dict[str, str]) -> str:
+	"""Persist a display-label rename, then return the run-page redirect."""
+	path = form.get("path", "").strip()
+	root = form.get("root", "").strip()
+	va = int(form["va"], 0)
+	symbol_rename(path, va, form.get("label", ""))
+	return _run_redirect(root, path)
+
+
+def _handle_notes_save(form: dict[str, str]) -> str:
+	"""Persist per-function notes, then return the run-page redirect."""
+	root = form["root"].strip()
+	notes_save(root, form.get("notes", ""))
+	return _run_redirect(root, form.get("path", "").strip())
+
+
 def launch_job_from_form(
 	project_path_str: str, va_str: str, form: dict[str, str]
 ) -> tuple[str, JobInfo]:
@@ -2249,6 +2375,7 @@ def launch_job_from_form(
 	use_ghidra = form.get("use_ghidra_warmstart", "").lower() in ("1", "on", "true", "yes")
 
 	parsed = xbe_cached_load(str(project.xbe_path))
+	symbols = symbol_map_load(project_path_str)
 	job = launch_decomp_job(
 		project,
 		fn,
@@ -2259,6 +2386,7 @@ def launch_job_from_form(
 		wipe_history=wipe,
 		reset_ctx_h=reset_ctx,
 		use_ghidra_warmstart=use_ghidra,
+		label_for=symbols.label_for,
 	)
 	_register_job(job)
 	redirect = f"/decomp/run?root={quote(str(job.workspace_path))}&path={quote(project_path_str)}"
@@ -2296,6 +2424,12 @@ class Handler(BaseHTTPRequestHandler):
 					form,
 				)
 				self._redirect(redirect)
+				return
+			if route == "/symbol/rename":
+				self._redirect(_handle_symbol_rename(form))
+				return
+			if route == "/notes/save":
+				self._redirect(_handle_notes_save(form))
 				return
 			self._send(404, view_error(f"unknown POST route: {route}"))
 		except JobsAtCapacity as e:
