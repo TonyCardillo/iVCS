@@ -234,6 +234,7 @@ def propagate_to_twins(
 		result = compile_and_view_assembly(
 			workspace=workspace, c_code=twin_source, compile_fn=compile_fn, diff_fn=diff_fn
 		)
+		workspace.attempt_model_path(result.attempt_number).write_text("propagated")
 		pct = result.match_percent
 		if result.success and pct is not None and pct >= 100.0:
 			workspace.best_c.write_text(twin_source)

@@ -68,6 +68,13 @@ class FunctionWorkspace:
 			diff_json=self.history_dir / f"{stem}.diff.json",
 		)
 
+	def attempt_model_path(self, n: int) -> Path:
+		"""Sidecar naming the model that produced attempt `n` — lets multiple
+		models attack one function while we still know which AI made each try."""
+		if n < 0:
+			raise ValueError(f"attempt number must be >= 0, got {n}")
+		return self.history_dir / f"{n:04d}.model"
+
 	def initialize(self) -> None:
 		self.root.mkdir(parents=True, exist_ok=True)
 		self.history_dir.mkdir(exist_ok=True)

@@ -127,7 +127,7 @@ def function_status(project: Project, fn: FunctionEntry) -> FunctionStatus:
 	untouched = no result, or zero/None match
 	"""
 	ws_path = project.workspace_for(fn)
-	result = _load_json_or_none(ws_path / "result.json")
+	result = json_load_or_none(ws_path / "result.json")
 	if result is None:
 		return FunctionStatus(
 			name=fn.name,
@@ -164,9 +164,7 @@ def function_status(project: Project, fn: FunctionEntry) -> FunctionStatus:
 	)
 
 
-def project_aggregate(
-	project: Project, *, sdk_vas: frozenset[int] = frozenset()
-) -> ProjectStats:
+def project_aggregate(project: Project, *, sdk_vas: frozenset[int] = frozenset()) -> ProjectStats:
 	"""Aggregate per-function match state into project stats.
 
 	Functions whose VA is in `sdk_vas` (identified as XDK library code) are tallied
@@ -216,7 +214,7 @@ def _parse_int(value) -> int:
 	return int(value)
 
 
-def _load_json_or_none(path: Path) -> dict | None:
+def json_load_or_none(path: Path) -> dict | None:
 	if not path.is_file():
 		return None
 	try:

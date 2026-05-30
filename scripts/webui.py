@@ -40,6 +40,7 @@ from src.objdiff import DiffKind, objdiff_parse  # noqa: E402
 from src.project import (  # noqa: E402
 	Project,
 	ProjectStats,
+	json_load_or_none,
 	project_aggregate,
 	project_load,
 )
@@ -375,7 +376,7 @@ pre.code .ascii  { color: var(--violet); }
 
 .attempt-row {
   display: grid;
-  grid-template-columns: 48px 1fr 120px 110px;
+  grid-template-columns: 48px 1fr 130px 110px 110px;
   gap: 12px;
   align-items: center;
   padding: 6px 8px;
@@ -383,6 +384,15 @@ pre.code .ascii  { color: var(--violet); }
 }
 .attempt-row:hover { background: var(--bg-row); }
 .attempt-row .n { color: var(--fg-dim); }
+.attempt-row .attempt-model {
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--cyan);
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .attempt-row .mp { text-align: right; color: var(--green); }
 .attempt-row .mp.zero { color: var(--fg-faint); }
 .attempt-row .status { text-align: right; }
@@ -575,6 +585,15 @@ pre.code .ascii  { color: var(--violet); }
 .run-banner.running { border-color: var(--line-strong); }
 .run-banner.failed  { border-color: rgba(255, 122, 122, 0.55); }
 .run-banner.done    { border-color: rgba(149, 230, 203, 0.45); }
+.run-banner.interrupted { border-color: var(--amber); }
+.run-banner a.resume {
+  margin-left: auto;
+  color: var(--amber);
+  border: 1px solid var(--amber);
+  padding: 3px 10px;
+  text-decoration: none;
+}
+.run-banner a.resume:hover { background: var(--amber); color: var(--bg); }
 .run-banner .amber  { color: var(--amber); }
 .run-banner .cyan   { color: var(--cyan); }
 .run-banner .green  { color: var(--green); }
@@ -1080,7 +1099,7 @@ def _ensure_diff_json(workspace_root: Path, n: int, function_name: str | None) -
 
 
 def _workspace_function_name(workspace_root: Path) -> str | None:
-	result = _load_json_or_none(workspace_root / "result.json")
+	result = json_load_or_none(workspace_root / "result.json")
 	if result and result.get("function_name"):
 		return result["function_name"]
 	job = _job_for(workspace_root)
@@ -1100,6 +1119,7 @@ def _attempt_info(workspace_root: Path, n: int, *, derive_missing: bool = True) 
 	if derive_missing and not diff_path.is_file():
 		_ensure_diff_json(workspace_root, n, _workspace_function_name(workspace_root))
 
+	model_path = history / f"{stem}.model"
 	info = {
 		"n": n,
 		"c_path": c_path,
@@ -1108,6 +1128,7 @@ def _attempt_info(workspace_root: Path, n: int, *, derive_missing: bool = True) 
 		"compiled": obj_path.is_file(),
 		"match_percent": None,
 		"function_symbol_name": None,
+		"model": model_path.read_text().strip() if model_path.is_file() else None,
 	}
 	if diff_path.is_file():
 		try:
@@ -1139,6 +1160,18 @@ def _attempts_listing(workspace_root: Path) -> list[dict]:
 		except ValueError:
 			continue
 	return [_attempt_info(workspace_root, n) for n in sorted(numbers)]
+
+
+def _best_attempt(attempts: list[dict]) -> dict | None:
+	"""The attempt that owns best.c: highest match%, ties broken by earliest.
+
+	Its `model` is the AI we credit for the function's best solution — even when
+	several models attacked it across runs.
+	"""
+	scored = [a for a in attempts if isinstance(a.get("match_percent"), (int, float))]
+	if not scored:
+		return None
+	return max(scored, key=lambda a: (a["match_percent"], -a["n"]))
 
 
 def _status_badge(result_json: dict | None) -> str:
@@ -1236,7 +1269,7 @@ def view_decomp_run(root_str: str, current_path: str | None) -> str:
 		raise FileNotFoundError(f"workspace not a directory: {root}")
 
 	job = _job_for(root)
-	result = _load_json_or_none(root / "result.json")
+	result = json_load_or_none(root / "result.json")
 	attempts = _attempts_listing(root)
 	best = (result or {}).get("best_match_percent")
 	if best is None:
@@ -1248,13 +1281,23 @@ def view_decomp_run(root_str: str, current_path: str | None) -> str:
 		or "?"
 	)
 
+	best_at = _best_attempt(attempts)
+	best_model = (result or {}).get("model") or (best_at["model"] if best_at else None)
+	best_model_row = ""
+	if best_model:
+		where = f" · #{best_at['n']:04d}" if best_at else ""
+		best_model_row = (
+			'  <div class="k">best by</div>         '
+			f'<div class="v cyan">{html.escape(best_model)}{where}</div>\n'
+		)
+
 	header_body = f"""
 <div class="kv">
   <div class="k">workspace</div>      <div class="v">{html.escape(str(root))}</div>
   <div class="k">function</div>       <div class="v amber">{html.escape(fn_name)}</div>
   <div class="k">attempts</div>       <div class="v">{len(attempts)}</div>
   <div class="k">best match</div>     <div class="v green">{(f"{best:.2f}%" if isinstance(best, (int, float)) else "—")}</div>
-  <div class="k">status</div>         <div class="v">{_status_badge(result)}</div>
+{best_model_row}  <div class="k">status</div>         <div class="v">{_status_badge(result)}</div>
 </div>
 {_progress_bar(best)}
 {_sparkline_svg(attempts)}
@@ -1285,10 +1328,16 @@ def view_decomp_run(root_str: str, current_path: str | None) -> str:
 			if a["n"] == 0
 			else ""
 		)
+		model_chip = (
+			f'<span class="attempt-model" title="model for this attempt">{html.escape(a["model"])}</span>'
+			if a.get("model") and a["n"] != 0
+			else ""
+		)
 		timeline_rows.append(
 			f'<div class="attempt-row">'
 			f'<span class="n">#{a["n"]:04d}</span>'
 			f'<a class="openrow" href="/decomp/attempt?root={html.escape(str(root))}&n={a["n"]}">view source &amp; diff →</a>'
+			f"{model_chip}"
 			f'<span class="status">{mp_html}</span>'
 			f'<span class="status">{ghidra_tag}{status_html}</span>'
 			f"</div>"
@@ -1342,6 +1391,8 @@ def view_decomp_run(root_str: str, current_path: str | None) -> str:
 				f" · iter {job.iterations_completed}/{job.max_iterations}</span>"
 				f"</div>"
 			)
+	elif _run_interrupted(job, result, attempts):
+		banner = _interrupted_banner(root, current_path)
 
 	body = (
 		crumbs(("home", "/"), _project_crumb(current_path), (root.name, None))
@@ -1593,15 +1644,6 @@ def _progress_bar(value: float | None) -> str:
 	)
 
 
-def _load_json_or_none(path: Path) -> dict | None:
-	if not path.is_file():
-		return None
-	try:
-		return json.loads(path.read_text())
-	except (json.JSONDecodeError, OSError):
-		return None
-
-
 def _attempt_status_labels(attempt: dict, *, is_in_flight: bool) -> tuple[str | None, str, str]:
 	"""Pick (mp_label, badge_class, badge_text) for one attempt row.
 
@@ -1633,6 +1675,38 @@ def _guess_function_name(root: Path) -> str | None:
 	if "_fn_" in name:
 		return "fn_" + name.split("_fn_", 1)[1]
 	return None
+
+
+def _run_interrupted(job: JobInfo | None, result: dict | None, attempts: list[dict]) -> bool:
+	"""True when a run was orphaned — the model attempted at least once (#0001+ on
+	disk) but there's no terminal result.json and no live job tracking it.
+
+	This is the 'server restarted mid-run' case: the daemon thread died, so its
+	in-memory JobInfo is gone and the loop never reached _finalize. The attempt
+	history and best.c survive on disk, so the run is resumable.
+	"""
+	if job is not None or result is not None:
+		return False
+	return any(a["n"] >= 1 for a in attempts)
+
+
+def _interrupted_banner(root: Path, current_path: str | None) -> str:
+	"""Banner for an orphaned run: explain the interruption and offer a Resume
+	link to the prefilled launch form. Resume reuses this workspace, so attempt
+	numbering continues and best.c is preserved — no progress is thrown away."""
+	va = _va_from_workspace(root)
+	resume = ""
+	if va is not None and current_path:
+		href = f"/decomp/launch?path={quote(current_path)}&va={va:#x}"
+		resume = f'<a class="resume" href="{href}">resume run →</a>'
+	return (
+		'<div class="run-banner interrupted">'
+		'<span class="badge failed">INTERRUPTED</span>'
+		'<span class="muted">run stopped mid-flight (server restarted) · '
+		"attempts and best.c preserved on disk</span>"
+		f"{resume}"
+		"</div>"
+	)
 
 
 def _va_from_workspace(root: Path) -> int | None:
@@ -2269,7 +2343,7 @@ def view_launch_form(project_path_str: str, va_str: str) -> str:
 	existing_attempts = []
 	if (workspace_path / "history").is_dir():
 		existing_attempts = sorted(int(p.stem) for p in (workspace_path / "history").glob("*.c"))
-	existing_result = _load_json_or_none(workspace_path / "result.json")
+	existing_result = json_load_or_none(workspace_path / "result.json")
 	existing_state_html = ""
 	ctx_h_exists = (workspace_path / "ctx.h").is_file()
 	if existing_attempts or existing_result or ctx_h_exists:

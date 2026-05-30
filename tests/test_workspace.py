@@ -56,6 +56,10 @@ class TestAttemptPaths:
 		with pytest.raises(ValueError):
 			ws.attempt_paths(-1)
 
+	def test_attempt_model_path_sidecar(self, tmp_path):
+		ws = FunctionWorkspace(root=tmp_path, function_name="_Foo@8")
+		assert ws.attempt_model_path(7) == tmp_path / "history" / "0007.model"
+
 
 class TestInitialize:
 	def test_creates_workspace_dirs(self, tmp_path):

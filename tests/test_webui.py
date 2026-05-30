@@ -8,10 +8,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
 from webui import (  # noqa: E402
 	_attempt_status_labels,
+	_best_attempt,
 	_handle_notes_save,
 	_handle_symbol_rename,
 	_path_query_suffix,
 	_project_crumb,
+	_run_interrupted,
 	_va_from_workspace,
 )
 
@@ -112,6 +114,51 @@ def test_va_from_workspace_case_insensitive(tmp_path):
 
 def test_va_from_workspace_none_for_non_fn_dir(tmp_path):
 	assert _va_from_workspace(tmp_path / "scratch") is None
+
+
+def test_run_interrupted_when_model_attempted_but_no_result_or_job():
+	# Server restarted mid-run: attempts #1+ on disk, no result.json, no live job.
+	assert _run_interrupted(None, None, [{"n": 1}, {"n": 2}]) is True
+
+
+def test_run_not_interrupted_when_result_exists():
+	# A clean termination wrote result.json — not an orphan.
+	assert _run_interrupted(None, {"termination_reason": "matched"}, [{"n": 1}]) is False
+
+
+def test_run_not_interrupted_when_job_is_live():
+	# An in-memory job is still tracking the run.
+	assert _run_interrupted(object(), None, [{"n": 1}]) is False
+
+
+def test_run_not_interrupted_when_only_baseline_attempt():
+	# Only the Ghidra warm-start (#0000) — the model never ran, nothing lost.
+	assert _run_interrupted(None, None, [{"n": 0}]) is False
+
+
+def test_run_not_interrupted_when_no_attempts():
+	assert _run_interrupted(None, None, []) is False
+
+
+def _att(n, mp, model=None):
+	return {"n": n, "match_percent": mp, "model": model}
+
+
+def test_best_attempt_none_when_no_scored_attempts():
+	assert _best_attempt([]) is None
+	assert _best_attempt([_att(0, None), _att(1, None)]) is None
+
+
+def test_best_attempt_picks_highest_match():
+	best = _best_attempt([_att(1, 40.0, "alpha"), _att(2, 80.0, "beta"), _att(3, 55.0, "alpha")])
+	assert best["n"] == 2
+	assert best["model"] == "beta"
+
+
+def test_best_attempt_ties_keep_earliest():
+	best = _best_attempt([_att(1, 60.0, "alpha"), _att(2, 60.0, "beta")])
+	assert best["n"] == 1
+	assert best["model"] == "alpha"
 
 
 def _project_json(tmp_path):

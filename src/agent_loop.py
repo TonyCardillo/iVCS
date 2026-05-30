@@ -17,6 +17,7 @@ from src.compile_tool import (
 	DiffFn,
 	compile_and_view_assembly,
 	compile_error_format,
+	function_match_percent,
 )
 from src.ghidra_decompile import ghidra_pseudo_c_normalize_for_prompt
 from src.workspace import FunctionWorkspace
@@ -134,7 +135,10 @@ def agent_loop_run(
 	]
 	tools = [_TOOL_SCHEMA]
 
-	best_match: float | None = None
+	# Seed the global best from any prior run on this workspace, so a second AI
+	# attacking the same function never clobbers a stronger solution — and we
+	# keep crediting best.c to the model that actually produced it.
+	best_match, best_model = _prior_best(workspace)
 	best_c_code: str | None = None
 	start_time = time.monotonic()
 	soft_timeout_injected = False
@@ -143,7 +147,7 @@ def agent_loop_run(
 	for _ in range(config.max_iterations):
 		elapsed = time.monotonic() - start_time
 		if elapsed > config.hard_timeout_seconds:
-			return _finalize(workspace, "hard_timeout", best_match, iterations, model=config.model)
+			return _finalize(workspace, "hard_timeout", best_match, iterations, model=best_model)
 
 		soft_threshold = config.hard_timeout_seconds * config.soft_timeout_fraction
 		if not soft_timeout_injected and elapsed > soft_threshold:
@@ -155,9 +159,7 @@ def agent_loop_run(
 
 		c_code = _extract_c_code(response)
 		if c_code is None:
-			return _finalize(
-				workspace, "llm_no_progress", best_match, iterations, model=config.model
-			)
+			return _finalize(workspace, "llm_no_progress", best_match, iterations, model=best_model)
 
 		iterations += 1
 		result = compile_and_view_assembly(
@@ -166,6 +168,7 @@ def agent_loop_run(
 			compile_fn=compile_fn,
 			diff_fn=diff_fn,
 		)
+		workspace.attempt_model_path(result.attempt_number).write_text(config.model)
 
 		if (
 			result.success
@@ -173,12 +176,13 @@ def agent_loop_run(
 			and (best_match is None or result.match_percent > best_match)
 		):
 			best_match = result.match_percent
+			best_model = config.model
 			best_c_code = c_code
 			workspace.best_c.write_text(c_code)
 
 		if result.match_percent is not None and result.match_percent >= 100.0:
 			return _finalize(
-				workspace, "matched", best_match, iterations, best_c_code, model=config.model
+				workspace, "matched", best_match, iterations, best_c_code, model=best_model
 			)
 
 		tool_call_id = _tool_call_id(response)
@@ -196,7 +200,29 @@ def agent_loop_run(
 				}
 			)
 
-	return _finalize(workspace, "budget_exhausted", best_match, iterations, model=config.model)
+	return _finalize(workspace, "budget_exhausted", best_match, iterations, model=best_model)
+
+
+def _prior_best(workspace: FunctionWorkspace) -> tuple[float | None, str | None]:
+	"""Recover (best_match_percent, model) from a prior run's result.json.
+
+	Lets a fresh run on an existing workspace inherit the standing best, so a
+	weaker second model can't overwrite a stronger best.c and we keep attributing
+	the solution to the model that earned it. Returns (None, None) for a fresh
+	workspace.
+	"""
+	if not workspace.result_json.is_file():
+		return None, None
+	try:
+		data = json.loads(workspace.result_json.read_text())
+	except (json.JSONDecodeError, OSError):
+		return None, None
+	best = data.get("best_match_percent")
+	model = data.get("model")
+	return (
+		best if isinstance(best, (int, float)) else None,
+		model if isinstance(model, str) else None,
+	)
 
 
 def _baseline_compile_attempt_zero(workspace: FunctionWorkspace, *, compile_fn: CompileFn) -> None:
@@ -209,6 +235,7 @@ def _baseline_compile_attempt_zero(workspace: FunctionWorkspace, *, compile_fn: 
 	paths = workspace.attempt_paths(0)
 	if not paths.c.is_file() or paths.obj.is_file():
 		return
+	workspace.attempt_model_path(0).write_text("ghidra")
 	result = compile_fn(paths.c, paths.obj, workspace.root)
 	if not result.success:
 		stderr_path = paths.c.with_suffix(".stderr")
@@ -239,16 +266,7 @@ def ghidra_only_run(
 		return _finalize(workspace, "compile_failed", None, 0, model="ghidra")
 
 	diff = diff_fn(workspace.target_obj, paths.obj, workspace.function_name)
-	match: float | None = None
-	for symbol in diff.function_symbols("left"):
-		if symbol.name == workspace.function_name:
-			match = symbol.match_percent
-			break
-	if match is None:
-		for symbol in diff.function_symbols("right"):
-			if symbol.name == workspace.function_name:
-				match = symbol.match_percent
-				break
+	match = function_match_percent(diff, workspace.function_name)
 
 	if match is not None and match >= 100.0:
 		# Surface as a "matched" success so the aggregator counts it.

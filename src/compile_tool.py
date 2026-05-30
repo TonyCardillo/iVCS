@@ -62,7 +62,7 @@ def compile_and_view_assembly(
 		)
 
 	diff_result = diff_fn(workspace.target_obj, paths.obj, workspace.function_name)
-	match_percent = _function_match_percent(diff_result, workspace.function_name)
+	match_percent = function_match_percent(diff_result, workspace.function_name)
 
 	return CompileAndViewResult(
 		success=True,
@@ -72,7 +72,7 @@ def compile_and_view_assembly(
 	)
 
 
-def _function_match_percent(diff: DiffResult, function_name: str) -> float | None:
+def function_match_percent(diff: DiffResult, function_name: str) -> float | None:
 	for symbol in diff.function_symbols("left"):
 		if symbol.name == function_name:
 			return symbol.match_percent

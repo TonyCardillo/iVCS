@@ -263,6 +263,113 @@ class TestBestSoFar:
 		assert ws.best_c.read_text() == c_codes[0]
 
 
+class TestModelByAttempt:
+	def test_attempt_tagged_with_model_sidecar(self, tmp_path):
+		ws = _make_workspace(tmp_path, fn_name="_foo")
+		llm = FakeLLMClient(
+			[assistant_tool_call("compile_and_view_assembly", {"c_code": "// a\n"})]
+		)
+		agent_loop_run(
+			workspace=ws,
+			target_asm="ret",
+			config=_make_config(model="claude-haiku-4-5", max_iterations=1),
+			llm_client=llm,
+			compile_fn=_compile_ok,
+			diff_fn=_scripted_diff(60.0),
+		)
+		assert ws.attempt_model_path(1).read_text() == "claude-haiku-4-5"
+
+	def test_failed_compile_attempt_still_tagged(self, tmp_path):
+		ws = _make_workspace(tmp_path, fn_name="_foo")
+		llm = FakeLLMClient(
+			[assistant_tool_call("compile_and_view_assembly", {"c_code": "// bad\n"})]
+		)
+		agent_loop_run(
+			workspace=ws,
+			target_asm="ret",
+			config=_make_config(model="local", max_iterations=1),
+			llm_client=llm,
+			compile_fn=_compile_fail,
+			diff_fn=_scripted_diff(),
+		)
+		assert ws.attempt_model_path(1).read_text() == "local"
+
+	def test_result_json_records_best_model(self, tmp_path):
+		ws = _make_workspace(tmp_path, fn_name="_foo")
+		llm = FakeLLMClient(
+			[assistant_tool_call("compile_and_view_assembly", {"c_code": "// a\n"})]
+		)
+		agent_loop_run(
+			workspace=ws,
+			target_asm="ret",
+			config=_make_config(model="local", max_iterations=1),
+			llm_client=llm,
+			compile_fn=_compile_ok,
+			diff_fn=_scripted_diff(70.0),
+		)
+		data = json.loads(ws.result_json.read_text())
+		assert data["best_match_percent"] == 70.0
+		assert data["model"] == "local"
+
+	def test_weaker_rerun_keeps_stronger_model_and_best_c(self, tmp_path):
+		# Two AIs attack one function across two runs on the same workspace.
+		# Model "alpha" reaches 80%; a later "beta" run only reaches 50%.
+		# best.c and the recorded model must stay alpha's — its solution won.
+		ws = _make_workspace(tmp_path, fn_name="_foo")
+		agent_loop_run(
+			workspace=ws,
+			target_asm="ret",
+			config=_make_config(model="alpha", max_iterations=1),
+			llm_client=FakeLLMClient(
+				[assistant_tool_call("compile_and_view_assembly", {"c_code": "// alpha 80\n"})]
+			),
+			compile_fn=_compile_ok,
+			diff_fn=_scripted_diff(80.0),
+		)
+		result = agent_loop_run(
+			workspace=ws,
+			target_asm="ret",
+			config=_make_config(model="beta", max_iterations=1),
+			llm_client=FakeLLMClient(
+				[assistant_tool_call("compile_and_view_assembly", {"c_code": "// beta 50\n"})]
+			),
+			compile_fn=_compile_ok,
+			diff_fn=_scripted_diff(50.0),
+		)
+		assert result.best_match_percent == 80.0
+		assert ws.best_c.read_text() == "// alpha 80\n"
+		data = json.loads(ws.result_json.read_text())
+		assert data["best_match_percent"] == 80.0
+		assert data["model"] == "alpha"
+
+	def test_stronger_rerun_takes_over_model_and_best_c(self, tmp_path):
+		# The reverse: a later "beta" run beats alpha's 50% with 90%.
+		ws = _make_workspace(tmp_path, fn_name="_foo")
+		agent_loop_run(
+			workspace=ws,
+			target_asm="ret",
+			config=_make_config(model="alpha", max_iterations=1),
+			llm_client=FakeLLMClient(
+				[assistant_tool_call("compile_and_view_assembly", {"c_code": "// alpha 50\n"})]
+			),
+			compile_fn=_compile_ok,
+			diff_fn=_scripted_diff(50.0),
+		)
+		agent_loop_run(
+			workspace=ws,
+			target_asm="ret",
+			config=_make_config(model="beta", max_iterations=1),
+			llm_client=FakeLLMClient(
+				[assistant_tool_call("compile_and_view_assembly", {"c_code": "// beta 90\n"})]
+			),
+			compile_fn=_compile_ok,
+			diff_fn=_scripted_diff(90.0),
+		)
+		assert ws.best_c.read_text() == "// beta 90\n"
+		data = json.loads(ws.result_json.read_text())
+		assert data["model"] == "beta"
+
+
 class TestBaselineCompileAttemptZero:
 	def test_noop_when_no_attempt_zero_c(self, tmp_path):
 		from src.agent_loop import _baseline_compile_attempt_zero
