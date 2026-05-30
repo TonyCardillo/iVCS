@@ -12,6 +12,7 @@ the real run wiring (prep + agent loop + LM Studio) lives in scripts/batch.py.
 """
 
 import json
+import re
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 
@@ -157,6 +158,20 @@ def batch_run(
 	)
 
 
+def _rename_to_twin(source: str, rep_va: int, twin_va: int) -> str:
+	"""Rewrite the representative's defined function to the twin's canonical name.
+
+	A leaf's solution names its function after the representative's address — but
+	the prefix and case vary by origin (`fn_00175F40` from the agent/normalizer,
+	`FUN_00175f40` from a raw Ghidra draft). We rewrite any such token to the
+	twin's canonical `fn_<TWIN_VA>` so the compiled symbol is `_fn_<twin_va>` and
+	objdiff pairs it with the twin's target. Safe because we only ever propagate
+	leaves, whose body holds no other address references.
+	"""
+	pattern = re.compile(rf"(?:FUN_|fn_|sub_)?{rep_va:08x}", re.IGNORECASE)
+	return pattern.sub(f"fn_{twin_va:08X}", source)
+
+
 def _flagged(twin: FunctionEntry, reason: str) -> RunOutcome:
 	"""A twin we couldn't (or wouldn't) auto-finish — left for manual follow-up."""
 	return RunOutcome(
@@ -215,7 +230,7 @@ def propagate_to_twins(
 			continue
 
 		workspace = prepare(twin)
-		twin_source = rep_source.replace(rep.name, twin.name)
+		twin_source = _rename_to_twin(rep_source, rep.va, twin.va)
 		result = compile_and_view_assembly(
 			workspace=workspace, c_code=twin_source, compile_fn=compile_fn, diff_fn=diff_fn
 		)
@@ -235,10 +250,11 @@ def propagate_to_twins(
 				)
 			)
 		else:
-			detail = (
-				f"compiled to {pct:.1f}%"
-				if result.success and pct is not None
-				else "compile failed"
-			)
+			if not result.success:
+				detail = "compile failed"
+			elif pct is None:
+				detail = "no paired symbol in diff"
+			else:
+				detail = f"matched only {pct:.1f}%"
 			outcomes.append(_flagged(twin, f"propagation {detail}"))
 	return outcomes

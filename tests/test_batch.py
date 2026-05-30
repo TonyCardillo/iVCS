@@ -216,6 +216,24 @@ class TestPropagation:
 		assert result["success"] is True
 		assert result["model"] == "propagated"
 
+	def test_ghidra_FUN_prefix_is_renamed_to_twin_canonical(self, tmp_path: Path):
+		# A raw Ghidra draft names the function FUN_<addr> (lowercase); propagation
+		# must still rewrite it to the twin's canonical fn_<VA> so the symbol pairs.
+		out = propagate_to_twins(
+			self.REP,
+			[self.TWIN],
+			rep_source="void FUN_00001000(void)\n{\n  return;\n}\n",
+			is_leaf=lambda fn: True,
+			prepare=_twin_workspace(tmp_path),
+			compile_fn=_compile_ok,
+			diff_fn=_diff_at(100.0),
+		)
+		assert out[0].matched is True
+		best = (tmp_path / self.TWIN.name / "best.c").read_text()
+		assert "fn_00002000" in best
+		assert "FUN_" not in best
+		assert "00001000" not in best
+
 	def test_leaf_twin_below_100_is_flagged_not_claimed(self, tmp_path: Path):
 		out = propagate_to_twins(
 			self.REP,
