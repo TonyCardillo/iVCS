@@ -694,13 +694,35 @@ def page(
 		if current_path
 		else ""
 	)
-	refresh_tag = (
-		f'<meta http-equiv="refresh" content="{refresh_seconds}">' if refresh_seconds else ""
+	# Live updates without a full-page reload: poll the same URL and swap only
+	# <main>'s contents, so the page never repaints blank (no flicker) and scroll
+	# is kept. `data-live` carries the interval; the server drops it once the job
+	# finishes, which is the poller's signal to stop.
+	live_attr = f' data-live="{refresh_seconds}"' if refresh_seconds else ""
+	live_script = (
+		"""
+<script>
+(function(){
+  function ms(el){ return el ? parseInt(el.getAttribute('data-live'), 10) : NaN; }
+  function tick(){
+    fetch(location.href).then(function(r){ return r.text(); }).then(function(t){
+      var next = new DOMParser().parseFromString(t, 'text/html').querySelector('main');
+      var cur = document.querySelector('main');
+      if (next && cur) cur.innerHTML = next.innerHTML;
+      var n = ms(next);
+      if (n > 0) setTimeout(tick, n * 1000);
+    }).catch(function(){ setTimeout(tick, 3000); });
+  }
+  var n = ms(document.querySelector('main'));
+  if (n > 0) setTimeout(tick, n * 1000);
+})();
+</script>"""
+		if refresh_seconds
+		else ""
 	)
 	return f"""<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8">
-{refresh_tag}
 <title>{html.escape(title)} · iVCS</title>
 <style>{CSS}</style>
 </head><body>
@@ -709,7 +731,8 @@ def page(
   <div>{path_chip}</div>
   <nav>{nav_html}</nav>
 </header>
-<main>{body}</main>
+<main{live_attr}>{body}</main>
+{live_script}
 </body></html>"""
 
 
