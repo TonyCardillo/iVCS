@@ -30,7 +30,7 @@ from src.ghidra_decompile import (
 	ghidra_pseudo_c_normalize,
 	ghidra_structs_dump,
 )
-from src.llm_clients import LiteLLMClient
+from src.llm_clients import llm_client_for
 from src.project import FunctionEntry, Project
 from src.relocs import (
 	RelocKind,
@@ -100,38 +100,22 @@ class JobInfo:
 		return self.state in ("pending", "running")
 
 
-def launch_decomp_job(
+def prepare_decomp_workspace(
 	project: Project,
 	fn: FunctionEntry,
 	*,
-	model: str = "claude-haiku-4-5",
-	max_iterations: int = 8,
-	hard_timeout_seconds: float = 180.0,
-	api_key: str | None = None,
-	parsed_xbe: ParsedXbe | None = None,
+	parsed: ParsedXbe,
+	label_for: Callable[[int], str] | None = None,
 	wipe_history: bool = False,
 	reset_ctx_h: bool = False,
 	use_ghidra_warmstart: bool = False,
-	label_for: Callable[[int], str] | None = None,
-) -> JobInfo:
-	"""Carve, prepare workspace, and spawn the agent loop in a daemon thread.
+) -> tuple[FunctionWorkspace, str]:
+	"""Carve the target, synth target.obj, compose ctx.h, mirror the warm-start.
 
-	Returns immediately after the thread starts. The returned JobInfo
-	mutates as the run progresses; readers see state, iterations, and
-	best_match_percent advance live.
+	The shared front half of a decomp run: everything up to (but not including)
+	the agent loop. Returns the initialized workspace and the target disassembly
+	listing. Used by both the web UI's threaded launch and the batch runner.
 	"""
-	is_ghidra_only = model == "ghidra"
-	if is_ghidra_only:
-		# Ghidra-only runs need the warm-start to have anything to compile.
-		use_ghidra_warmstart = True
-		key = None
-	else:
-		key = api_key or os.environ.get("ANTHROPIC_API_KEY")
-		if not key:
-			raise RuntimeError("ANTHROPIC_API_KEY not set in environment")
-
-	parsed = parsed_xbe if parsed_xbe is not None else xbe_load(project.xbe_path)
-
 	body = xbe_function_carve(parsed, fn.va, fn.size)
 	mangled = _infer_mangled_name(body, fn.name)
 	obj_bytes = carver_target_obj_build(parsed, fn.va, fn.size, mangled)
@@ -139,8 +123,7 @@ def launch_decomp_job(
 	callee_decls = _extract_rel32_callee_decls(parsed, fn.va, fn.size, label_for=label_for)
 	kernel_imports = _extract_kernel_imports(parsed, fn.va, fn.size)
 
-	workspace_path = project.workspace_for(fn)
-	workspace = FunctionWorkspace(root=workspace_path, function_name=mangled)
+	workspace = FunctionWorkspace(root=project.workspace_for(fn), function_name=mangled)
 	workspace.initialize()
 	if wipe_history:
 		_wipe_workspace_history(workspace)
@@ -164,10 +147,57 @@ def launch_decomp_job(
 		stdcall_target=fn.name if "@" in mangled else None,
 		callee_arities=_extract_callee_arities(parsed, fn.va, fn.size),
 	)
+	return workspace, target_asm
+
+
+def launch_decomp_job(
+	project: Project,
+	fn: FunctionEntry,
+	*,
+	model: str = "claude-haiku-4-5",
+	max_iterations: int = 8,
+	hard_timeout_seconds: float = 180.0,
+	api_key: str | None = None,
+	parsed_xbe: ParsedXbe | None = None,
+	wipe_history: bool = False,
+	reset_ctx_h: bool = False,
+	use_ghidra_warmstart: bool = False,
+	label_for: Callable[[int], str] | None = None,
+) -> JobInfo:
+	"""Carve, prepare workspace, and spawn the agent loop in a daemon thread.
+
+	Returns immediately after the thread starts. The returned JobInfo
+	mutates as the run progresses; readers see state, iterations, and
+	best_match_percent advance live.
+	"""
+	is_ghidra_only = model == "ghidra"
+	is_local = model == "local"
+	if is_ghidra_only:
+		# Ghidra-only runs need the warm-start to have anything to compile.
+		use_ghidra_warmstart = True
+		key = None
+	elif is_local:
+		# A local OpenAI-compatible server (LM Studio) needs no Anthropic key.
+		key = None
+	else:
+		key = api_key or os.environ.get("ANTHROPIC_API_KEY")
+		if not key:
+			raise RuntimeError("ANTHROPIC_API_KEY not set in environment")
+
+	parsed = parsed_xbe if parsed_xbe is not None else xbe_load(project.xbe_path)
+	workspace, target_asm = prepare_decomp_workspace(
+		project,
+		fn,
+		parsed=parsed,
+		label_for=label_for,
+		wipe_history=wipe_history,
+		reset_ctx_h=reset_ctx_h,
+		use_ghidra_warmstart=use_ghidra_warmstart,
+	)
 
 	job = JobInfo(
-		workspace_path=workspace_path,
-		function_name=mangled,
+		workspace_path=workspace.root,
+		function_name=workspace.function_name,
 		va=fn.va,
 		size=fn.size,
 		model=model,
@@ -186,7 +216,7 @@ def launch_decomp_job(
 					diff_fn=default_diff_fn,
 				)
 			else:
-				llm = LiteLLMClient(model=f"anthropic/{model}", api_key=key)
+				llm = llm_client_for(model, api_key=key)
 				config = AgentConfig(
 					model=model,
 					api_base="",

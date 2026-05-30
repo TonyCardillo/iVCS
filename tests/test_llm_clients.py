@@ -7,7 +7,9 @@ rather than calling a real model.
 
 from unittest.mock import MagicMock, patch
 
-from src.llm_clients import LiteLLMClient
+import pytest
+
+from src.llm_clients import LiteLLMClient, llm_client_for
 
 
 def _mock_response(content: str | None = None, tool_calls: list[dict] | None = None) -> MagicMock:
@@ -99,3 +101,36 @@ class TestCallPassthrough:
 			client.complete(messages=[], tools=[])
 		call_kwargs = mock_completion.call_args.kwargs
 		assert "api_base" not in call_kwargs
+
+
+class TestLlmClientFor:
+	def test_local_points_at_lm_studio_by_default(self, monkeypatch):
+		monkeypatch.delenv("IVCS_LLM_API_BASE", raising=False)
+		monkeypatch.delenv("IVCS_LLM_MODEL", raising=False)
+		client = llm_client_for("local")
+		assert client.model == "openai/qwen3-coder-30b"
+		assert client.api_base == "http://127.0.0.1:1234/v1"
+
+	def test_local_honors_env_overrides(self, monkeypatch):
+		monkeypatch.setenv("IVCS_LLM_API_BASE", "http://10.0.0.5:5000/v1")
+		monkeypatch.setenv("IVCS_LLM_MODEL", "deepseek-coder")
+		client = llm_client_for("local")
+		assert client.model == "openai/deepseek-coder"
+		assert client.api_base == "http://10.0.0.5:5000/v1"
+
+	def test_cloud_uses_anthropic_prefix_and_key(self, monkeypatch):
+		monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+		client = llm_client_for("claude-haiku-4-5")
+		assert client.model == "anthropic/claude-haiku-4-5"
+		assert client.api_base is None
+		assert client.api_key == "sk-ant-test"
+
+	def test_cloud_explicit_key_beats_env(self, monkeypatch):
+		monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-env")
+		client = llm_client_for("claude-haiku-4-5", api_key="sk-explicit")
+		assert client.api_key == "sk-explicit"
+
+	def test_cloud_without_key_raises(self, monkeypatch):
+		monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+		with pytest.raises(RuntimeError, match="ANTHROPIC_API_KEY"):
+			llm_client_for("claude-haiku-4-5")

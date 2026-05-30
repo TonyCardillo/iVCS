@@ -2270,9 +2270,16 @@ def view_launch_form(project_path_str: str, va_str: str) -> str:
 </label>
 """
 
+	model_choices = (
+		("claude-haiku-4-5", "claude-haiku-4-5"),
+		("claude-sonnet-4-6", "claude-sonnet-4-6"),
+		("claude-opus-4-7", "claude-opus-4-7"),
+		("local", "local (LM Studio)"),
+		("ghidra", "ghidra"),
+	)
 	model_options = "".join(
-		f'<option value="{m}"{" selected" if m == "claude-haiku-4-5" else ""}>{m}</option>'
-		for m in ("claude-haiku-4-5", "claude-sonnet-4-6", "claude-opus-4-7", "ghidra")
+		f'<option value="{value}"{" selected" if value == "claude-haiku-4-5" else ""}>{label}</option>'
+		for value, label in model_choices
 	)
 
 	warmstart_exists = (workspace_path / "ghidra_warmstart.c").is_file()
