@@ -17,7 +17,9 @@ Out of MVP scope: absolute-address operands on mov/push/lea
 (IMAGE_REL_I386_DIR32 against non-call instructions).
 """
 
+import re
 import struct
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
 
@@ -238,3 +240,28 @@ def relocs_kernel_import_va_map(parsed: ParsedXbe) -> dict[str, int]:
 		if name:
 			out[name] = slot_va
 	return out
+
+
+_FN_OR_DATA_SYMBOL = re.compile(r"^_?(?:fn|data)_([0-9A-Fa-f]{8})(?:@\d+)?$")
+_IMP_PREFIX = "__imp__"
+
+
+def relocs_image_va_resolver(parsed: ParsedXbe) -> Callable[[str], int | None]:
+	"""Resolve a compiled object's external symbol names back to image VAs.
+
+	The inverse of `reloc_symbol_name`: `_fn_<va>` / `_data_<va>` carry the
+	absolute VA in the name; `__imp__<export>` resolves to the kernel thunk-table
+	slot the import occupied. Both the byte-splice verifier (Phase 4a) and the
+	real relink (Phase 4b) place externals at the addresses this returns.
+	"""
+	imports = relocs_kernel_import_va_map(parsed)
+
+	def resolve(name: str) -> int | None:
+		if name.startswith(_IMP_PREFIX):
+			return imports.get(name[len(_IMP_PREFIX) :])
+		match = _FN_OR_DATA_SYMBOL.match(name)
+		if match is not None:
+			return int(match.group(1), 16)
+		return None
+
+	return resolve

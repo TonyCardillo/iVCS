@@ -38,6 +38,8 @@ IMAGE_SYM_CLASS_STATIC = 3
 IMAGE_SYM_TYPE_NULL = 0x0000
 IMAGE_SYM_TYPE_FUNCTION = 0x0020
 
+IMAGE_SYM_ABSOLUTE = -1  # section number for a symbol with an absolute value
+
 _SHORT_NAME_LEN = 8
 
 
@@ -94,6 +96,33 @@ def coff_object_build(
 			string_table,
 		]
 	)
+
+
+def coff_absolute_symbols_build(symbols: dict[str, int]) -> bytes:
+	"""A sectionless COFF/i386 object defining each name as an absolute symbol.
+
+	The real-relink path (Phase 4b) feeds this to Link.Exe so the linker resolves
+	a function's REL32/DIR32 externals — other functions' VAs, kernel thunk slots —
+	to fixed image addresses, exactly as they sit in the original image. An
+	`IMAGE_SYM_ABSOLUTE` (section number -1) symbol's value IS its virtual address.
+	"""
+	records = [
+		_SymbolRecord(
+			name=name,
+			value=va,
+			section_number=IMAGE_SYM_ABSOLUTE,
+			type=IMAGE_SYM_TYPE_NULL,
+			storage_class=IMAGE_SYM_CLASS_EXTERNAL,
+		)
+		for name, va in symbols.items()
+	]
+	symbol_blob, string_table = _symbol_table_pack(records)
+	header = _coff_header_pack(
+		section_count=0,
+		symbol_table_ptr=COFF_HEADER_SIZE,
+		symbol_count=_symbol_slot_count(records),
+	)
+	return header + symbol_blob + string_table
 
 
 def _text_zero_imm32_sites(text_bytes: bytes, relocations: list[ResolvedReloc]) -> bytes:

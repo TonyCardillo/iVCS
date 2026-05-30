@@ -13,7 +13,6 @@ authoritative, so nothing is hand-authored or duplicated into config.
 Phase 1 (here): the segment model — grouping, gaps, overlaps, source paths.
 """
 
-import re
 import shutil
 import tempfile
 from collections.abc import Callable
@@ -22,9 +21,11 @@ from pathlib import Path
 
 from src.coff_read import CoffObject, coff_object_read
 from src.compile_tool import CompileOutput, default_compile_fn
+from src.link_tool import default_link_fn
 from src.project import FunctionEntry, Project, function_status
 from src.relink import RelinkError, relink_place
-from src.relocs import relocs_kernel_import_va_map
+from src.relink_image import LinkFn, function_real_relink
+from src.relocs import relocs_image_va_resolver
 from src.workspace import FunctionWorkspace
 from src.xbe import ParsedXbe, XbeFormatError, xbe_function_carve, xbe_section_containing_va
 
@@ -271,30 +272,6 @@ def project_coverage(project: Project, parsed: ParsedXbe) -> tuple[SegmentCovera
 # the original image. A whole-image "verified %" is a stronger claim than the
 # sum of per-function match percents.
 
-_FN_OR_DATA_SYMBOL = re.compile(r"^_?(?:fn|data)_([0-9A-Fa-f]{8})(?:@\d+)?$")
-_IMP_PREFIX = "__imp__"
-
-
-def _image_symbol_resolver(parsed: ParsedXbe) -> Callable[[str], int | None]:
-	"""Resolve a compiled object's external symbol names back to image VAs.
-
-	`_fn_<va>` / `_data_<va>` carry the absolute VA in the name itself (that's how
-	`relocs.reloc_symbol_name` minted them); `__imp__<export>` resolves to the
-	kernel thunk-table slot the import occupied.
-	"""
-	imports = relocs_kernel_import_va_map(parsed)
-
-	def resolve(name: str) -> int | None:
-		if name.startswith(_IMP_PREFIX):
-			return imports.get(name[len(_IMP_PREFIX) :])
-		match = _FN_OR_DATA_SYMBOL.match(name)
-		if match is not None:
-			return int(match.group(1), 16)
-		return None
-
-	return resolve
-
-
 def _compiled_function_object(
 	project: Project, fn: FunctionEntry, compile_fn: CompileFn
 ) -> CoffObject | None:
@@ -348,6 +325,17 @@ class ImageVerify:
 		return (self.verified_bytes / self.matched_bytes * 100.0) if self.matched_bytes else 0.0
 
 
+def _byte_match_verify(fn: FunctionEntry, placed: bytes, original: bytes) -> FunctionVerify:
+	"""Count how many of fn's bytes the placed bytes reproduce, as a FunctionVerify."""
+	verified = sum(1 for i in range(fn.size) if i < len(placed) and placed[i] == original[i])
+	reason = None if verified == fn.size else f"{verified}/{fn.size} bytes match"
+	return FunctionVerify(fn.name, fn.va, fn.size, verified, reason)
+
+
+def _matched_functions(project: Project) -> list[FunctionEntry]:
+	return [f for f in project.functions if function_status(project, f).state == "matched"]
+
+
 def _function_splice_verify(
 	project: Project,
 	parsed: ParsedXbe,
@@ -369,9 +357,7 @@ def _function_splice_verify(
 	except RelinkError as exc:
 		return FunctionVerify(fn.name, fn.va, fn.size, 0, f"relink failed: {exc}")
 
-	verified = sum(1 for i in range(fn.size) if i < len(placed) and placed[i] == original[i])
-	reason = None if verified == fn.size else f"{verified}/{fn.size} bytes match"
-	return FunctionVerify(fn.name, fn.va, fn.size, verified, reason)
+	return _byte_match_verify(fn, placed, original)
 
 
 def image_splice_verify(
@@ -383,12 +369,50 @@ def image_splice_verify(
 	"""Recompile every matched function, relocate it to its VA, and byte-compare
 	against the original image. Returns per-function and whole-image verified
 	byte counts."""
-	resolve = _image_symbol_resolver(parsed)
+	resolve = relocs_image_va_resolver(parsed)
 	results = [
 		_function_splice_verify(project, parsed, fn, resolve, compile_fn)
-		for fn in project.functions
-		if function_status(project, fn).state == "matched"
+		for fn in _matched_functions(project)
 	]
+	return ImageVerify(
+		functions=tuple(results),
+		matched_bytes=sum(r.size for r in results),
+		verified_bytes=sum(r.verified_bytes for r in results),
+	)
+
+
+# --- Phase 4b: real relink verification (Link.Exe) --------------------------
+#
+# An independent oracle for the same claim: instead of our own relocator, drive
+# the real XDK linker over each matched function (placed at its true VA with an
+# absolute-symbol stub for its externals) and byte-compare the linker's output
+# against the original image. Agreement with the splice verifier is strong
+# evidence; disagreement points at a relocation our own placement got wrong.
+
+
+def image_real_relink_verify(
+	project: Project,
+	parsed: ParsedXbe,
+	*,
+	compile_fn: CompileFn = default_compile_fn,
+	link_fn: LinkFn = default_link_fn,
+) -> ImageVerify:
+	"""Relink every matched function with Link.Exe at its true VA and byte-compare
+	against the original image."""
+	results: list[FunctionVerify] = []
+	for fn in _matched_functions(project):
+		relinked = function_real_relink(
+			project, parsed, fn, compile_fn=compile_fn, link_fn=link_fn
+		)
+		if not relinked.ok:
+			results.append(FunctionVerify(fn.name, fn.va, fn.size, 0, relinked.reason))
+			continue
+		try:
+			original = xbe_function_carve(parsed, fn.va, fn.size)
+		except XbeFormatError as exc:
+			results.append(FunctionVerify(fn.name, fn.va, fn.size, 0, f"carve failed: {exc}"))
+			continue
+		results.append(_byte_match_verify(fn, relinked.function_bytes, original))
 	return ImageVerify(
 		functions=tuple(results),
 		matched_bytes=sum(r.size for r in results),

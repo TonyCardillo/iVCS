@@ -63,6 +63,11 @@ agent_loop_run                                        ← src/agent_loop.py
   one-function linker over the compiled COFF), and byte-compares — a whole-image
   verified-matched % that catches address mistakes the relocation-aware
   per-function diff masks (`scripts/integrate.py verify`)
+- Cross-checks that same claim with the real XDK `Link.Exe` as an independent
+  oracle: pads each matched function to land at its exact original VA, resolves
+  its externals through an absolute-symbol stub, links, reads the placed bytes
+  back out of the PE, and byte-compares — agreeing with our own relocator to the
+  byte (`scripts/integrate.py relink`)
 
 ## Quickstart
 
@@ -96,7 +101,9 @@ src/
   coff.py           Microsoft COFF/i386 .obj emitter
   coff_read.py      COFF/i386 .obj reader (inverse of coff.py) for whole-image verify
   relink.py         One-function linker: place compiled bytes at their real VA
-  link_tool.py      Link.Exe wrapper (real relink, Phase 4b foundation)
+  pe_read.py        Minimal PE32 reader: pull linked section bytes back out
+  link_tool.py      Link.Exe wrapper (argv builder + Wine invocation)
+  relink_image.py   Real relink via Link.Exe: pad-to-VA, stub externals, extract
   carver.py         Three-line orchestrator: carve → resolve → coff
   workspace.py      Per-function filesystem layout
   project.py        Project manifest (project.json) load/save + match aggregation
@@ -138,31 +145,20 @@ A mix of nostalgia and more greenfield decomp scene!
 
 In rough order of leverage:
 
-1. **Real relink via `Link.Exe`** — drive the XDK linker over the committed
-   `.obj`s into a candidate section image and diff against the original at the
-   section-bytes level, so the match is proven by the real linker rather than
-   our one-function relocator. The wrapper (`src/link_tool.py`) is in and runs
-   Link.Exe 7.10.3077 under Wine on cl-emitted objects; the remaining work is
-   the next slice:
-   - *Retention* — Link.Exe garbage-collects unreferenced functions (a lone
-     committed obj with no entry/exports links to a 0-section PE). Retain each
-     committed symbol via `/INCLUDE:` or an exports stub.
-   - *Exact placement* — PE image bases must be 64 KB-aligned, so a function
-     can't be pinned to its real VA via `/BASE` alone; the section RVA has to be
-     driven so `base + rva + offset` lands on the target VA.
-   - *PE section reader + diff* — pull the linked `.text` bytes back out and
-     byte-compare against the original section.
-   Producing a bootable XBE (headers/cert) stays out of scope; verification is
-   at section-bytes level only. (The byte-splice verifier —
-   `scripts/integrate.py verify`, `src/relink.py`, `src/coff_read.py` — and the
-   segment model / commit / coverage report already shipped.)
-2. **Codebase index + embeddings** — once we have ≥5 matched functions,
+1. **Codebase index + embeddings** — once we have ≥5 matched functions,
    embed them and retrieve similar examples as few-shot prompt context.
-3. **x86 permuter** — non-LLM C-source mutation engine (swap commutative ops,
+2. **x86 permuter** — non-LLM C-source mutation engine (swap commutative ops,
    reorder local declarations, equivalent idioms) to brute-force the
    last-mile register-allocation gap without spending LLM tokens. Original
    `decomp-permuter` is MIPS-focused; an x86 port is real work but pays off
    forever.
+
+Whole-image relink + verify (the previous #1) shipped: both
+`scripts/integrate.py verify` (our own relocator) and `scripts/integrate.py
+relink` (the real XDK Link.Exe, as an independent cross-check) place each
+matched function at its true VA and byte-compare against the original image.
+Producing a bootable XBE (headers/cert) remains out of scope — verification is
+at section-bytes level.
 
 ## Known constraints
 
