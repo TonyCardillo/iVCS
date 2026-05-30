@@ -428,6 +428,10 @@ class TestGhidraOnlyRun:
 			diff_fn=_scripted_diff(100.0),
 		)
 		assert result.success is True
+		assert result.termination_reason == "matched"
+		assert result.best_match_percent == 100.0
+		# best.c gets written so the aggregator counts this as a real match.
+		assert ws.best_c.is_file()
 
 	def test_full_match_at_or_above_100_reports_success_example(self, tmp_path):
 		# Same `>= 100.0` threshold as the agent loop / aggregator: a float at or
@@ -442,8 +446,6 @@ class TestGhidraOnlyRun:
 		)
 		assert result.success is True
 		assert result.termination_reason == "matched"
-		assert result.best_match_percent == 100.0
-		# best.c gets written so the aggregator counts this as a real match.
 		assert ws.best_c.is_file()
 
 

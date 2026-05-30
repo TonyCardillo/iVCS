@@ -14,7 +14,7 @@ from src.coff import coff_object_build
 from src.coff_read import coff_object_read
 from src.link_tool import LinkOutput
 from src.project import FunctionEntry, Project
-from src.relink_image import function_real_relink, relink_placement
+from src.relink_image import function_object_compile, function_real_relink, relink_placement
 from src.relocs import RelocKind, RelocSite, ResolvedReloc
 from src.workspace import FunctionWorkspace
 from src.xbe import SECTION_FLAG_EXECUTABLE, ParsedXbe, XbeHeader, XbeSection

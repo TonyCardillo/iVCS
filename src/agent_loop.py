@@ -176,7 +176,7 @@ def agent_loop_run(
 			best_c_code = c_code
 			workspace.best_c.write_text(c_code)
 
-		if result.match_percent == 100.0:
+		if result.match_percent is not None and result.match_percent >= 100.0:
 			return _finalize(
 				workspace, "matched", best_match, iterations, best_c_code, model=config.model
 			)
@@ -250,7 +250,7 @@ def ghidra_only_run(
 				match = symbol.match_percent
 				break
 
-	if match == 100.0:
+	if match is not None and match >= 100.0:
 		# Surface as a "matched" success so the aggregator counts it.
 		return _finalize(
 			workspace,

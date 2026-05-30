@@ -76,6 +76,12 @@ agent_loop_run                                        ← src/agent_loop.py
   much work collapses (Halo 2: 14.2% of functions are opcode-redundant, one
   match each covers a whole cluster) and feeding few-shot retrieval, with no
   LLM/embedding model (`scripts/codindex.py`)
+- Identifies SDK functions against the XDK static libraries (FLIRT-style): reads
+  each `!<arch>` library's COFF objects, fingerprints their functions, and matches
+  the image against them on relocation-invariant hashes — naming the SDK portion
+  and scoping it out of the real decomp target (Halo 2: 538 functions confidently
+  named against 6 libs in ~12 s, e.g. `_XGetLaunchInfo@8`, `_D3DIndexBuffer_GetDesc@8`)
+  — `scripts/libmatch.py`
 
 ## Quickstart
 
@@ -123,12 +129,15 @@ src/
   llm_clients.py    LiteLLM client adapter (works with local/cloud providers)
   objdiff.py        objdiff-cli wrapper + typed JSON parser
   fingerprint.py    x86 structural index: exact/opcode/equiv hashes, cluster, similarity
+  archive.py        !<arch> static-library parser (extract COFF members from .lib)
+  libmatch.py       Match the image against XDK library signatures to name SDK code
 
 tests/
 scripts/
   enumerate.py      Enumerate all functions in an XBE → project.json manifest
   integrate.py      Commit matched functions into the source tree; coverage report
   codindex.py       Structural code index: cluster duplicates, find similar functions
+  libmatch.py       Name SDK functions by matching the image against the XDK .libs
   smoke_run.py      End-to-end agent loop against the bundled objdiff-smoke fixture (no XBE needed)
   halo2_sanity.py   End-to-end pipeline diagnostic against a real Halo 2 XBE
   webui.py          Local web UI for inspecting an XBE (sections, hex, disassembly, kernel ordinals)
