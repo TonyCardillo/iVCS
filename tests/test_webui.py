@@ -13,6 +13,7 @@ from webui import (  # noqa: E402
 	_handle_symbol_rename,
 	_path_query_suffix,
 	_project_crumb,
+	_run_action_bar,
 	_run_interrupted,
 	_va_from_workspace,
 )
@@ -138,6 +139,39 @@ def test_run_not_interrupted_when_only_baseline_attempt():
 
 def test_run_not_interrupted_when_no_attempts():
 	assert _run_interrupted(None, None, []) is False
+
+
+class _FakeJob:
+	def __init__(self, active):
+		self._active = active
+
+	def is_active(self):
+		return self._active
+
+
+def test_run_action_bar_run_when_fresh(tmp_path):
+	bar = _run_action_bar(tmp_path / "fn_00175F40", "/p/project.json", None, has_attempts=False)
+	assert "▶ run" in bar
+	assert "/decomp/launch?path=" in bar
+	assert "va=0x175f40" in bar
+
+
+def test_run_action_bar_rerun_when_attempts_exist(tmp_path):
+	bar = _run_action_bar(tmp_path / "fn_00175F40", "/p/project.json", None, has_attempts=True)
+	assert "↻ re-run" in bar
+
+
+def test_run_action_bar_hidden_while_job_active(tmp_path):
+	root = tmp_path / "fn_00175F40"
+	assert _run_action_bar(root, "/p/project.json", _FakeJob(True), has_attempts=True) == ""
+
+
+def test_run_action_bar_hidden_without_project_path(tmp_path):
+	assert _run_action_bar(tmp_path / "fn_00175F40", None, None, has_attempts=True) == ""
+
+
+def test_run_action_bar_hidden_when_va_undecodable(tmp_path):
+	assert _run_action_bar(tmp_path / "scratch", "/p/project.json", None, has_attempts=False) == ""
 
 
 def _att(n, mp, model=None):

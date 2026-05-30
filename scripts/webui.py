@@ -594,6 +594,17 @@ pre.code .ascii  { color: var(--violet); }
   text-decoration: none;
 }
 .run-banner a.resume:hover { background: var(--amber); color: var(--bg); }
+.run-actions { margin: 0 0 14px 0; }
+.btn-run {
+  display: inline-block;
+  padding: 6px 16px;
+  border: 1px solid var(--line-strong);
+  color: var(--green);
+  text-decoration: none;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+}
+.btn-run:hover { border-color: var(--green); background: var(--bg-soft); }
 .run-banner .amber  { color: var(--amber); }
 .run-banner .cyan   { color: var(--cyan); }
 .run-banner .green  { color: var(--green); }
@@ -1397,6 +1408,7 @@ def view_decomp_run(root_str: str, current_path: str | None) -> str:
 	body = (
 		crumbs(("home", "/"), _project_crumb(current_path), (root.name, None))
 		+ banner
+		+ _run_action_bar(root, current_path, job, has_attempts=bool(attempts))
 		+ panel("Run", header_body, meta=fn_name)
 		+ _symbol_notes_panel(root, current_path)
 		+ panel("Attempts", timeline, meta=f"{len(attempts)} total")
@@ -1707,6 +1719,22 @@ def _interrupted_banner(root: Path, current_path: str | None) -> str:
 		f"{resume}"
 		"</div>"
 	)
+
+
+def _run_action_bar(root: Path, current_path: str | None, job, *, has_attempts: bool) -> str:
+	"""A run / re-run button on the decomp page → the prefilled launch form.
+
+	Hidden while a job is live (the banner already shows progress) or when we
+	lack the project path needed to build the launch link. Labelled by history:
+	`▶ run` for a fresh function, `↻ re-run` once attempts exist — re-running
+	lets another model attack the same workspace.
+	"""
+	va = _va_from_workspace(root)
+	if not current_path or va is None or (job and job.is_active()):
+		return ""
+	label = "↻ re-run" if has_attempts else "▶ run"
+	href = f"/decomp/launch?path={quote(current_path)}&va={va:#x}"
+	return f'<div class="run-actions"><a class="btn-run" href="{href}">{label}</a></div>'
 
 
 def _va_from_workspace(root: Path) -> int | None:
