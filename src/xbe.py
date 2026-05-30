@@ -204,14 +204,21 @@ class XbeFunction:
 
 def xbe_functions_enumerate(parsed: ParsedXbe) -> tuple[XbeFunction, ...]:
 	"""Linear-sweep every executable section, emitting (name, va, size) per
-	detected function. Names follow `sub_VVVVVVVV` (8 hex digits uppercase).
+	detected function. Names follow `fn_VVVVVVVV` (8 hex digits uppercase).
 
-	Two-pass per section. First, disassemble the whole section and record
-	every direct `call` target that lands within it — each is a guaranteed
-	function start. Second, walk the instruction stream: a `ret` closes the
-	current function iff the byte after it is padding (0xCC/0x90), the
-	section ends, the next decoded instruction is a recognized MSVC /O2
-	prologue, or its VA is in the call-target set.
+	Two-pass per section. First, disassemble the whole section and record every
+	direct `call` target that lands within it — each is a guaranteed function
+	start. Second, walk the instruction stream and split functions at three
+	signals, so that endings other than `ret` (tail-call `jmp`, `noreturn` calls)
+	don't merge the following function in. The signals:
+
+	1. a `ret` closes the function iff the byte after it is padding (0xCC/0x90),
+	the section ends, the next instruction is a recognized MSVC /O2 prologue, or
+	its VA is a call target;
+	2. reaching a call-target VA mid-function closes the previous function — a
+	directly-called entry cannot lie inside another function;
+	3. an `int3` run that leads into a prologue or call-target closes the current
+	function (int3 is never intra-function padding under /O2, unlike `nop`).
 	"""
 	md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
 	md.detail = False
@@ -223,20 +230,36 @@ def xbe_functions_enumerate(parsed: ParsedXbe) -> tuple[XbeFunction, ...]:
 		body = xbe_section_read(parsed, section)
 		n = section.raw_size
 		section_va = section.virtual_address
-		section_end_va = section_va + n
 
 		instrs = _disassemble_with_resync(md, body, section_va)
-		call_targets = _collect_call_targets(instrs, section_va, section_end_va)
+		call_targets = _collect_call_targets(instrs, section_va, section_va + n)
 
 		fn_start_off: int | None = None
 		for i, (addr, size, mnem, _op) in enumerate(instrs):
 			offset = addr - section_va
 			end_off = offset + size
 
+			# A directly-called entry can't be in the middle of another function:
+			# reaching it closes the previous one and starts a new one here.
+			if fn_start_off is not None and offset > fn_start_off and addr in call_targets:
+				_maybe_emit(found, section_va, fn_start_off, offset)
+				fn_start_off = offset
+
 			if fn_start_off is None:
 				if mnem in ("int3", "nop"):
 					continue
 				fn_start_off = offset
+
+			# An int3 run ends this function — catching tail-jmp / noreturn endings
+			# that never reach a `ret`. A run of two-plus int3 is reliable
+			# inter-function padding; a lone int3 only counts when it leads into a
+			# clear new-function start (could otherwise be a `__debugbreak`).
+			if mnem == "int3" and offset > fn_start_off and _int3_run_is_boundary(
+				instrs, i, call_targets
+			):
+				_maybe_emit(found, section_va, fn_start_off, offset)
+				fn_start_off = None
+				continue
 
 			if mnem == "ret" or mnem.startswith("retn") or mnem.startswith("retf"):
 				next_va = section_va + end_off
@@ -247,19 +270,19 @@ def xbe_functions_enumerate(parsed: ParsedXbe) -> tuple[XbeFunction, ...]:
 					or _next_instr_is_prologue(instrs, i + 1)
 				)
 				if is_boundary:
-					fn_va = section_va + fn_start_off
-					fn_size = end_off - fn_start_off
-					if 1 <= fn_size <= MAX_FUNCTION_SIZE:
-						found.append(
-							XbeFunction(
-								name=f"fn_{fn_va:08X}",
-								va=fn_va,
-								size=fn_size,
-							)
-						)
+					_maybe_emit(found, section_va, fn_start_off, end_off)
 					fn_start_off = None
 
 	return tuple(found)
+
+
+def _maybe_emit(
+	found: list[XbeFunction], section_va: int, start_off: int, end_off: int
+) -> None:
+	fn_size = end_off - start_off
+	if 1 <= fn_size <= MAX_FUNCTION_SIZE:
+		fn_va = section_va + start_off
+		found.append(XbeFunction(name=f"fn_{fn_va:08X}", va=fn_va, size=fn_size))
 
 
 def _collect_call_targets(
@@ -284,22 +307,54 @@ def _collect_call_targets(
 _PUSH_PROLOGUE_REGS = frozenset({"ebp", "esi", "edi", "ebx"})
 
 
+def _looks_like_prologue(mnem: str, op: str) -> bool:
+	"""Is this single instruction a recognized MSVC /O2 function prologue?"""
+	if mnem == "push" and op in _PUSH_PROLOGUE_REGS:
+		return True
+	if mnem == "sub" and op.startswith("esp,"):
+		return True
+	if mnem == "mov" and op == "edi, edi":
+		return True
+	return mnem == "enter"
+
+
 def _next_instr_is_prologue(instrs: list[tuple[int, int, str, str]], idx: int) -> bool:
-	"""Does the instruction at `idx` (skipping any padding) look like a
-	function prologue? Pattern set is the common MSVC /O2 entries."""
+	"""Does the next non-padding instruction at/after `idx` look like a prologue?"""
 	while idx < len(instrs):
 		_, _, mnem, op = instrs[idx]
 		if mnem in ("int3", "nop"):
 			idx += 1
 			continue
-		if mnem == "push" and op in _PUSH_PROLOGUE_REGS:
-			return True
-		if mnem == "sub" and op.startswith("esp,"):
-			return True
-		if mnem == "mov" and op == "edi, edi":
-			return True
-		return mnem == "enter"
+		return _looks_like_prologue(mnem, op)
 	return False
+
+
+def _int3_run_is_boundary(
+	instrs: list[tuple[int, int, str, str]], idx: int, call_targets: set[int]
+) -> bool:
+	"""True if the `int3` run at `idx` marks a function boundary.
+
+	This is what lets an `int3` run close a function whose body ended in a
+	tail-call `jmp` or a `noreturn` call rather than a `ret`. A run of two or more
+	int3 is reliable inter-function padding (you never `__debugbreak` twice, and
+	intra-function alignment uses `nop`). A lone int3 is ambiguous, so it counts
+	only when the following non-padding instruction is itself a new-function
+	start — a directly-called entry or a recognized prologue — or the section ends.
+	"""
+	run = 0
+	j = idx
+	while j < len(instrs) and instrs[j][2] == "int3":
+		run += 1
+		j += 1
+	if run >= 2:
+		return True
+
+	while j < len(instrs) and instrs[j][2] in ("int3", "nop"):
+		j += 1
+	if j >= len(instrs):
+		return True
+	addr, _size, mnem, op = instrs[j]
+	return addr in call_targets or _looks_like_prologue(mnem, op)
 
 
 def _disassemble_with_resync(

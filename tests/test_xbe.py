@@ -673,6 +673,103 @@ class TestEnumerateFunctions:
 		assert fns[0] == XbeFunction(name="fn_00011000", va=0x00011000, size=6)
 		assert fns[1] == XbeFunction(name="fn_00011006", va=0x00011006, size=6)
 
+	def test_tail_jmp_predecessor_splits_at_call_target(self):
+		# Function A ends in a tail call (`jmp eax`) — never a `ret` — so the old
+		# enumerator merged the following function B into it. B is a direct call
+		# target, so it cannot lie inside A: reaching B's VA must split.
+		#   A: call 0x11007 ; jmp eax        (7 bytes, ends in jmp not ret)
+		#   B: mov eax, 0 ; ret              (6 bytes)
+		a = b"\xe8\x02\x00\x00\x00\xff\xe0"  # call 0x11007 (rel32=2); jmp eax
+		b = b"\xb8\x00\x00\x00\x00\xc3"  # mov eax, 0; ret
+		text = a + b + b"\xcc"
+		parsed = xbe_parse(
+			build_minimal_xbe(
+				base_addr=0x00010000,
+				size_of_image=0x00100000,
+				sections=[(".text", SECTION_FLAG_EXECUTABLE, text, 0x00011000)],
+			)
+		)
+		fns = xbe_functions_enumerate(parsed)
+		assert fns == (
+			XbeFunction(name="fn_00011000", va=0x00011000, size=7),
+			XbeFunction(name="fn_00011007", va=0x00011007, size=6),
+		)
+
+	def test_noreturn_call_then_int3_then_prologue_splits(self):
+		# Function A ends in a `call` (e.g. to a noreturn) with no trailing `ret`,
+		# then int3 padding, then function B opens with a `push ebp` prologue.
+		# The int3 run leading into a prologue must close A.
+		a = b"\xe8\xfb\xff\xff\xff"  # call 0x11000 (back-edge, A's own start)
+		pad = b"\xcc\xcc"
+		b = b"\x55\x8b\xec\x5d\xc3"  # push ebp; mov ebp,esp; pop ebp; ret
+		text = a + pad + b + b"\xcc"
+		parsed = xbe_parse(
+			build_minimal_xbe(
+				base_addr=0x00010000,
+				size_of_image=0x00100000,
+				sections=[(".text", SECTION_FLAG_EXECUTABLE, text, 0x00011000)],
+			)
+		)
+		fns = xbe_functions_enumerate(parsed)
+		assert fns == (
+			XbeFunction(name="fn_00011000", va=0x00011000, size=5),
+			XbeFunction(name="fn_00011007", va=0x00011007, size=5),
+		)
+
+	def test_int3_run_splits_before_non_prologue_entry(self):
+		# A run of 2+ int3 is reliable inter-function padding even when the next
+		# function's entry isn't a recognized prologue (here a `push imm32`
+		# registration thunk). Without this, runs of such thunks merge into one.
+		#   A: xor eax,eax ; jmp eax       (4 bytes, ends in jmp not ret)
+		#   <int3 int3 int3>
+		#   B: push 0x12345678 ; ret       (6 bytes, non-prologue entry)
+		a = b"\x33\xc0\xff\xe0"  # xor eax,eax; jmp eax
+		pad = b"\xcc\xcc\xcc"
+		b = b"\x68\x78\x56\x34\x12\xc3"  # push 0x12345678; ret
+		text = a + pad + b + b"\xcc"
+		parsed = xbe_parse(
+			build_minimal_xbe(
+				base_addr=0x00010000,
+				size_of_image=0x00100000,
+				sections=[(".text", SECTION_FLAG_EXECUTABLE, text, 0x00011000)],
+			)
+		)
+		fns = xbe_functions_enumerate(parsed)
+		assert fns == (
+			XbeFunction(name="fn_00011000", va=0x00011000, size=4),
+			XbeFunction(name="fn_00011007", va=0x00011007, size=6),
+		)
+
+	def test_nop_alignment_inside_function_not_split(self):
+		# A `nop` run is intra-function alignment, not a separator. A function
+		# with mid-body nop padding followed by non-prologue code must NOT split.
+		#   xor eax,eax ; nop ; nop ; inc eax ; ret
+		text = b"\x33\xc0" + b"\x90\x90" + b"\x40" + b"\xc3" + b"\xcc"
+		parsed = xbe_parse(
+			build_minimal_xbe(
+				base_addr=0x00010000,
+				size_of_image=0x00100000,
+				sections=[(".text", SECTION_FLAG_EXECUTABLE, text, 0x00011000)],
+			)
+		)
+		fns = xbe_functions_enumerate(parsed)
+		assert fns == (XbeFunction(name="fn_00011000", va=0x00011000, size=6),)
+
+	def test_int3_debugbreak_inside_function_not_split(self):
+		# A lone int3 (`__debugbreak`) followed by ordinary code (not a prologue
+		# or call target) is intra-function — it must NOT split the function.
+		#   xor eax,eax ; int3 ; inc eax ; ret
+		text = b"\x33\xc0" + b"\xcc" + b"\x40" + b"\xc3" + b"\xcc"
+		parsed = xbe_parse(
+			build_minimal_xbe(
+				base_addr=0x00010000,
+				size_of_image=0x00100000,
+				sections=[(".text", SECTION_FLAG_EXECUTABLE, text, 0x00011000)],
+			)
+		)
+		fns = xbe_functions_enumerate(parsed)
+		assert fns == (XbeFunction(name="fn_00011000", va=0x00011000, size=5),)
+
 	def test_back_to_back_not_split_when_no_prologue(self):
 		# Two consecutive `ret` instructions with no padding and no prologue
 		# after. The first ret is not a boundary (treated as early return).
