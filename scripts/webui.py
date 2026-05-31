@@ -31,7 +31,6 @@ _BUNDLED_OBJDIFF = REPO_ROOT / "recon" / "objdiff-smoke" / "objdiff-cli"
 if "IVCS_OBJDIFF_CLI" not in os.environ and _BUNDLED_OBJDIFF.is_file():
 	os.environ["IVCS_OBJDIFF_CLI"] = str(_BUNDLED_OBJDIFF)
 
-import capstone  # noqa: E402
 
 from src.launcher import JobInfo, launch_decomp_job  # noqa: E402
 from src.libmatch import sdk_manifest_load  # noqa: E402
@@ -49,12 +48,7 @@ from src.symbols import symbol_map_load, symbol_rename  # noqa: E402
 from src.xbe import (  # noqa: E402
 	ParsedXbe,
 	XbeFormatError,
-	xbe_build_flavor_detect,
-	xbe_entry_point_get,
-	xbe_kernel_thunk_address_get,
 	xbe_load,
-	xbe_section_find,
-	xbe_section_read,
 )
 
 # ── Tiny XBE cache (parsing a 5 MB XBE is cheap, but redundant) ─────────────
@@ -220,41 +214,7 @@ th {
 }
 tr:hover td { background: var(--bg-row); }
 td.num { color: var(--cyan); }
-td.flags span { color: var(--fg-faint); margin-right: 4px; }
-td.flags span.on { color: var(--amber); }
 td.size { color: var(--green); }
-
-.va-strip {
-  position: relative;
-  height: 36px;
-  border: 1px solid var(--line);
-  margin-top: 14px;
-  background: var(--bg);
-}
-.va-strip .seg {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  border-right: 1px solid var(--line-strong);
-  background: linear-gradient(180deg, rgba(95,215,255,0.04), rgba(95,215,255,0.12));
-}
-.va-strip .seg.X { background: linear-gradient(180deg, rgba(255,180,84,0.05), rgba(255,180,84,0.18)); }
-.va-strip .seg .lbl {
-  position: absolute;
-  top: 2px; left: 4px;
-  font-size: 10px;
-  color: var(--fg-dim);
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  white-space: nowrap;
-}
-.va-strip .seg.X .lbl { color: var(--amber); }
-.va-strip .axis {
-  position: absolute;
-  bottom: -16px;
-  font-size: 10px;
-  color: var(--fg-faint);
-}
 
 form.inline { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 input[type="text"], input[type="number"] {
@@ -289,18 +249,6 @@ pre.code {
   line-height: 1.7;
   white-space: pre;
 }
-pre.code .addr   { color: var(--fg-dim); }
-pre.code .hex    { color: var(--green); }
-pre.code .mn     { color: var(--cyan); }
-pre.code .op     { color: var(--fg); }
-pre.code .imm    { color: var(--amber); }
-pre.code .ascii  { color: var(--violet); }
-
-.hex-row { white-space: pre; }
-.hex-row .addr   { color: var(--fg-dim); margin-right: 16px; }
-.hex-row .bytes  { color: var(--green); }
-.hex-row .ascii  { color: var(--fg-dim); margin-left: 16px; }
-
 .error {
   border: 1px solid var(--red);
   color: var(--red);
@@ -804,7 +752,7 @@ LOGO = """\
  └──────────────────────────────────────────┘"""
 
 
-def view_index(default_path: str = "") -> str:
+def view_index() -> str:
 	projects = _discover_projects()
 	if projects:
 		proj_rows = "".join(
@@ -821,237 +769,15 @@ def view_index(default_path: str = "") -> str:
 			meta=f"{len(projects)} detected · click to open dashboard",
 		)
 	else:
-		proj_panel = ""
+		proj_panel = panel(
+			"Projects",
+			'<p class="muted">No projects detected. Drop a '
+			'<span class="cyan">project.json</span> under <span class="cyan">projects/</span> '
+			"to get started.</p>",
+		)
 
-	body = f"""
-<div class="ascii-logo">{LOGO}</div>
-{proj_panel}
-{
-		panel(
-			"Load XBE",
-			f'''
-<form class="inline" action="/xbe" method="get">
-  <input type="text" name="path" placeholder="/path/to/default.xbe" value="{html.escape(default_path)}"{" autofocus" if not projects else ""}>
-  <button type="submit">Parse →</button>
-</form>
-<p class="muted" style="margin-top: 12px;">
-  Point at any XBE on disk. Try <span style="color: var(--cyan);">/tmp/halo2_default.xbe</span>
-  if you ran the demo script.
-</p>
-''',
-		)
-	}
-{
-		panel(
-			"What you can poke at",
-			'''
-<div class="kv">
-  <div class="k">overview</div>   <div class="v">Header, build flavor, decoded entry &amp; thunk addresses, VA strip.</div>
-  <div class="k">sections</div>   <div class="v">All sections with flags, VA, raw offset, sizes. Click into hex view.</div>
-  <div class="k">function</div>   <div class="v">Carve N bytes at VA, disassemble x86 with capstone.</div>
-  <div class="k">progress</div>   <div class="v">Watch a matching-decomp run: attempt timeline, diffs, best.c.</div>
-</div>
-''',
-		)
-	}
-"""
+	body = f'<div class="ascii-logo">{LOGO}</div>\n{proj_panel}'
 	return page("iVCS", body, current_path=None)
-
-
-def view_xbe(path: str) -> str:
-	parsed = xbe_cached_load(path)
-	flavor = xbe_build_flavor_detect(parsed)
-	ep = xbe_entry_point_get(parsed)
-	kt = xbe_kernel_thunk_address_get(parsed)
-	h = parsed.header
-
-	header_body = f"""
-<div class="kv">
-  <div class="k">file</div>             <div class="v">{html.escape(path)}</div>
-  <div class="k">build flavor</div>     <div class="v amber">{flavor.name}</div>
-  <div class="k">base address</div>     <div class="v cyan">{h.base_address:#010x}</div>
-  <div class="k">image size</div>       <div class="v green">{h.size_of_image:,} bytes  ({h.size_of_image:#x})</div>
-  <div class="k">entry point</div>      <div class="v cyan">{ep:#010x}  <span class="muted">(xor {h.entry_point_xor:#010x})</span></div>
-  <div class="k">kernel thunk addr</div><div class="v cyan">{kt:#010x}  <span class="muted">(xor {h.kernel_thunk_address_xor:#010x})</span></div>
-  <div class="k">section count</div>    <div class="v">{h.section_count}</div>
-  <div class="k">section table</div>    <div class="v">{h.section_headers_address:#010x}</div>
-</div>
-{_va_strip_html(parsed)}
-"""
-
-	sections_rows = []
-	for s in parsed.sections:
-		flags_html = (
-			f'<td class="flags">'
-			f'<span class="{"on" if s.is_executable else ""}">X</span>'
-			f'<span class="{"on" if s.is_writable else ""}">W</span>'
-			f'<span class="{"on" if s.flags & 0x2 else ""}">P</span>'
-			f"</td>"
-		)
-		sections_rows.append(
-			f"<tr>"
-			f'<td><a href="/section?path={html.escape(path)}&name={html.escape(s.name)}">{html.escape(s.name) or "<i>(unnamed)</i>"}</a></td>'
-			f"{flags_html}"
-			f'<td class="num">{s.virtual_address:#010x}</td>'
-			f'<td class="size">{s.virtual_size:,}</td>'
-			f'<td class="num">{s.raw_address:#010x}</td>'
-			f'<td class="size">{s.raw_size:,}</td>'
-			f'<td><a href="/function?path={html.escape(path)}&va={s.virtual_address:#x}&size=64">carve →</a></td>'
-			f"</tr>"
-		)
-	sections_table = (
-		"<table>"
-		"<thead><tr><th>name</th><th>flags</th><th>VA</th><th>vsize</th><th>raw</th><th>rsize</th><th></th></tr></thead>"
-		f"<tbody>{''.join(sections_rows)}</tbody>"
-		"</table>"
-	)
-
-	fn_form = f"""
-<form class="inline" action="/function" method="get">
-  <input type="hidden" name="path" value="{html.escape(path)}">
-  <input type="text"   name="va"   placeholder="0x002D1D94" value="{ep:#x}">
-  <input type="number" name="size" value="64" min="1" max="4096" style="min-width: 80px;">
-  <button type="submit">Disassemble →</button>
-</form>
-"""
-
-	body = (
-		crumbs(("home", "/"), ("overview", None))
-		+ panel("XBE Header", header_body, meta=f"{flavor.name} · {h.section_count} sections")
-		+ panel("Sections", sections_table, meta=f"{len(parsed.sections)} entries")
-		+ panel("Function explorer", fn_form, meta="carve + disassemble")
-	)
-	return page("XBE", body, current_path=path)
-
-
-def _va_strip_html(parsed: ParsedXbe) -> str:
-	base = parsed.header.base_address
-	end = base + parsed.header.size_of_image
-	span = end - base or 1
-	segs = []
-	for s in parsed.sections:
-		left = (s.virtual_address - base) / span * 100
-		width = s.virtual_size / span * 100
-		cls = "seg X" if s.is_executable else "seg"
-		segs.append(
-			f'<div class="{cls}" style="left: {left:.3f}%; width: {width:.3f}%;" '
-			f'title="{html.escape(s.name)}  {s.virtual_address:#x}..{s.virtual_address + s.virtual_size:#x}">'
-			f'<div class="lbl">{html.escape(s.name)}</div>'
-			f"</div>"
-		)
-	return (
-		f'<div class="va-strip">{"".join(segs)}'
-		f'<div class="axis" style="left: 0;">{base:#x}</div>'
-		f'<div class="axis" style="right: 0;">{end:#x}</div>'
-		f"</div>"
-		f'<div style="margin-top: 20px;" class="muted tight">virtual address space · amber = executable</div>'
-	)
-
-
-def view_section(path: str, name: str) -> str:
-	parsed = xbe_cached_load(path)
-	section = xbe_section_find(parsed, name)
-	if section is None:
-		raise XbeFormatError(f"no section named {name!r}")
-	data = xbe_section_read(parsed, section)
-	preview = data[:1024]
-
-	info = f"""
-<div class="kv">
-  <div class="k">flags</div>     <div class="v">{section.flags:#010x}  <span class="muted">({_flag_words(section.flags)})</span></div>
-  <div class="k">VA</div>        <div class="v cyan">{section.virtual_address:#010x} .. {section.virtual_address + section.virtual_size:#010x}</div>
-  <div class="k">raw</div>       <div class="v cyan">{section.raw_address:#010x} .. {section.raw_address + section.raw_size:#010x}</div>
-  <div class="k">virtual size</div><div class="v green">{section.virtual_size:,} bytes</div>
-  <div class="k">raw size</div>  <div class="v green">{section.raw_size:,} bytes  <span class="muted">(showing first {len(preview)})</span></div>
-</div>
-"""
-
-	hex_lines = _hex_dump(preview, base_address=section.virtual_address)
-	body = (
-		crumbs(("home", "/"), ("overview", f"/xbe?path={html.escape(path)}"), (f"§ {name}", None))
-		+ panel(f"Section · {name}", info)
-		+ panel("Hex (first 1 KiB)", f'<pre class="code">{hex_lines}</pre>')
-	)
-	return page(f"§{name}", body, current_path=path)
-
-
-def _flag_words(flags: int) -> str:
-	words = []
-	if flags & 0x01:
-		words.append("WRITABLE")
-	if flags & 0x02:
-		words.append("PRELOAD")
-	if flags & 0x04:
-		words.append("EXECUTABLE")
-	if flags & 0x08:
-		words.append("INSERTED_FILE")
-	if flags & 0x10:
-		words.append("HEAD_PAGE_RO")
-	if flags & 0x20:
-		words.append("TAIL_PAGE_RO")
-	return " | ".join(words) if words else "—"
-
-
-def _hex_dump(data: bytes, base_address: int = 0) -> str:
-	rows = []
-	for i in range(0, len(data), 16):
-		chunk = data[i : i + 16]
-		hex_part = " ".join(f"{b:02x}" for b in chunk).ljust(16 * 3 - 1)
-		ascii_part = "".join(chr(b) if 32 <= b < 127 else "." for b in chunk)
-		rows.append(
-			f'<span class="addr">{base_address + i:08x}</span>'
-			f'<span class="hex">{hex_part}</span>'
-			f'  <span class="ascii">{html.escape(ascii_part)}</span>'
-		)
-	return "\n".join(rows)
-
-
-def view_function(path: str, va_str: str, size: int) -> str:
-	va = int(va_str, 16) if va_str.lower().startswith("0x") else int(va_str, 0)
-	parsed = xbe_cached_load(path)
-	from src.xbe import xbe_function_carve
-
-	body_bytes = xbe_function_carve(parsed, va, size)
-
-	md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
-	lines = []
-	last_end = va
-	for instr in md.disasm(body_bytes, va):
-		hex_bytes = instr.bytes.hex()
-		lines.append(
-			f'<span class="addr">{instr.address:#010x}</span>  '
-			f'<span class="hex">{hex_bytes:<14}</span>  '
-			f'<span class="mn">{instr.mnemonic:<7}</span>'
-			f'<span class="op">{html.escape(instr.op_str)}</span>'
-		)
-		last_end = instr.address + instr.size
-	if not lines:
-		lines.append(
-			'<span class="ascii">(capstone produced no instructions; bytes may be data)</span>'
-		)
-
-	info = f"""
-<div class="kv">
-  <div class="k">virtual address</div><div class="v cyan">{va:#010x}</div>
-  <div class="k">carved size</div>    <div class="v green">{size} bytes</div>
-  <div class="k">instructions</div>   <div class="v">{len(lines)} (ends near {last_end:#x})</div>
-</div>
-<form class="inline" action="/function" method="get" style="margin-top: 14px;">
-  <input type="hidden" name="path" value="{html.escape(path)}">
-  <input type="text"   name="va"   value="{va:#x}">
-  <input type="number" name="size" value="{size}" min="1" max="4096" style="min-width: 80px;">
-  <button type="submit">Re-disassemble</button>
-</form>
-"""
-	asm_block = '<pre class="code">' + "\n".join(lines) + "</pre>"
-	body = (
-		crumbs(
-			("home", "/"), ("overview", f"/xbe?path={html.escape(path)}"), (f"fn @ {va:#x}", None)
-		)
-		+ panel("Function", info)
-		+ panel("Disassembly", asm_block, meta=f"{size}B · x86 32-bit")
-	)
-	return page(f"fn {va:#x}", body, current_path=path)
 
 
 # ── Decomp workspace views ──────────────────────────────────────────────────
@@ -2659,17 +2385,7 @@ class Handler(BaseHTTPRequestHandler):
 		route = parts.path
 		try:
 			if route == "/":
-				html_out = view_index(default_path=q.get("path", ""))
-			elif route == "/xbe":
-				path = q.get("path", "").strip()
-				if not path:
-					html_out = view_index()
-				else:
-					html_out = view_xbe(path)
-			elif route == "/section":
-				html_out = view_section(q["path"], q["name"])
-			elif route == "/function":
-				html_out = view_function(q["path"], q.get("va", "0"), int(q.get("size", "64")))
+				html_out = view_index()
 			elif route == "/decomp/run":
 				html_out = view_decomp_run(q["root"], current_path=q.get("path") or None)
 			elif route == "/decomp/attempt":
