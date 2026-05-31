@@ -14,7 +14,11 @@ from dataclasses import dataclass
 from litellm import completion as litellm_completion
 
 _LM_STUDIO_API_BASE = "http://127.0.0.1:1234/v1"
-_LM_STUDIO_MODEL = "qwen3-coder-30b"
+# Last-resort fallback name when no IVCS_LLM_MODEL is set AND the server can't be
+# reached to report what's loaded. Deliberately NOT a real model id: an honest
+# "we don't know" beats inventing a specific model the user never ran (which is
+# how stale runs got mislabeled before detection worked).
+_LM_STUDIO_MODEL = "local (unknown)"
 
 
 def _lm_studio_api_base() -> str:
@@ -28,7 +32,10 @@ def _lm_studio_detect_loaded_model() -> str | None:
 	server is unreachable — so we name the real AI rather than a guessed default.
 	"""
 	try:
-		with urllib.request.urlopen(f"{_lm_studio_api_base()}/models", timeout=2) as resp:
+		# noqa justified: always the http(s) LM Studio API base from env/default,
+		# never a user-supplied or custom-scheme URL.
+		url = f"{_lm_studio_api_base()}/models"
+		with urllib.request.urlopen(url, timeout=2) as resp:  # noqa: S310
 			data = json.load(resp)
 	except (OSError, ValueError):
 		return None

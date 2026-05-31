@@ -16,7 +16,8 @@ Stop it gracefully overnight by creating a STOP file next to project.json
 outcome is appended to <project_dir>/batch.log as JSON, one line per function.
 
 Targets LM Studio at IVCS_LLM_API_BASE (default http://127.0.0.1:1234/v1),
-model IVCS_LLM_MODEL (default qwen3-coder-30b). Needs Wine + the XDK toolchain.
+model IVCS_LLM_MODEL (else the loaded model, auto-detected). Needs Wine + the
+XDK toolchain.
 """
 
 from __future__ import annotations
@@ -31,7 +32,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
-# Use the bundled objdiff-cli unless the env already points somewhere.
+# Prefer bundled objdiff-cli; don't override an explicit env setting.
 _BUNDLED_OBJDIFF = REPO_ROOT / "recon" / "objdiff-smoke" / "objdiff-cli"
 if "IVCS_OBJDIFF_CLI" not in os.environ and _BUNDLED_OBJDIFF.is_file():
 	os.environ["IVCS_OBJDIFF_CLI"] = str(_BUNDLED_OBJDIFF)

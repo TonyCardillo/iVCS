@@ -78,7 +78,7 @@ class TestNormalizeResponse:
 class TestCallPassthrough:
 	def test_model_and_api_base_passed_through(self):
 		client = LiteLLMClient(
-			model="openai/qwen3-coder-30b",
+			model="openai/qwen/qwen3.5-9b",
 			api_base="http://127.0.0.1:1234/v1",
 			api_key="sk-local",
 		)
@@ -88,7 +88,7 @@ class TestCallPassthrough:
 				messages=[{"role": "user", "content": "hi"}], tools=[{"type": "function"}]
 			)
 		call_kwargs = mock_completion.call_args.kwargs
-		assert call_kwargs["model"] == "openai/qwen3-coder-30b"
+		assert call_kwargs["model"] == "openai/qwen/qwen3.5-9b"
 		assert call_kwargs["api_base"] == "http://127.0.0.1:1234/v1"
 		assert call_kwargs["api_key"] == "sk-local"
 		assert call_kwargs["messages"] == [{"role": "user", "content": "hi"}]
@@ -107,10 +107,10 @@ class TestLlmClientFor:
 	def test_local_points_at_lm_studio_by_default(self, monkeypatch):
 		monkeypatch.delenv("IVCS_LLM_API_BASE", raising=False)
 		monkeypatch.delenv("IVCS_LLM_MODEL", raising=False)
-		# No server reachable → fall back to the built-in default.
+		# No server reachable → fall back to the honest "we don't know" default.
 		monkeypatch.setattr("src.llm_clients._lm_studio_detect_loaded_model", lambda: None)
 		client = llm_client_for("local")
-		assert client.model == "openai/qwen3-coder-30b"
+		assert client.model == "openai/local (unknown)"
 		assert client.api_base == "http://127.0.0.1:1234/v1"
 
 	def test_local_uses_detected_loaded_model(self, monkeypatch):
@@ -154,7 +154,7 @@ class TestRecordedModel:
 	def test_local_default_when_env_unset_and_no_server(self, monkeypatch):
 		monkeypatch.delenv("IVCS_LLM_MODEL", raising=False)
 		monkeypatch.setattr("src.llm_clients._lm_studio_detect_loaded_model", lambda: None)
-		assert llm_recorded_model("local") == "qwen3-coder-30b"
+		assert llm_recorded_model("local") == "local (unknown)"
 
 	def test_local_records_detected_loaded_model(self, monkeypatch):
 		monkeypatch.delenv("IVCS_LLM_MODEL", raising=False)
