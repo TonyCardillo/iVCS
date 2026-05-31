@@ -11,6 +11,8 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
 from src.coff import (
 	COFF_HEADER_SIZE,
@@ -87,6 +89,62 @@ class TestDefinedFunctionRename:
 		# Round-trips cleanly: text bytes preserved, one .text section.
 		obj = coff_object_read(out)
 		assert obj.text_section().raw == b"\x90\x90\xc3"
+
+
+# Names kept disjoint so a rename only ever touches the defined function symbol.
+_FUNC_NAMES = st.sampled_from(["_f", "_short", "_XMemAlloc", "_a_long_source_name_over_eight"])
+_EXTERN_NAMES = st.sampled_from(["_alpha", "_beta", "__imp__NtClose@4", "_fn_00430000"])
+_NEW_NAMES = st.sampled_from(["_fn_00012280@8", "_fn_00747474", "_fn_00000001"])
+
+
+@st.composite
+def _renameable_object(draw):
+	"""(text_bytes, function_name, relocs, new_name) for a buildable .obj."""
+	relocs: list[ResolvedReloc] = []
+	body = b""
+	for i in range(draw(st.integers(0, 4))):
+		offset = len(body) + 1  # imm32 field sits one byte into the placeholder
+		kind = draw(st.sampled_from([RelocKind.REL32, RelocKind.DIR32]))
+		body += b"\xe8\x00\x00\x00\x00"  # opcode + 4-byte field the writer zeroes
+		relocs.append(ResolvedReloc(RelocSite(offset, kind, 0x1000 + i), draw(_EXTERN_NAMES)))
+	body += b"\xc3"
+	return body, draw(_FUNC_NAMES), relocs, draw(_NEW_NAMES)
+
+
+def _undefined_externs(obj) -> set[str]:
+	return {s.name for s in obj.symbols if s.section_number == 0}
+
+
+def _reloc_view(obj) -> list[tuple[int, int, str]]:
+	text = obj.text_section()
+	if text is None:
+		return []
+	return [(r.offset, r.type, obj.symbol_at(r.symbol_index).name) for r in text.relocations]
+
+
+class TestDefinedFunctionRenameProperties:
+	@given(case=_renameable_object())
+	def test_rename_sets_name_and_preserves_everything_else(self, case):
+		body, fname, relocs, new_name = case
+		blob = coff_object_build(body, fname, relocations=relocs)
+		before = coff_object_read(blob)
+		out = coff_defined_function_rename(blob, new_name)
+		after = coff_object_read(out)
+
+		# The lone defined function now carries the canonical name...
+		assert _defined_function_name(out) == new_name
+		# ...while everything else the object carries is untouched:
+		assert after.text_section().raw == before.text_section().raw
+		assert _undefined_externs(after) == _undefined_externs(before)
+		assert _reloc_view(after) == _reloc_view(before)
+
+	@given(case=_renameable_object())
+	def test_rename_is_idempotent(self, case):
+		body, fname, relocs, new_name = case
+		blob = coff_object_build(body, fname, relocations=relocs)
+		once = coff_defined_function_rename(blob, new_name)
+		# Second rename to the same canonical name hits the already-named no-op.
+		assert coff_defined_function_rename(once, new_name) == once
 
 
 def _coff_header_parse(blob: bytes) -> dict:

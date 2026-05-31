@@ -15,10 +15,14 @@ import struct
 from io import BytesIO
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
 from src.xbe import (
 	SECTION_FLAG_EXECUTABLE,
+	SECTION_FLAG_PRELOAD,
 	SECTION_FLAG_WRITABLE,
+	XBE_BUILD_FLAVORS,
 	XBE_EP_KEY_CHIHIRO,
 	XBE_EP_KEY_DEBUG,
 	XBE_EP_KEY_RETAIL,
@@ -787,3 +791,115 @@ class TestEnumerateFunctions:
 		# eax` is not in the prologue set), so it doesn't close the function.
 		assert len(fns) == 1
 		assert fns[0].size == 4
+
+
+# --- Property tests --------------------------------------------------------
+# The hand-built XBEs above each pin one shape; these assert the laws those
+# witnesses instance: parse inverts the byte-level writer, the XOR address
+# scrambling is invertible per build flavor, and carve returns the exact
+# sub-range of a section's bytes.
+
+_FLAGS = st.sampled_from(
+	[
+		0,
+		SECTION_FLAG_EXECUTABLE,
+		SECTION_FLAG_WRITABLE,
+		SECTION_FLAG_EXECUTABLE | SECTION_FLAG_WRITABLE,
+		SECTION_FLAG_PRELOAD | SECTION_FLAG_EXECUTABLE,
+	]
+)
+_SECTION_NAME = st.sampled_from([".text", ".data", ".rdata", "XONLINE", "DSOUND", "$$XTIMAGE"])
+
+
+_xbe_section = st.tuples(
+	_SECTION_NAME,
+	_FLAGS,
+	st.binary(max_size=32),
+	st.integers(min_value=0x1000, max_value=0x00FF_0000),
+)
+_xbe_section_list = st.lists(_xbe_section, max_size=4)
+
+
+class TestXbeParseRoundTrip:
+	@given(
+		base=st.integers(min_value=0x10000, max_value=0x40_0000),
+		size=st.integers(min_value=0, max_value=0x100_0000),
+		sections=_xbe_section_list,
+	)
+	def test_parse_recovers_header_and_section_fields(self, base, size, sections):
+		parsed = xbe_parse(build_minimal_xbe(base_addr=base, size_of_image=size, sections=sections))
+		assert parsed.header.base_address == base
+		assert parsed.header.size_of_image == size
+		assert len(parsed.sections) == len(sections)
+		for (name, flags, data, va), sec in zip(sections, parsed.sections, strict=True):
+			assert sec.name == name
+			assert sec.flags == flags
+			assert sec.virtual_address == va
+			assert sec.virtual_size == len(data)
+			assert sec.raw_size == len(data)
+			assert xbe_section_read(parsed, sec) == data  # raw bytes survive the trip
+
+
+class TestXorAddressInvertibility:
+	# entry_point_xor / kernel_thunk_address_xor are the VA XOR a per-flavor key;
+	# detect picks the flavor whose decoded entry point lands in the image, and
+	# the getters must hand back exactly the VAs that were encoded.
+	@given(
+		flavor=st.sampled_from(list(XBE_BUILD_FLAVORS)),
+		ep_offset=st.integers(min_value=0, max_value=0xF_FFFF),
+		thunk_va=st.integers(min_value=0, max_value=2**32 - 1),
+	)
+	def test_entry_point_and_thunk_decode_to_the_encoded_vas(self, flavor, ep_offset, thunk_va):
+		base, size = 0x00010000, 0x00100000
+		entry_va = base + ep_offset  # guaranteed inside [base, base + size)
+		parsed = xbe_parse(
+			build_minimal_xbe(
+				base_addr=base,
+				size_of_image=size,
+				entry_point_xor=entry_va ^ flavor.ep_key,
+				kernel_thunk_address_xor=thunk_va ^ flavor.kt_key,
+				sections=[(".text", SECTION_FLAG_EXECUTABLE, b"\x90", 0x00011000)],
+			)
+		)
+		assert xbe_build_flavor_detect(parsed).name == flavor.name
+		assert xbe_entry_point_get(parsed) == entry_va
+		assert xbe_kernel_thunk_address_get(parsed) == thunk_va
+
+
+@st.composite
+def _carve_case(draw):
+	data = draw(st.binary(min_size=1, max_size=64))
+	offset = draw(st.integers(min_value=0, max_value=len(data) - 1))
+	size = draw(st.integers(min_value=1, max_value=len(data) - offset))
+	return data, offset, size
+
+
+class TestCarveProperties:
+	SECTION_VA = 0x00020000
+
+	@given(case=_carve_case())
+	def test_carve_returns_the_exact_subrange(self, case):
+		data, offset, size = case
+		parsed = xbe_parse(
+			build_minimal_xbe(
+				base_addr=0x00010000,
+				size_of_image=0x00100000,
+				sections=[(".text", SECTION_FLAG_EXECUTABLE, data, self.SECTION_VA)],
+			)
+		)
+		carved = xbe_function_carve(parsed, self.SECTION_VA + offset, size)
+		assert carved == data[offset : offset + size]
+
+	@given(case=_carve_case())
+	def test_containing_va_is_consistent_with_carve(self, case):
+		data, offset, _size = case
+		parsed = xbe_parse(
+			build_minimal_xbe(
+				base_addr=0x00010000,
+				size_of_image=0x00100000,
+				sections=[(".text", SECTION_FLAG_EXECUTABLE, data, self.SECTION_VA)],
+			)
+		)
+		# Any VA inside the section resolves to it; one past the end does not.
+		assert xbe_section_containing_va(parsed, self.SECTION_VA + offset).name == ".text"
+		assert xbe_section_containing_va(parsed, self.SECTION_VA + len(data)) is None

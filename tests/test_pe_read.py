@@ -3,6 +3,8 @@
 import struct
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
 from src.pe_read import PeReadError, pe_image_read
 
@@ -79,3 +81,36 @@ class TestPeImageRead:
 	def test_rejects_non_pe(self):
 		with pytest.raises(PeReadError):
 			pe_image_read(b"not a pe file at all")
+
+
+# --- Property tests --------------------------------------------------------
+# The examples each pin one image shape; this asserts the parse law they witness:
+# pe_image_read inverts the writer for any section list — image base recovered,
+# and each section's name, raw bytes, size, and VA (= base + rva) preserved in
+# order.
+
+
+@st.composite
+def _section_list(draw):
+	out: list[tuple[str, int, bytes]] = []
+	for _ in range(draw(st.integers(1, 5))):
+		name = draw(st.sampled_from([".text", ".data", ".rdata", "code", "blob"]))
+		rva = draw(st.integers(min_value=0, max_value=0x00FF_F000)) & ~0xFFF | 0x1000
+		raw = draw(st.binary(max_size=32))
+		out.append((name, rva, raw))
+	return out
+
+
+class TestPeImageReadRoundTrip:
+	@given(
+		image_base=st.integers(min_value=0x10000, max_value=0x7000_0000), sections=_section_list()
+	)
+	def test_round_trip_recovers_base_and_sections(self, image_base, sections):
+		pe = pe_image_read(_make_pe(image_base, sections))
+		assert pe.image_base == image_base
+		assert len(pe.sections) == len(sections)
+		for (name, rva, raw), sec in zip(sections, pe.sections, strict=True):
+			assert sec.name == name
+			assert sec.raw == raw
+			assert sec.virtual_size == len(raw)
+			assert sec.virtual_address == image_base + rva
