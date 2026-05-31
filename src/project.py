@@ -8,6 +8,7 @@ function is `workspace_root / function.name` by convention.
 """
 
 import json
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -206,6 +207,46 @@ def project_aggregate(project: Project, *, sdk_vas: frozenset[int] = frozenset()
 		sdk_functions=sdk_fns,
 		sdk_bytes=sdk_bytes,
 	)
+
+
+@dataclass(frozen=True)
+class ModelStat:
+	"""Per-model leaderboard row: how a single model performed across the
+	functions whose best.c it owns."""
+
+	model: str
+	functions: int  # functions this model currently leads (owns best.c)
+	matched: int  # of those, fully matched (100%)
+	partial: int  # of those, partial (>0, <100)
+	avg_best_percent: float  # mean best match% across this model's functions
+
+
+def model_stats(statuses: Sequence[FunctionStatus]) -> list[ModelStat]:
+	"""Group function statuses by the model that owns each best.c.
+
+	Functions with no recorded model (never run) are skipped. Each model is
+	credited only for functions where its attempt produced the standing best.c
+	(see agent_loop's best-tracking). Rows are sorted by matched desc, then
+	functions desc, then model name — the winningest model first.
+	"""
+	buckets: dict[str, list[FunctionStatus]] = {}
+	for s in statuses:
+		if not s.model:
+			continue
+		buckets.setdefault(s.model, []).append(s)
+
+	rows = [
+		ModelStat(
+			model=model,
+			functions=len(group),
+			matched=sum(1 for s in group if s.state == "matched"),
+			partial=sum(1 for s in group if s.state == "partial"),
+			avg_best_percent=sum((s.best_match_percent or 0.0) for s in group) / len(group),
+		)
+		for model, group in buckets.items()
+	]
+	rows.sort(key=lambda m: (-m.matched, -m.functions, m.model))
+	return rows
 
 
 def _parse_int(value) -> int:

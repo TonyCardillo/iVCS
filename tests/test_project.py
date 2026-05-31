@@ -7,9 +7,62 @@ import pytest
 
 from src.project import (
 	FunctionEntry,
+	FunctionStatus,
+	model_stats,
 	project_aggregate,
 	project_load,
 )
+
+
+def _status(model, state, best, *, name="fn", va=0x1000, size=16):
+	return FunctionStatus(
+		name=name,
+		va=va,
+		size=size,
+		state=state,
+		best_match_percent=best,
+		iterations=1,
+		workspace_path=Path("/ws") / name,
+		termination_reason=None,
+		model=model,
+	)
+
+
+class TestModelStats:
+	def test_skips_functions_with_no_model(self):
+		rows = model_stats([_status(None, "untouched", None), _status(None, "partial", 40.0)])
+		assert rows == []
+
+	def test_groups_and_counts_by_model(self):
+		rows = model_stats(
+			[
+				_status("opus", "matched", 100.0),
+				_status("opus", "partial", 50.0),
+				_status("haiku", "matched", 100.0),
+			]
+		)
+		by_model = {r.model: r for r in rows}
+		assert by_model["opus"].functions == 2
+		assert by_model["opus"].matched == 1
+		assert by_model["opus"].partial == 1
+		assert by_model["opus"].avg_best_percent == 75.0
+		assert by_model["haiku"].functions == 1
+		assert by_model["haiku"].matched == 1
+
+	def test_sorted_by_matched_then_functions(self):
+		rows = model_stats(
+			[
+				_status("a", "partial", 40.0),
+				_status("a", "partial", 60.0),
+				_status("b", "matched", 100.0),
+			]
+		)
+		# b has a match, so it leads despite a having more functions.
+		assert [r.model for r in rows] == ["b", "a"]
+
+	def test_none_best_counts_as_zero_in_average(self):
+		rows = model_stats([_status("x", "untouched", None), _status("x", "partial", 80.0)])
+		assert rows[0].avg_best_percent == 40.0
 
 
 def _write_manifest(tmp_path: Path, extra: dict | None = None) -> Path:

@@ -41,6 +41,7 @@ from src.project import (  # noqa: E402
 	Project,
 	ProjectStats,
 	json_load_or_none,
+	model_stats,
 	project_aggregate,
 	project_load,
 )
@@ -594,6 +595,14 @@ pre.code .ascii  { color: var(--violet); }
   text-decoration: none;
 }
 .run-banner a.resume:hover { background: var(--amber); color: var(--bg); }
+.page-actions { margin: 0 0 14px 0; }
+.page-actions a {
+  color: var(--cyan);
+  text-decoration: none;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+}
+.page-actions a:hover { color: var(--amber); }
 .run-actions { margin: 0 0 14px 0; }
 .btn-run {
   display: inline-block;
@@ -1864,6 +1873,8 @@ def view_progress(
 	rng = f"{start + 1}–{min(start + page_size, total)} of {total}" if total else "0 of 0"
 	body = (
 		crumbs(("home", "/"), ("progress", "/progress"), (project.name, None))
+		+ f'<div class="page-actions"><a href="/stats?path={quote(project_path_str)}">'
+		"📊 model stats →</a></div>"
 		+ panel(
 			"Project", summary, meta=f"{total_unfiltered} functions · {stats.total_bytes:,} bytes"
 		)
@@ -1871,6 +1882,62 @@ def view_progress(
 		+ panel("Functions", filter_bar + table, meta=f"{rng} · page {page_n}/{total_pages}")
 	)
 	return page(f"progress · {project.name}", body, current_path=current_path)
+
+
+def _model_stats_table(rows: list) -> str:
+	"""Per-model leaderboard table. Each model is credited for the functions
+	whose best.c it currently owns."""
+	if not rows:
+		return (
+			'<div class="muted center" style="padding: 18px;">'
+			"no model attributions yet — run a function to populate this</div>"
+		)
+	body_rows = []
+	for r in rows:
+		win_pct = (r.matched / r.functions * 100.0) if r.functions else 0.0
+		body_rows.append(
+			"<tr>"
+			f'<td><span class="cyan">{html.escape(r.model)}</span></td>'
+			f'<td class="num">{r.functions}</td>'
+			f'<td class="num green">{r.matched}</td>'
+			f'<td class="num">{r.partial}</td>'
+			f'<td class="num">{win_pct:.0f}%</td>'
+			f'<td class="num">{r.avg_best_percent:.2f}%</td>'
+			"</tr>"
+		)
+	return (
+		"<table>"
+		"<thead><tr>"
+		"<th>model</th><th>functions</th><th>matched</th><th>partial</th>"
+		"<th>match rate</th><th>avg best</th>"
+		"</tr></thead>"
+		f"<tbody>{''.join(body_rows)}</tbody>"
+		"</table>"
+		'<p class="muted tight" style="margin-top: 10px;">'
+		"A model is credited for a function when its attempt produced the standing "
+		"best.c. Re-running with another model reassigns credit only if it beats the "
+		'current best. <span class="cyan">propagated</span> = byte-identical twins '
+		'auto-finished from a solved representative; <span class="cyan">ghidra</span> '
+		"= matched straight from the warm-start.</p>"
+	)
+
+
+def view_stats(project_path_str: str) -> str:
+	"""Per-model performance leaderboard for one project."""
+	project = project_load(project_path_str)
+	stats = project_aggregate(project, sdk_vas=_sdk_vas_for(project_path_str))
+	rows = model_stats(stats.function_statuses)
+
+	attributed = sum(r.functions for r in rows)
+	meta = f"{attributed} of {stats.game_functions:,} game functions attributed to a model"
+	body = crumbs(
+		("home", "/"), ("progress", "/progress"), (project.name, _progress_link(project_path_str))
+	) + panel("Models", _model_stats_table(rows), meta=meta)
+	return page(f"stats · {project.name}", body, current_path=None)
+
+
+def _progress_link(project_path_str: str) -> str:
+	return f"/progress?path={quote(project_path_str)}"
 
 
 _STATE_SORT_ORDER = {"matched": 0, "partial": 1, "untouched": 2}
@@ -2632,6 +2699,12 @@ class Handler(BaseHTTPRequestHandler):
 							"order": q.get("order", "asc"),
 						},
 					)
+			elif route == "/stats":
+				project_path = q.get("path", "").strip()
+				if not project_path:
+					html_out = view_progress_index(current_path=None)
+				else:
+					html_out = view_stats(project_path)
 			elif route == "/healthz":
 				self._send_json(200, {"ok": True})
 				return
