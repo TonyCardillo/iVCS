@@ -249,6 +249,68 @@ def model_stats(statuses: Sequence[FunctionStatus]) -> list[ModelStat]:
 	return rows
 
 
+@dataclass(frozen=True)
+class ModelAttemptStat:
+	"""Per-model effort row: how hard a model worked, not just what it won.
+
+	Derived from the per-attempt `.model` sidecars rather than the final
+	result.json, so it exposes the cost/quality tradeoff the per-function
+	leaderboard hides."""
+
+	model: str
+	attempts: int  # tool calls / compiles tagged with this model
+	improved: int  # of those, the ones that raised the running best in their function
+	matched: int  # of those, the ones that reached 100%
+
+	@property
+	def improve_rate(self) -> float:
+		"""Share of this model's attempts that moved the needle — its efficiency."""
+		return (self.improved / self.attempts * 100.0) if self.attempts else 0.0
+
+
+def model_attempt_stats(
+	workspace_attempts: Sequence[Sequence[tuple[int, str | None, float | None]]],
+) -> list[ModelAttemptStat]:
+	"""Aggregate per-attempt effort by model across a project.
+
+	`workspace_attempts` is one entry per function: a sequence of
+	`(attempt_number, model, match_percent)` triples (any order). Within each
+	function the attempts are walked in attempt-number order tracking the running
+	best match%; an attempt "improved" when its match% strictly beats every
+	lower-numbered attempt (a compile failure / None counts as 0%, never an
+	improvement). Attempts with no model are skipped. Rows sort by matched desc,
+	improved desc, then model.
+	"""
+	attempts: dict[str, int] = {}
+	improved: dict[str, int] = {}
+	matched: dict[str, int] = {}
+
+	for fn_attempts in workspace_attempts:
+		running_best = 0.0
+		for _n, model, mp in sorted(fn_attempts, key=lambda t: t[0]):
+			pct = mp if isinstance(mp, (int, float)) else 0.0
+			if model:
+				attempts[model] = attempts.get(model, 0) + 1
+				if pct > running_best:
+					improved[model] = improved.get(model, 0) + 1
+				if pct >= 100.0:
+					matched[model] = matched.get(model, 0) + 1
+			if pct > running_best:
+				running_best = pct
+
+	rows = [
+		ModelAttemptStat(
+			model=model,
+			attempts=count,
+			improved=improved.get(model, 0),
+			matched=matched.get(model, 0),
+		)
+		for model, count in attempts.items()
+	]
+	rows.sort(key=lambda m: (-m.matched, -m.improved, m.model))
+	return rows
+
+
 def _parse_int(value) -> int:
 	if isinstance(value, str):
 		return int(value, 0)  # supports "0x..." and decimal

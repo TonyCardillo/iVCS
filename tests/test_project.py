@@ -8,6 +8,7 @@ import pytest
 from src.project import (
 	FunctionEntry,
 	FunctionStatus,
+	model_attempt_stats,
 	model_stats,
 	project_aggregate,
 	project_load,
@@ -336,3 +337,50 @@ class TestProjectAggregate:
 		assert stats.total_functions == 0
 		assert stats.matched_function_percent == 0.0
 		assert stats.matched_byte_percent == 0.0
+
+
+class TestModelAttemptStats:
+	def test_tracks_attempts_improved_matched_per_model(self):
+		# One function: ghidra baseline 10%, qwen 10% (no gain) then 55%, haiku 100%.
+		ws = [[(0, "ghidra", 10.0), (1, "qwen", 10.0), (2, "qwen", 55.0), (3, "haiku", 100.0)]]
+		rows = {r.model: r for r in model_attempt_stats(ws)}
+
+		def trip(r):
+			return (r.attempts, r.improved, r.matched)
+
+		assert trip(rows["ghidra"]) == (1, 1, 0)
+		assert trip(rows["qwen"]) == (2, 1, 0)
+		assert trip(rows["haiku"]) == (1, 1, 1)
+
+	def test_compile_failure_counts_as_attempt_not_improvement(self):
+		ws = [[(1, "qwen", None), (2, "qwen", 30.0)]]
+		(row,) = model_attempt_stats(ws)
+		assert (row.attempts, row.improved, row.matched) == (2, 1, 0)
+
+	def test_tie_with_running_best_is_not_an_improvement(self):
+		ws = [[(1, "a", 40.0), (2, "b", 40.0)]]
+		rows = {r.model: r for r in model_attempt_stats(ws)}
+		assert rows["a"].improved == 1  # 40 > 0
+		assert rows["b"].improved == 0  # 40 not > 40
+
+	def test_unmodeled_attempt_skipped_but_still_raises_the_bar(self):
+		# The None-model attempt isn't tallied, but its 50% is the bar qwen must beat.
+		ws = [[(0, None, 50.0), (1, "qwen", 60.0), (2, "qwen", 50.0)]]
+		(row,) = model_attempt_stats(ws)
+		assert (row.attempts, row.improved) == (2, 1)  # only 60% improved; the 50% didn't
+
+	def test_improve_rate(self):
+		(row,) = model_attempt_stats([[(1, "qwen", 0.0), (2, "qwen", 30.0)]])
+		assert row.attempts == 2
+		assert row.improve_rate == 50.0
+
+	def test_sorted_by_matched_then_improved_then_name(self):
+		ws = [
+			[(0, "ghidra", 12.0)],
+			[(0, "ghidra", 0.0), (1, "alpha", 100.0)],
+		]
+		rows = model_attempt_stats(ws)
+		assert rows[0].model == "alpha"  # the only matcher leads
+
+	def test_empty(self):
+		assert model_attempt_stats([]) == []

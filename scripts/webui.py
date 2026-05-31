@@ -41,6 +41,7 @@ from src.project import (  # noqa: E402
 	Project,
 	ProjectStats,
 	json_load_or_none,
+	model_attempt_stats,
 	model_stats,
 	project_aggregate,
 	project_load,
@@ -977,7 +978,7 @@ def _attempt_info(workspace_root: Path, n: int, *, derive_missing: bool = True) 
 	return info
 
 
-def _attempts_listing(workspace_root: Path) -> list[dict]:
+def _attempts_listing(workspace_root: Path, *, derive_missing: bool = True) -> list[dict]:
 	history = workspace_root / "history"
 	if not history.is_dir():
 		return []
@@ -989,7 +990,9 @@ def _attempts_listing(workspace_root: Path) -> list[dict]:
 			numbers.append(int(entry.stem))
 		except ValueError:
 			continue
-	return [_attempt_info(workspace_root, n) for n in sorted(numbers)]
+	return [
+		_attempt_info(workspace_root, n, derive_missing=derive_missing) for n in sorted(numbers)
+	]
 
 
 def _attempt_model_label(attempt: dict, fallback: str | None) -> str | None:
@@ -1881,17 +1884,73 @@ def _model_stats_table(rows: list) -> str:
 	)
 
 
+def _workspace_attempt_triples(root: Path) -> list[tuple[int, str | None, float | None]]:
+	"""(attempt_number, model, match_percent) for one workspace's attempts.
+
+	Reads only what's on disk (no objdiff derivation) so a whole-project scan
+	stays cheap — the diff JSON already exists for any attempt that ran."""
+	return [
+		(a["n"], a["model"], a["match_percent"])
+		for a in _attempts_listing(root, derive_missing=False)
+	]
+
+
+def _model_attempt_table(rows: list) -> str:
+	"""Per-model effort table: attempts spent vs. attempts that moved the needle."""
+	if not rows:
+		return '<div class="muted center" style="padding: 18px;">no per-attempt history yet</div>'
+	body_rows = [
+		(
+			"<tr>"
+			f'<td><span class="cyan">{html.escape(r.model)}</span></td>'
+			f'<td class="num">{r.attempts}</td>'
+			f'<td class="num">{r.improved}</td>'
+			f'<td class="num green">{r.matched}</td>'
+			f'<td class="num">{r.improve_rate:.0f}%</td>'
+			"</tr>"
+		)
+		for r in rows
+	]
+	return (
+		"<table>"
+		"<thead><tr>"
+		"<th>model</th><th>attempts</th><th>improved</th><th>100% hits</th><th>improve rate</th>"
+		"</tr></thead>"
+		f"<tbody>{''.join(body_rows)}</tbody>"
+		"</table>"
+		'<p class="muted tight" style="margin-top: 10px;">'
+		'Counted from the per-attempt <span class="cyan">.model</span> sidecars. '
+		"<b>attempts</b> = compiles tagged to the model; <b>improved</b> = those that "
+		"raised the function's running best; <b>improve rate</b> = improved ÷ attempts "
+		"(efficiency — a model can win few functions cheaply or many by grinding).</p>"
+	)
+
+
 def view_stats(project_path_str: str) -> str:
 	"""Per-model performance leaderboard for one project."""
 	project = project_load(project_path_str)
 	stats = project_aggregate(project, sdk_vas=_sdk_vas_for(project_path_str))
 	rows = model_stats(stats.function_statuses)
+	attempt_rows = model_attempt_stats(
+		[_workspace_attempt_triples(s.workspace_path) for s in stats.function_statuses]
+	)
 
 	attributed = sum(r.functions for r in rows)
 	meta = f"{attributed} of {stats.game_functions:,} game functions attributed to a model"
-	body = crumbs(
-		("home", "/"), ("progress", "/progress"), (project.name, _progress_link(project_path_str))
-	) + panel("Models", _model_stats_table(rows), meta=meta)
+	total_attempts = sum(r.attempts for r in attempt_rows)
+	body = (
+		crumbs(
+			("home", "/"),
+			("progress", "/progress"),
+			(project.name, _progress_link(project_path_str)),
+		)
+		+ panel("Models — who won", _model_stats_table(rows), meta=meta)
+		+ panel(
+			"Models — effort per attempt",
+			_model_attempt_table(attempt_rows),
+			meta=f"{total_attempts:,} attempts across all functions",
+		)
+	)
 	return page(f"stats · {project.name}", body, current_path=None)
 
 
