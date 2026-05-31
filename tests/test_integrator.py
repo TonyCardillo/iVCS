@@ -187,8 +187,12 @@ class TestIntegrateCommit:
 		fn = FunctionEntry("fn_00001000", 0x1000, 0x10)
 		proj = self._project(tmp_path, fn)
 		self._workspace(
-			proj, fn, best="int fn_00001000(void){return 0;}\n",
-			ctx="typedef int X;\n", pct=100.0, success=True,
+			proj,
+			fn,
+			best="int fn_00001000(void){return 0;}\n",
+			ctx="typedef int X;\n",
+			pct=100.0,
+			success=True,
 		)
 		res = integrate_commit(proj, self._parsed_text(), fn, compile_fn=_ok_compile)
 		assert res.skipped_reason is None
@@ -202,15 +206,19 @@ class TestIntegrateCommit:
 		assert "typedef int X;" in common.read_text()
 		# An all-preamble ctx has no function-specific tail → no per-function header.
 		assert not res.path.with_name("fn_00001000.ctx.h").exists()
-		assert 'fn_00001000.ctx.h' not in body
+		assert "fn_00001000.ctx.h" not in body
 
 	def test_function_specific_decls_kept_in_per_function_header(self, tmp_path):
 		fn = FunctionEntry("fn_00001000", 0x1000, 0x10)
 		proj = self._project(tmp_path, fn)
 		ctx = "typedef int X;\n\n/* Target — pins mangling. */\nint fn_00001000(void);\n"
 		self._workspace(
-			proj, fn, best="int fn_00001000(void){return 0;}\n",
-			ctx=ctx, pct=100.0, success=True,
+			proj,
+			fn,
+			best="int fn_00001000(void){return 0;}\n",
+			ctx=ctx,
+			pct=100.0,
+			success=True,
 		)
 		res = integrate_commit(proj, self._parsed_text(), fn, compile_fn=_ok_compile)
 		body = res.path.read_text()
@@ -230,12 +238,21 @@ class TestIntegrateCommit:
 			FunctionEntry("fn_00001100", 0x1100, 0x10),
 		]
 		proj = Project(
-			name="t", xbe_path=Path("/x.xbe"), workspace_root=tmp_path / "ws",
-			functions=tuple(fns), src_root=tmp_path / "src_tree",
+			name="t",
+			xbe_path=Path("/x.xbe"),
+			workspace_root=tmp_path / "ws",
+			functions=tuple(fns),
+			src_root=tmp_path / "src_tree",
 		)
 		for fn in fns:
-			self._workspace(proj, fn, best=f"int {fn.name}(void){{return 0;}}\n",
-				ctx=preamble, pct=100.0, success=True)
+			self._workspace(
+				proj,
+				fn,
+				best=f"int {fn.name}(void){{return 0;}}\n",
+				ctx=preamble,
+				pct=100.0,
+				success=True,
+			)
 			integrate_commit(proj, parsed, fn, compile_fn=_ok_compile)
 		# Exactly one shared header; neither function carries its own typedef copy.
 		commons = list((proj.src_root / "include").glob("*.h"))
@@ -297,8 +314,11 @@ class TestProjectCoverage:
 			FunctionEntry("u", 0x1200, 0x20),  # untouched (no result.json)
 		]
 		proj = Project(
-			name="t", xbe_path=Path("/x.xbe"), workspace_root=tmp_path / "ws",
-			functions=tuple(fns), src_root=tmp_path / "src",
+			name="t",
+			xbe_path=Path("/x.xbe"),
+			workspace_root=tmp_path / "ws",
+			functions=tuple(fns),
+			src_root=tmp_path / "src",
 		)
 		self._write_result(proj, fns[0], 100.0, True)
 		self._write_result(proj, fns[1], 50.0, False)
@@ -317,8 +337,11 @@ class TestProjectCoverage:
 			FunctionEntry("sdk", 0x1100, 0x40),  # identified SDK (also "matched" state)
 		]
 		proj = Project(
-			name="t", xbe_path=Path("/x.xbe"), workspace_root=tmp_path / "ws",
-			functions=tuple(fns), src_root=tmp_path / "src",
+			name="t",
+			xbe_path=Path("/x.xbe"),
+			workspace_root=tmp_path / "ws",
+			functions=tuple(fns),
+			src_root=tmp_path / "src",
 		)
 		self._write_result(proj, fns[0], 100.0, True)
 		self._write_result(proj, fns[1], 100.0, True)
@@ -336,8 +359,11 @@ class TestProjectCoverage:
 		parsed = _parsed(_section(".text", 0x1000, 0x1000))
 		fn = FunctionEntry("m", 0x1000, 0x40)
 		proj = Project(
-			name="t", xbe_path=Path("/x.xbe"), workspace_root=tmp_path / "ws",
-			functions=(fn,), src_root=tmp_path / "src",
+			name="t",
+			xbe_path=Path("/x.xbe"),
+			workspace_root=tmp_path / "ws",
+			functions=(fn,),
+			src_root=tmp_path / "src",
 		)
 		self._write_result(proj, fn, 100.0, True)
 		assert project_coverage(proj, parsed)[0].committed == 0
@@ -351,8 +377,11 @@ class TestProjectCoverage:
 		parsed = _parsed(_section(".text", 0x1000, 0x200))
 		fns = [FunctionEntry("a", 0x1000, 0x60), FunctionEntry("b", 0x1040, 0x40)]  # overlap
 		proj = Project(
-			name="t", xbe_path=Path("/x.xbe"), workspace_root=tmp_path / "ws",
-			functions=tuple(fns), src_root=tmp_path / "src",
+			name="t",
+			xbe_path=Path("/x.xbe"),
+			workspace_root=tmp_path / "ws",
+			functions=tuple(fns),
+			src_root=tmp_path / "src",
 		)
 		c = project_coverage(proj, parsed)[0]
 		assert len(c.overlaps) == 1
@@ -361,7 +390,110 @@ class TestProjectCoverage:
 	def test_empty_project_is_empty(self, tmp_path):
 		parsed = _parsed(_section(".text", 0x1000, 0x1000))
 		proj = Project(
-			name="t", xbe_path=Path("/x.xbe"), workspace_root=tmp_path / "ws",
-			functions=(), src_root=tmp_path / "src",
+			name="t",
+			xbe_path=Path("/x.xbe"),
+			workspace_root=tmp_path / "ws",
+			functions=(),
+			src_root=tmp_path / "src",
 		)
 		assert project_coverage(proj, parsed) == ()
+
+
+def _fstatus(va, size, state, *, name="fn"):
+	from src.project import FunctionStatus
+
+	return FunctionStatus(
+		name=name,
+		va=va,
+		size=size,
+		state=state,
+		best_match_percent=None,
+		iterations=0,
+		workspace_path=Path("/ws") / name,
+		termination_reason=None,
+	)
+
+
+class TestImageCoverage:
+	def test_data_section_is_all_gap(self):
+		from src.integrator import image_coverage
+
+		# .text (code) at 0x1000 holds one matched fn; .data at 0x9000 holds none.
+		parsed = _parsed(
+			_section(".text", 0x1000, 0x100),
+			_section(".data", 0x9000, 0x80, flags=0),
+		)
+		statuses = [_fstatus(0x1000, 0x40, "matched")]
+		cov = image_coverage(statuses, parsed)
+		by = {s.name: s for s in cov.sections}
+		assert by[".text"].matched_bytes == 0x40
+		assert by[".text"].gap_bytes == 0x100 - 0x40
+		# Data section: no functions → entirely gap, zero from source.
+		assert by[".data"].enumerated_bytes == 0
+		assert by[".data"].gap_bytes == 0x80
+		assert by[".data"].matched_bytes == 0
+
+	def test_whole_image_denominator_includes_data(self):
+		from src.integrator import image_coverage
+
+		parsed = _parsed(
+			_section(".text", 0x1000, 0x100),
+			_section(".data", 0x9000, 0x100, flags=0),
+		)
+		statuses = [_fstatus(0x1000, 0x40, "matched")]
+		cov = image_coverage(statuses, parsed)
+		assert cov.total_bytes == 0x200
+		assert cov.matched_bytes == 0x40
+		# 0x40 of 0x200 — the data section is in the denominator, not ignored.
+		assert cov.from_source_percent == 0x40 / 0x200 * 100.0
+
+	def test_sdk_bytes_separated_from_matched(self):
+		from src.integrator import image_coverage
+
+		parsed = _parsed(_section(".text", 0x1000, 0x100))
+		statuses = [
+			_fstatus(0x1000, 0x20, "matched", name="game"),
+			_fstatus(0x1040, 0x20, "matched", name="sdk"),
+		]
+		cov = image_coverage(statuses, parsed, sdk_vas=frozenset({0x1040}))
+		(sec,) = cov.sections
+		assert sec.matched_bytes == 0x20  # only the game fn
+		assert sec.sdk_bytes == 0x20
+		assert sec.enumerated_bytes == 0x40
+
+
+class TestImageVerifyCache:
+	def test_write_then_load_round_trip(self, tmp_path):
+		from src.integrator import FunctionVerify as FV
+		from src.integrator import (
+			ImageVerify,
+			image_verify_cache_load,
+			image_verify_cache_path,
+			image_verify_cache_write,
+		)
+
+		project_path = tmp_path / "project.json"
+		project_path.write_text("{}")
+		result = ImageVerify(
+			functions=(
+				FV("a", 0x1000, 16, 16, None),
+				FV("b", 0x1010, 16, 8, "8/16 bytes match"),
+			),
+			matched_bytes=32,
+			verified_bytes=24,
+		)
+		image_verify_cache_write(project_path, result, method="splice", when=1234.0)
+		assert image_verify_cache_path(project_path) == tmp_path / "image_verify.json"
+
+		got = image_verify_cache_load(project_path)
+		assert got["method"] == "splice"
+		assert got["verified_bytes"] == 24
+		assert got["matched_bytes"] == 32
+		assert got["functions"] == 2
+		assert got["functions_verified"] == 1
+		assert got["generated_at"] == 1234.0
+
+	def test_load_missing_returns_none(self, tmp_path):
+		from src.integrator import image_verify_cache_load
+
+		assert image_verify_cache_load(tmp_path / "project.json") is None

@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+import time
 import types
 from pathlib import Path
 
@@ -31,6 +32,7 @@ sys.path.insert(0, str(REPO_ROOT))
 from src.integrator import (  # noqa: E402
 	image_real_relink_verify,
 	image_splice_verify,
+	image_verify_cache_write,
 	integrate_commit,
 	project_coverage,
 )
@@ -118,12 +120,16 @@ def _print_verify(project, result, kind: str) -> int:
 	return 0
 
 
-def _verify(project, parsed) -> int:
-	return _print_verify(project, image_splice_verify(project, parsed), "splice-verified")
+def _verify(project, parsed, project_path: Path) -> int:
+	result = image_splice_verify(project, parsed)
+	image_verify_cache_write(project_path, result, method="splice", when=time.time())
+	return _print_verify(project, result, "splice-verified")
 
 
-def _relink(project, parsed) -> int:
-	return _print_verify(project, image_real_relink_verify(project, parsed), "relink-verified")
+def _relink(project, parsed, project_path: Path) -> int:
+	result = image_real_relink_verify(project, parsed)
+	image_verify_cache_write(project_path, result, method="relink", when=time.time())
+	return _print_verify(project, result, "relink-verified")
 
 
 def main() -> int:
@@ -147,9 +153,9 @@ def main() -> int:
 	if args.command == "report":
 		return _report(project, parsed, _sdk_vas_for(args.project))
 	if args.command == "verify":
-		return _verify(project, parsed)
+		return _verify(project, parsed, args.project)
 	if args.command == "relink":
-		return _relink(project, parsed)
+		return _relink(project, parsed, args.project)
 	return _commit(
 		project, parsed, function=args.function, force=args.force, no_compile=args.no_compile
 	)

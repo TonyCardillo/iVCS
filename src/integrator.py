@@ -13,16 +13,17 @@ authoritative, so nothing is hand-authored or duplicated into config.
 Phase 1 (here): the segment model — grouping, gaps, overlaps, source paths.
 """
 
+import json
 import shutil
 import tempfile
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
 from src.coff_read import CoffObject, coff_object_read
 from src.compile_tool import CompileOutput, default_compile_fn
 from src.link_tool import default_link_fn
-from src.project import FunctionEntry, Project, function_status
+from src.project import FunctionEntry, FunctionStatus, Project, function_status
 from src.relink import RelinkError, relink_place
 from src.relink_image import LinkFn, function_object_compile, function_real_relink
 from src.relocs import relocs_image_va_resolver
@@ -221,7 +222,7 @@ def integrate_commit(
 	dest.parent.mkdir(parents=True, exist_ok=True)
 	common, tail = _split_ctx_preamble(workspace.ctx_h.read_text())
 
-	# The shared preamble lives once per project; every committed source includes it.
+	# Shared preamble lives once per project; sources include it.
 	common_dir = project.src_root / _COMMON_HEADER_DIR
 	common_dir.mkdir(parents=True, exist_ok=True)
 	common_body = f"#pragma once\n\n{common}\n" if common else "#pragma once\n"
@@ -314,13 +315,8 @@ def project_coverage(
 
 
 # --- Phase 4a: whole-image byte-splice verification -------------------------
-#
-# The per-function objdiff is relocation-aware: it masks the rel32/disp32 fields
-# so a function can read "100% matched" even if a symbol resolves to the wrong
-# address. Splice verification closes that gap — recompile the matched source,
-# relocate it to the VA the function actually occupies, and byte-compare against
-# the original image. A whole-image "verified %" is a stronger claim than the
-# sum of per-function match percents.
+# objdiff masks rel32/disp32, so "100% matched" can hide a wrong-address symbol;
+# splicing each function to its real VA and byte-comparing closes that gap.
 
 
 def _compiled_function_object(
@@ -446,12 +442,8 @@ def image_splice_verify(
 
 
 # --- Phase 4b: real relink verification (Link.Exe) --------------------------
-#
-# An independent oracle for the same claim: instead of our own relocator, drive
-# the real XDK linker over each matched function (placed at its true VA with an
-# absolute-symbol stub for its externals) and byte-compare the linker's output
-# against the original image. Agreement with the splice verifier is strong
-# evidence; disagreement points at a relocation our own placement got wrong.
+# Independent oracle: the real XDK linker, not our relocator. Disagreement with
+# Phase 4a points at a relocation our own placement got wrong.
 
 
 def _function_real_relink_verify(
@@ -483,3 +475,144 @@ def image_real_relink_verify(
 	return _image_verify(
 		project, lambda fn: _function_real_relink_verify(project, parsed, fn, compile_fn, link_fn)
 	)
+
+
+# --- Whole-image byte coverage (code AND data) ------------------------------
+#
+# project_coverage answers "% of enumerated code matched" per segment. This
+# answers the wider, honest question: of every byte in the image — code,
+# data, padding — how much is reconstructed from source vs. still carried
+# verbatim from the original. Data sections (no enumerated functions) show up
+# explicitly as all-gap, instead of being invisible.
+
+
+@dataclass(frozen=True)
+class SectionCoverage:
+	name: str
+	virtual_address: int
+	virtual_size: int
+	is_executable: bool
+	matched_bytes: int
+	partial_bytes: int
+	sdk_bytes: int
+	enumerated_bytes: int  # total bytes of enumerated functions in this section
+
+	@property
+	def gap_bytes(self) -> int:
+		"""Bytes not covered by any enumerated function: padding, jump tables,
+		data, and un-enumerated code. For a pure data section this is the whole
+		section — carried verbatim, not reconstructed from source."""
+		return max(0, self.virtual_size - self.enumerated_bytes)
+
+
+@dataclass(frozen=True)
+class ImageCoverage:
+	sections: tuple[SectionCoverage, ...]
+
+	@property
+	def total_bytes(self) -> int:
+		return sum(s.virtual_size for s in self.sections)
+
+	@property
+	def matched_bytes(self) -> int:
+		return sum(s.matched_bytes for s in self.sections)
+
+	@property
+	def sdk_bytes(self) -> int:
+		return sum(s.sdk_bytes for s in self.sections)
+
+	@property
+	def gap_bytes(self) -> int:
+		return sum(s.gap_bytes for s in self.sections)
+
+	@property
+	def from_source_percent(self) -> float:
+		"""Matched (reconstructed-from-source) bytes over the whole image."""
+		return (self.matched_bytes / self.total_bytes * 100.0) if self.total_bytes else 0.0
+
+
+def image_coverage(
+	statuses: Sequence[FunctionStatus],
+	parsed: ParsedXbe,
+	*,
+	sdk_vas: frozenset[int] = frozenset(),
+) -> ImageCoverage:
+	"""Whole-binary byte coverage across every section, code and data alike.
+
+	Takes precomputed FunctionStatus (from project_aggregate) so it adds no disk
+	reads — fit for an always-on UI. Each function's bytes are tallied under the
+	section that contains its VA; every section's remaining bytes become gap.
+	"""
+	by_section: dict[int, list[FunctionStatus]] = {}
+	for status in statuses:
+		section = xbe_section_containing_va(parsed, status.va)
+		if section is not None:
+			by_section.setdefault(section.virtual_address, []).append(status)
+
+	sections: list[SectionCoverage] = []
+	for section in parsed.sections:
+		group = by_section.get(section.virtual_address, [])
+		matched = partial = sdk = enumerated = 0
+		for st in group:
+			enumerated += st.size
+			if st.va in sdk_vas:
+				sdk += st.size
+			elif st.state == "matched":
+				matched += st.size
+			elif st.state == "partial":
+				partial += st.size
+		sections.append(
+			SectionCoverage(
+				name=section.name,
+				virtual_address=section.virtual_address,
+				virtual_size=section.virtual_size,
+				is_executable=section.is_executable,
+				matched_bytes=matched,
+				partial_bytes=partial,
+				sdk_bytes=sdk,
+				enumerated_bytes=enumerated,
+			)
+		)
+	return ImageCoverage(tuple(sections))
+
+
+# --- Verify-result cache (UI reads what the CLI computes) --------------------
+#
+# image_splice_verify / image_real_relink_verify recompile every matched
+# function, so they're far too slow for a page render. The CLI runs them and
+# caches the headline numbers next to project.json; the webui just displays the
+# cached result (and how stale it is).
+
+
+def image_verify_cache_path(project_path: Path | str) -> Path:
+	return Path(project_path).parent / "image_verify.json"
+
+
+def image_verify_cache_write(
+	project_path: Path | str, result: ImageVerify, *, method: str, when: float
+) -> None:
+	"""Persist the headline verify numbers (not the full per-function list)."""
+	image_verify_cache_path(project_path).write_text(
+		json.dumps(
+			{
+				"method": method,
+				"verified_bytes": result.verified_bytes,
+				"matched_bytes": result.matched_bytes,
+				"verified_percent": result.verified_percent,
+				"functions": len(result.functions),
+				"functions_verified": sum(1 for f in result.functions if f.is_verified),
+				"generated_at": when,
+			},
+			indent=2,
+		)
+	)
+
+
+def image_verify_cache_load(project_path: Path | str) -> dict | None:
+	path = image_verify_cache_path(project_path)
+	if not path.is_file():
+		return None
+	try:
+		return json.loads(path.read_text())
+	except (json.JSONDecodeError, OSError):
+		return None

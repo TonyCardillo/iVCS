@@ -25,14 +25,13 @@ from urllib.parse import parse_qs, quote, urlsplit
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
-# Point default_diff_fn at the bundled objdiff-cli unless the user already
-# pinned one. Without this, launching a decomp run from the UI dies with
-# FileNotFoundError when the agent loop tries to diff the first attempt.
+# Without this, a UI-launched decomp run dies with FileNotFoundError on first diff.
 _BUNDLED_OBJDIFF = REPO_ROOT / "recon" / "objdiff-smoke" / "objdiff-cli"
 if "IVCS_OBJDIFF_CLI" not in os.environ and _BUNDLED_OBJDIFF.is_file():
 	os.environ["IVCS_OBJDIFF_CLI"] = str(_BUNDLED_OBJDIFF)
 
 
+from src.integrator import image_coverage, image_verify_cache_load  # noqa: E402
 from src.launcher import JobInfo, ghidra_sweep_attempt_one, launch_decomp_job  # noqa: E402
 from src.libmatch import sdk_manifest_load  # noqa: E402
 from src.notes import notes_load, notes_save  # noqa: E402
@@ -60,7 +59,7 @@ from src.xbe import (  # noqa: E402
 	xbe_load,
 )
 
-# ── Tiny XBE cache (parsing a 5 MB XBE is cheap, but redundant) ─────────────
+# ── XBE parse cache ─────────────────────────────────────────────────────────
 _PARSE_CACHE: dict[str, ParsedXbe] = {}
 
 
@@ -122,7 +121,7 @@ class SweepState:
 
 
 _SWEEPS_LOCK = threading.Lock()
-_SWEEPS: dict[str, SweepState] = {}  # keyed by the project manifest path string
+_SWEEPS: dict[str, SweepState] = {}  # keyed by project manifest path
 
 
 def _sweep_for(project_path_str: str) -> SweepState | None:
@@ -766,10 +765,7 @@ def page(
 		if current_path
 		else ""
 	)
-	# Live updates without a full-page reload: poll the same URL and swap only
-	# <main>'s contents, so the page never repaints blank (no flicker) and scroll
-	# is kept. `data-live` carries the interval; the server drops it once the job
-	# finishes, which is the poller's signal to stop.
+	# Swap only <main> (no flicker, keeps scroll); server drops data-live to stop the poller.
 	live_attr = f' data-live="{refresh_seconds}"' if refresh_seconds else ""
 	live_script = (
 		"""
@@ -1479,7 +1475,7 @@ def _asm_dual_columns(
 		else:
 			differs += 1
 
-		# Left (target). No marker glyph on this side.
+		# Target column: no marker glyph.
 		if lrow is not None and lrow.instruction is not None:
 			addr = f"{lrow.instruction.address:x}:" if lrow.instruction.address is not None else ""
 			mnem, args = _split_instr(lrow.instruction.formatted)
@@ -1493,7 +1489,7 @@ def _asm_dual_columns(
 		else:
 			target_html.append(f'<div class="asm-row {cls} empty">&nbsp;</div>')
 
-		# Right (current). Marker glyph in first column.
+		# Current column: marker glyph in first column.
 		if rrow is not None and rrow.instruction is not None:
 			addr = f"{rrow.instruction.address:x}:" if rrow.instruction.address is not None else ""
 			mnem, args = _split_instr(rrow.instruction.formatted)
@@ -1567,7 +1563,7 @@ def _attempt_status_labels(attempt: dict, *, is_in_flight: bool) -> tuple[str | 
 
 
 def _guess_function_name(root: Path) -> str | None:
-	# If the workspace was named like "<prefix>_fn_002D1D94", recover "fn_002D1D94".
+	# Recover "fn_<va>" from a "<prefix>_fn_<va>" workspace name.
 	name = root.name
 	if "_fn_" in name:
 		return "fn_" + name.split("_fn_", 1)[1]
@@ -1838,8 +1834,7 @@ def view_progress(
 		+ panel("Match distribution", histogram, meta="function count per 10% bucket")
 		+ panel("Functions", filter_bar + table, meta=f"{rng} · page {page_n}/{total_pages}")
 	)
-	# Auto-refresh only while a sweep is live; the poller stops once the server
-	# drops data-live (sweep no longer active), same contract as the run page.
+	# Refresh only while the sweep is live; server drops data-live to stop the poller.
 	refresh = 4 if sweep_active else None
 	return page(
 		f"progress · {project.name}", body, current_path=current_path, refresh_seconds=refresh
@@ -1926,18 +1921,98 @@ def _model_attempt_table(rows: list) -> str:
 	)
 
 
+def _image_coverage_table(cov) -> str:
+	"""Per-section whole-image byte breakdown: how much of each section (code and
+	data) is reconstructed from source vs. carried verbatim as a gap."""
+	rows = []
+	for s in sorted(cov.sections, key=lambda s: -s.virtual_size):
+		pct = (s.matched_bytes / s.virtual_size * 100.0) if s.virtual_size else 0.0
+		# Classify by whether we enumerated functions here, NOT the exec flag —
+		# this XBE marks .rdata/.data executable, so the flag lies (see docs).
+		kind = "code" if s.enumerated_bytes else "data"
+		rows.append(
+			"<tr>"
+			f"<td>{html.escape(s.name)}</td>"
+			f'<td class="muted">{kind}</td>'
+			f'<td class="num">{s.virtual_size:,}</td>'
+			f'<td class="num green">{s.matched_bytes:,}</td>'
+			f'<td class="num">{pct:.1f}%</td>'
+			f'<td class="num muted">{s.gap_bytes:,}</td>'
+			"</tr>"
+		)
+	return (
+		"<table>"
+		"<thead><tr><th>section</th><th>kind</th><th>size</th>"
+		"<th>from source</th><th>%</th><th>gap / verbatim</th></tr></thead>"
+		f"<tbody>{''.join(rows)}</tbody></table>"
+		'<p class="muted tight" style="margin-top: 10px;">'
+		"<b>from source</b> = bytes of matched functions (reconstructed C). "
+		"<b>gap / verbatim</b> = padding, data, jump tables, and un-matched code — "
+		"carried from the original, not yet from source. Data sections are entirely gap.</p>"
+	)
+
+
+def _verify_panel(project_path_str: str) -> str:
+	"""Show the cached relink-verified% (computed by scripts/integrate.py), or a
+	hint to compute it. The oracle recompiles every function, so it can't run on
+	a page render — the UI only displays what the CLI cached."""
+	cache = image_verify_cache_load(project_path_str)
+	if cache is None:
+		body = (
+			'<p class="muted">Not yet computed. The relink oracle recompiles every '
+			"matched function (needs Wine + the toolchain), so it runs from the CLI:</p>"
+			'<pre class="code">python scripts/integrate.py verify '
+			f"{html.escape(project_path_str)}</pre>"
+			'<p class="muted tight">'
+			"<code>verify</code> uses our own relocator; <code>relink</code> drives the "
+			"real XDK Link.Exe as an independent cross-check.</p>"
+		)
+		return panel("Relink-verified", body)
+
+	pct = cache.get("verified_percent", 0.0)
+	age = ""
+	gen = cache.get("generated_at")
+	if isinstance(gen, (int, float)):
+		secs = max(0, int(time.time() - gen))
+		age = f" · {secs // 3600}h{(secs % 3600) // 60}m ago" if secs >= 60 else " · just now"
+	body = (
+		'<div class="kv">'
+		'<div class="k">verified</div>'
+		f'<div class="v green">{cache.get("verified_bytes", 0):,} / '
+		f"{cache.get('matched_bytes', 0):,} matched bytes ({pct:.1f}%)</div>"
+		'<div class="k">functions</div>'
+		f'<div class="v">{cache.get("functions_verified", 0)} / '
+		f"{cache.get('functions', 0)} fully reproduced</div>"
+		'<div class="k">method</div>'
+		f'<div class="v">{html.escape(str(cache.get("method", "?")))}{age}</div>'
+		"</div>"
+		f"{_progress_bar(pct)}"
+		'<p class="muted tight" style="margin-top:8px;">Matched functions recompiled, '
+		"placed at their real VA, and byte-compared against the original image. "
+		"Re-run the CLI to refresh.</p>"
+	)
+	return panel("Relink-verified", body)
+
+
 def view_stats(project_path_str: str) -> str:
 	"""Per-model performance leaderboard for one project."""
 	project = project_load(project_path_str)
-	stats = project_aggregate(project, sdk_vas=_sdk_vas_for(project_path_str))
+	sdk_vas = _sdk_vas_for(project_path_str)
+	stats = project_aggregate(project, sdk_vas=sdk_vas)
 	rows = model_stats(stats.function_statuses)
 	attempt_rows = model_attempt_stats(
 		[_workspace_attempt_triples(s.workspace_path) for s in stats.function_statuses]
 	)
+	parsed = xbe_cached_load(str(project.xbe_path))
+	cov = image_coverage(stats.function_statuses, parsed, sdk_vas=sdk_vas)
 
 	attributed = sum(r.functions for r in rows)
 	meta = f"{attributed} of {stats.game_functions:,} game functions attributed to a model"
 	total_attempts = sum(r.attempts for r in attempt_rows)
+	cov_meta = (
+		f"{cov.matched_bytes:,} / {cov.total_bytes:,} bytes from source "
+		f"({cov.from_source_percent:.1f}% of the whole image)"
+	)
 	body = (
 		crumbs(
 			("home", "/"),
@@ -1950,6 +2025,8 @@ def view_stats(project_path_str: str) -> str:
 			_model_attempt_table(attempt_rows),
 			meta=f"{total_attempts:,} attempts across all functions",
 		)
+		+ panel("Whole-image reconstruction", _image_coverage_table(cov), meta=cov_meta)
+		+ _verify_panel(project_path_str)
 	)
 	return page(f"stats · {project.name}", body, current_path=None)
 
@@ -1968,7 +2045,7 @@ def _apply_filters(statuses: list, f: dict[str, str], symbols=None) -> list:
 		out = [s for s in out if s.state == state]
 	query = (f.get("q") or "").strip().lower()
 	if query:
-		# Match the machine name or the human label, so a search finds either.
+		# Match machine name or human label so search finds either.
 		def hit(s) -> bool:
 			label = symbols.label_for(s.va).lower() if symbols else ""
 			return query in s.name.lower() or query in label
@@ -2072,7 +2149,7 @@ def _progress_filter_bar(
 """
 
 
-_SDK_SWATCH = "#5b7da6"  # a category colour, distinct from the matched/partial/untouched scale
+_SDK_SWATCH = "#5b7da6"  # distinct from the matched/partial/untouched scale
 
 
 def _sdk_vas_for(project_path_str: str) -> frozenset[int]:
@@ -2088,8 +2165,7 @@ def _progress_summary(project: Project, stats: ProjectStats) -> str:
 	u = stats.untouched_functions
 	sdk = stats.sdk_functions
 	total = stats.total_functions or 1
-	# The match bar spans the whole image (m + p + u + sdk == total); progress
-	# percentages below are measured against the *game* target (image minus SDK).
+	# Bar spans the whole image; progress % below is measured against the game target (image minus SDK).
 	game = stats.game_functions or 1
 
 	seg_html = []
@@ -2255,7 +2331,7 @@ def _name_cell(s, symbols) -> str:
 	label = symbols.label_for(s.va)
 	provenance = symbols.provenance(s.va)
 	tag = _PROVENANCE_TAG.get(provenance, "")
-	if label == s.name:  # default — nothing renamed
+	if label == s.name:  # not renamed
 		return html.escape(s.name)
 	return (
 		f'<span class="fn-label">{html.escape(label)}</span> {tag}'
@@ -2465,7 +2541,7 @@ def view_launch_form(project_path_str: str, va_str: str) -> str:
 		and not (existing_job and existing_job.is_active())
 	)
 
-	# Detect existing on-disk state so the user knows what they're about to overwrite.
+	# Surface existing on-disk state so the user knows what they'd overwrite.
 	existing_attempts = []
 	if (workspace_path / "history").is_dir():
 		existing_attempts = sorted(int(p.stem) for p in (workspace_path / "history").glob("*.c"))
