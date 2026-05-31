@@ -268,9 +268,7 @@ def _mirror_warmstart_as_attempt_zero(
 	"""
 	if not workspace.ghidra_warmstart.is_file():
 		return
-	target = workspace.attempt_paths(0).c
-	if target.is_file():
-		return
+	paths = workspace.attempt_paths(0)
 	ctx = workspace.ctx_h.read_text() if workspace.ctx_h.is_file() else ""
 	normalized = ghidra_pseudo_c_normalize(
 		workspace.ghidra_warmstart.read_text(),
@@ -278,7 +276,17 @@ def _mirror_warmstart_as_attempt_zero(
 		stdcall_target=stdcall_target,
 		callee_arities=callee_arities,
 	)
-	target.write_text(ctx + "\n" + normalized)
+	content = ctx + "\n" + normalized
+	# Regenerate when the freshly-normalized content differs from what's on disk,
+	# so normalizer improvements (e.g. DAT_ rewrites) reach already-prepared
+	# functions instead of being frozen by a stale baseline. Invalidate the
+	# compiled/diffed artifacts so the baseline recompiles against the new source.
+	if paths.c.is_file() and paths.c.read_text() == content:
+		return
+	paths.c.write_text(content)
+	for stale in (paths.obj, paths.diff_json):
+		if stale.is_file():
+			stale.unlink()
 
 
 def _prepare_ghidra_warmstart(

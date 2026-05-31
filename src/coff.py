@@ -125,6 +125,94 @@ def coff_absolute_symbols_build(symbols: dict[str, int]) -> bytes:
 	return header + symbol_blob + string_table
 
 
+def coff_defined_function_rename(data: bytes, new_name: str) -> bytes:
+	"""Rename the single defined external function symbol in a compiled object.
+
+	objdiff and the relink oracle pair symbols by name against the canonical
+	`_fn_<VA>`. This lets a matching-decomp attempt keep a readable function name
+	in its C source (CPlayer, XMemAlloc) while the object still exports the name
+	the rest of the pipeline expects — so a correct match counts instead of
+	scoring zero on a symbol-name mismatch.
+
+	The defined function is the lone symbol with storage class EXTERNAL, a real
+	section, and function type. Returns `data` unchanged when it's already named
+	`new_name`, when the function can't be uniquely identified (zero or several
+	candidates), or when the string-table layout is unexpected — best-effort,
+	never raises on a normal object.
+	"""
+	if len(data) < COFF_HEADER_SIZE:
+		return data
+	_machine, _sect_count, _ts, sym_ptr, sym_count = struct.unpack_from("<HHIII", data, 0)
+	if not sym_ptr or sym_count == 0:
+		return data
+	string_table_start = sym_ptr + sym_count * COFF_SYMBOL_SIZE
+
+	candidates: list[int] = []  # byte offset of each defined-function name field
+	already_named = False
+	slot = 0
+	while slot < sym_count:
+		base = sym_ptr + slot * COFF_SYMBOL_SIZE
+		if base + COFF_SYMBOL_SIZE > len(data):
+			return data
+		_value, section_number, sym_type, storage_class, aux = struct.unpack_from(
+			"<IhHBB", data, base + 8
+		)
+		if (
+			storage_class == IMAGE_SYM_CLASS_EXTERNAL
+			and section_number > 0
+			and sym_type == IMAGE_SYM_TYPE_FUNCTION
+		):
+			if _coff_symbol_name_read(data[base : base + 8], data, string_table_start) == new_name:
+				already_named = True
+			candidates.append(base)
+		slot += 1 + aux
+
+	if already_named or len(candidates) != 1:
+		return data
+	return _coff_symbol_name_repoint(data, candidates[0], string_table_start, new_name)
+
+
+def _coff_symbol_name_read(name_field: bytes, data: bytes, string_table_start: int) -> str:
+	"""Decode a symbol's 8-byte name field: inline short name, or long-name
+	string-table offset (the offset is measured from the table's start)."""
+	if name_field[:4] == b"\x00\x00\x00\x00":
+		offset = struct.unpack_from("<I", name_field, 4)[0]
+		abs_off = string_table_start + offset
+		end = data.find(b"\x00", abs_off)
+		return data[abs_off:end].decode("ascii", "replace")
+	return name_field.rstrip(b"\x00").decode("ascii", "replace")
+
+
+def _coff_symbol_name_repoint(
+	data: bytes, name_field_off: int, string_table_start: int, new_name: str
+) -> bytes:
+	"""Point one symbol's name field at a freshly-appended string-table entry.
+
+	`new_name` is always a long name here (`_fn_<VA>` is >8 chars), so it goes in
+	the string table. We append it at the table's end (which is end-of-file, per
+	the COFF layout this codebase emits and reads) and bump the table's size
+	field; the old name's bytes are left as harmless dead space.
+	"""
+	encoded = new_name.encode("ascii") + b"\x00"
+	out = bytearray(data)
+
+	if string_table_start + 4 <= len(data):
+		old_size = struct.unpack_from("<I", data, string_table_start)[0]
+		# The table must be exactly the tail of the file, or appending corrupts it.
+		if old_size < 4 or string_table_start + old_size != len(data):
+			return data
+		new_offset = old_size
+		out += encoded
+		struct.pack_into("<I", out, string_table_start, old_size + len(encoded))
+	else:
+		# No string table yet: create one (size field + the single entry).
+		new_offset = 4
+		out += struct.pack("<I", 4 + len(encoded)) + encoded
+
+	struct.pack_into("<II", out, name_field_off, 0, new_offset)
+	return bytes(out)
+
+
 def _text_zero_imm32_sites(text_bytes: bytes, relocations: list[ResolvedReloc]) -> bytes:
 	if not relocations:
 		return text_bytes

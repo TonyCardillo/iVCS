@@ -18,6 +18,7 @@ from src.compile_tool import (
 	compile_and_view_assembly,
 	compile_error_format,
 	function_match_percent,
+	obj_function_symbol_canonicalize,
 )
 from src.ghidra_decompile import ghidra_pseudo_c_normalize_for_prompt
 from src.workspace import FunctionWorkspace
@@ -240,6 +241,8 @@ def _baseline_compile_attempt_zero(workspace: FunctionWorkspace, *, compile_fn: 
 	if not result.success:
 		stderr_path = paths.c.with_suffix(".stderr")
 		stderr_path.write_text(compile_error_format(result))
+		return
+	obj_function_symbol_canonicalize(paths.obj, workspace.function_name)
 
 
 def ghidra_only_run(

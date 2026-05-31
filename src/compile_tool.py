@@ -12,6 +12,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from src.coff import coff_defined_function_rename
 from src.objdiff import DiffResult, objdiff_run
 from src.workspace import FunctionWorkspace
 
@@ -61,6 +62,7 @@ def compile_and_view_assembly(
 			error=compile_error_format(compile_out),
 		)
 
+	obj_function_symbol_canonicalize(paths.obj, workspace.function_name)
 	diff_result = diff_fn(workspace.target_obj, paths.obj, workspace.function_name)
 	match_percent = function_match_percent(diff_result, workspace.function_name)
 
@@ -70,6 +72,20 @@ def compile_and_view_assembly(
 		match_percent=match_percent,
 		diff_result=diff_result,
 	)
+
+
+def obj_function_symbol_canonicalize(obj_path: Path, function_name: str) -> None:
+	"""Rewrite a compiled object's defined function symbol to `function_name`.
+
+	The attempt's C may name the function readably (CPlayer, XMemAlloc); the
+	object must export the canonical `_fn_<VA>` so objdiff pairs it with
+	target.obj and the relink oracle can find it. A no-op when the symbol is
+	already canonical or can't be uniquely identified.
+	"""
+	obj = obj_path.read_bytes()
+	fixed = coff_defined_function_rename(obj, function_name)
+	if fixed != obj:
+		obj_path.write_bytes(fixed)
 
 
 def function_match_percent(diff: DiffResult, function_name: str) -> float | None:

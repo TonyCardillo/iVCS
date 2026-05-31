@@ -26,9 +26,67 @@ from src.coff import (
 	IMAGE_SYM_CLASS_EXTERNAL,
 	IMAGE_SYM_CLASS_STATIC,
 	IMAGE_SYM_TYPE_FUNCTION,
+	coff_defined_function_rename,
 	coff_object_build,
 )
+from src.coff_read import coff_object_read
 from src.relocs import RelocKind, RelocSite, ResolvedReloc
+
+
+def _defined_function_name(blob: bytes) -> str | None:
+	"""The name of the lone defined external function symbol, via the reader."""
+	obj = coff_object_read(blob)
+	names = [
+		s.name
+		for s in obj.symbols
+		if s.storage_class == IMAGE_SYM_CLASS_EXTERNAL
+		and s.section_number > 0
+		and s.type == IMAGE_SYM_TYPE_FUNCTION
+	]
+	return names[0] if len(names) == 1 else None
+
+
+class TestDefinedFunctionRename:
+	def test_renames_short_name_to_canonical(self):
+		# Source named it readably ("_XMemAlloc"); object should export "_fn_..".
+		blob = coff_object_build(b"\xc3", "_XMemAlloc", relocations=[])
+		out = coff_defined_function_rename(blob, "_fn_00012280@8")
+		assert _defined_function_name(out) == "_fn_00012280@8"
+
+	def test_renames_long_name_to_canonical(self):
+		blob = coff_object_build(b"\xc3", "_CPlayer_Update_long_name", relocations=[])
+		out = coff_defined_function_rename(blob, "_fn_00747474")
+		assert _defined_function_name(out) == "_fn_00747474"
+
+	def test_noop_when_already_canonical(self):
+		blob = coff_object_build(b"\xc3", "_fn_00012280", relocations=[])
+		assert coff_defined_function_rename(blob, "_fn_00012280") == blob
+
+	def test_callee_externs_untouched_and_relocs_intact(self):
+		body = b"\xe8\x00\x00\x00\x00\xc3"  # call rel32 ; ret
+		reloc = ResolvedReloc(
+			site=RelocSite(imm_offset=1, kind=RelocKind.REL32, target_va=0x00430000),
+			symbol_name="_fn_00430000",
+		)
+		blob = coff_object_build(body, "_XMemAlloc", relocations=[reloc])
+		out = coff_defined_function_rename(blob, "_fn_00012280@8")
+		obj = coff_object_read(out)
+
+		assert _defined_function_name(out) == "_fn_00012280@8"
+		# The callee extern still present and unrenamed.
+		assert any(s.name == "_fn_00430000" for s in obj.symbols)
+		# The reloc still points at a symbol named "_fn_00430000".
+		text = obj.text_section()
+		assert text is not None
+		(r,) = text.relocations
+		assert obj.symbol_at(r.symbol_index).name == "_fn_00430000"
+
+	def test_object_still_parses_after_rename(self):
+		blob = coff_object_build(b"\x90\x90\xc3", "_XMemAlloc", relocations=[])
+		out = coff_defined_function_rename(blob, "_fn_00012280@8")
+		# Round-trips cleanly: text bytes preserved, one .text section.
+		obj = coff_object_read(out)
+		assert obj.text_section().raw == b"\x90\x90\xc3"
 
 
 def _coff_header_parse(blob: bytes) -> dict:

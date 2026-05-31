@@ -300,14 +300,33 @@ class TestWarmstartMirror:
 		# attempt_paths(0).c is the canonical destination.
 		assert ws.attempt_paths(0).c.is_file()
 
-	def test_idempotent_does_not_overwrite_existing_zero(self, tmp_path):
+	def test_idempotent_when_content_matches(self, tmp_path):
 		ws = FunctionWorkspace(root=tmp_path / "fn", function_name="_fn_X")
 		ws.initialize()
-		ws.ghidra_warmstart.write_text("new draft")
-		(ws.history_dir / "0000.c").write_text("pre-existing")
+		ws.ghidra_warmstart.write_text("void fn_X(void){}\n")
 		_mirror_warmstart_as_attempt_zero(ws)
-		# Pre-existing 0000.c must not be clobbered; user may have hand-edited.
-		assert (ws.history_dir / "0000.c").read_text() == "pre-existing"
+		# A second mirror with identical normalized content leaves artifacts alone.
+		ws.attempt_paths(0).obj.write_bytes(b"\x90")  # pretend the baseline compiled
+		_mirror_warmstart_as_attempt_zero(ws)
+		assert ws.attempt_paths(0).obj.read_bytes() == b"\x90"  # not invalidated
+
+	def test_regenerates_when_normalized_content_differs(self, tmp_path):
+		# A stale 0000.c (e.g. from before a normalizer fix) must refresh, and its
+		# compiled/diffed artifacts must be invalidated so the baseline recompiles.
+		ws = FunctionWorkspace(root=tmp_path / "fn", function_name="_fn_X")
+		ws.initialize()
+		ws.ghidra_warmstart.write_text("void fn_X(void){ DAT_00485aa0 = 1; }\n")
+		ws.attempt_paths(0).c.write_text("stale — DAT_00485aa0 = 1;")
+		ws.attempt_paths(0).obj.write_bytes(b"\x90")
+		ws.attempt_paths(0).diff_json.write_text("{}")
+
+		_mirror_warmstart_as_attempt_zero(ws)
+
+		regenerated = ws.attempt_paths(0).c.read_text()
+		assert "DAT_" not in regenerated  # normalizer's DAT_ rewrite reached it
+		assert "(*(int *)0x00485aa0)" in regenerated
+		assert not ws.attempt_paths(0).obj.exists()  # stale obj invalidated
+		assert not ws.attempt_paths(0).diff_json.exists()
 
 
 class TestSelectReferencedStructs:
