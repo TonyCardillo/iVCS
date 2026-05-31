@@ -133,6 +133,11 @@ src/
   fingerprint.py    x86 structural index: exact/opcode/equiv hashes, cluster, similarity
   archive.py        !<arch> static-library parser (extract COFF members from .lib)
   libmatch.py       Match the image against XDK library signatures to name SDK code
+  strings_xref.py   String xref: recover string refs per function; project-wide auto-name pass
+  symbols.py        VA-keyed human-label overlay (display names separate from machine symbols)
+  batch.py          Overnight batch harness: cluster-aware queue over a whole project
+  sweep.py          Project-wide Ghidra baseline sweep: warm-start every untouched function
+  notes.py          Per-function free-text notes, stored as notes.md in the workspace dir
 
 tests/
 scripts/
@@ -140,9 +145,10 @@ scripts/
   integrate.py      Commit matched functions into the source tree; coverage report
   codindex.py       Structural code index: cluster duplicates, find similar functions
   libmatch.py       Name SDK functions by matching the image against the XDK .libs
+  batch.py          CLI entry point for the overnight batch harness
   smoke_run.py      End-to-end agent loop against the bundled objdiff-smoke fixture (no XBE needed)
   halo2_sanity.py   End-to-end pipeline diagnostic against a real Halo 2 XBE
-  webui.py          Local web UI for inspecting an XBE (sections, hex, disassembly, kernel ordinals)
+  webui.py          Local web UI: XBE explorer, decomp run/launch, batch/sweep control
 ghidra_scripts/   Ghidra postscripts (see docs/ghidra_setup.md):
                     DecompileOne.java — decompile one function by VA;
                     DumpStructs.java  — harvest composite layouts as C typedefs

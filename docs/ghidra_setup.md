@@ -13,10 +13,9 @@ and the webui launch form. Follow the install below to enable it locally.
 
 A first-attempt prompt that already has plausible variable shapes and
 control flow lets the model skip the "guess the function's purpose" stage
-and focus on register-allocation matching. JSRF and other projects pre-seed
-Ghidra with a symbol table so the pseudo-C uses real names instead of
-`FUN_00012000` / `DAT_002D0CF5`. We will do the same with our kernel-import
-table and discovered `fn_XXXXXXXX` labels.
+and focus on register-allocation matching. `ghidra_pseudo_c_normalize_for_prompt`
+post-processes the output to rename `FUN_xxxxxxxx` → `fn_XXXXXXXX` so callees
+match `ctx.h`'s declared names, making the warm-start directly usable.
 
 ## Version pinning
 
@@ -87,12 +86,17 @@ Implemented in `src/ghidra_decompile.py` (`ghidra_project_ensure` +
 `use Ghidra warm-start` checkbox in `scripts/webui.py`. Drafts cache to
 `<workspace>/ghidra_warmstart.c`.
 
-## Open questions to revisit after install
+## Resolved design decisions
 
-- Does Ghidra's calling-convention output ever conflict with our
-  `__stdcall` inference for kernel imports? If yes, post-process to
-  strip Ghidra's argument list and use ours.
-- Pseudo-C noise stripping (`bVar3 = (byte)uVar2;` style temporaries):
-  worth it, or trust the LLM to ignore?
-- Project-state staleness: a new XBE means a new project. Simplest is
-  hashing the XBE bytes and keying the project dir by hash.
+- **Calling-convention conflicts**: resolved. `ghidra_decompile.py` post-processes
+  the pseudo-C to pin the target's definition to `int __stdcall` (`_pseudo_c_stdcall_target_rewrite`)
+  and pads under-count stdcall call sites to match each callee's `@N` arity
+  (`_pseudo_c_pad_stdcall_calls`).
+- **Pseudo-C noise**: resolved. `ghidra_pseudo_c_normalize_for_prompt` renames
+  `FUN_xxxxxxxx` → `fn_XXXXXXXX`, strips the XAPILIB:: namespace, and drops
+  Ghidra's "Globals starting with '_'" warning. Remaining temporaries are left
+  for the LLM to work around.
+- **Project-state staleness**: resolved. The project is keyed by XBE filename
+  stem (overridable via `IVCS_GHIDRA_PROJECT_NAME`). A new XBE gets its own
+  project directory; `ghidra_project_ensure` is a no-op if the `.gpr` already
+  exists.
