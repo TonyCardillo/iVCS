@@ -107,9 +107,19 @@ class TestLlmClientFor:
 	def test_local_points_at_lm_studio_by_default(self, monkeypatch):
 		monkeypatch.delenv("IVCS_LLM_API_BASE", raising=False)
 		monkeypatch.delenv("IVCS_LLM_MODEL", raising=False)
+		# No server reachable → fall back to the built-in default.
+		monkeypatch.setattr("src.llm_clients._lm_studio_detect_loaded_model", lambda: None)
 		client = llm_client_for("local")
 		assert client.model == "openai/qwen3-coder-30b"
 		assert client.api_base == "http://127.0.0.1:1234/v1"
+
+	def test_local_uses_detected_loaded_model(self, monkeypatch):
+		monkeypatch.delenv("IVCS_LLM_MODEL", raising=False)
+		monkeypatch.setattr(
+			"src.llm_clients._lm_studio_detect_loaded_model", lambda: "qwen/qwen3.5-9b"
+		)
+		client = llm_client_for("local")
+		assert client.model == "openai/qwen/qwen3.5-9b"
 
 	def test_local_honors_env_overrides(self, monkeypatch):
 		monkeypatch.setenv("IVCS_LLM_API_BASE", "http://10.0.0.5:5000/v1")
@@ -141,9 +151,24 @@ class TestRecordedModel:
 		monkeypatch.setenv("IVCS_LLM_MODEL", "qwen/qwen3.5-9b")
 		assert llm_recorded_model("local") == "qwen/qwen3.5-9b"
 
-	def test_local_default_when_env_unset(self, monkeypatch):
+	def test_local_default_when_env_unset_and_no_server(self, monkeypatch):
 		monkeypatch.delenv("IVCS_LLM_MODEL", raising=False)
+		monkeypatch.setattr("src.llm_clients._lm_studio_detect_loaded_model", lambda: None)
 		assert llm_recorded_model("local") == "qwen3-coder-30b"
+
+	def test_local_records_detected_loaded_model(self, monkeypatch):
+		monkeypatch.delenv("IVCS_LLM_MODEL", raising=False)
+		monkeypatch.setattr(
+			"src.llm_clients._lm_studio_detect_loaded_model", lambda: "qwen/qwen3.5-9b"
+		)
+		assert llm_recorded_model("local") == "qwen/qwen3.5-9b"
+
+	def test_explicit_env_beats_detection(self, monkeypatch):
+		monkeypatch.setenv("IVCS_LLM_MODEL", "deepseek-coder")
+		monkeypatch.setattr(
+			"src.llm_clients._lm_studio_detect_loaded_model", lambda: "qwen/qwen3.5-9b"
+		)
+		assert llm_recorded_model("local") == "deepseek-coder"
 
 	def test_cloud_model_unchanged(self):
 		assert llm_recorded_model("claude-haiku-4-5") == "claude-haiku-4-5"

@@ -6,13 +6,43 @@ servers (LM Studio, Ollama, vLLM) via api_base, or cloud providers like
 Anthropic via api_key. Loop policy lives in src/agent_loop.py.
 """
 
+import json
 import os
+import urllib.request
 from dataclasses import dataclass
 
 from litellm import completion as litellm_completion
 
 _LM_STUDIO_API_BASE = "http://127.0.0.1:1234/v1"
 _LM_STUDIO_MODEL = "qwen3-coder-30b"
+
+
+def _lm_studio_api_base() -> str:
+	return os.environ.get("IVCS_LLM_API_BASE", _LM_STUDIO_API_BASE)
+
+
+def _lm_studio_detect_loaded_model() -> str | None:
+	"""Ask the LM Studio server which model is actually loaded.
+
+	Returns the first non-embedding model id from `/models`, or None if the
+	server is unreachable — so we name the real AI rather than a guessed default.
+	"""
+	try:
+		with urllib.request.urlopen(f"{_lm_studio_api_base()}/models", timeout=2) as resp:
+			data = json.load(resp)
+	except (OSError, ValueError):
+		return None
+	for entry in data.get("data", []):
+		mid = entry.get("id", "")
+		if mid and "embed" not in mid.lower():
+			return mid
+	return None
+
+
+def _local_model_name() -> str:
+	"""The LM Studio model to use and record: an explicit IVCS_LLM_MODEL wins;
+	otherwise the actually-loaded model; otherwise the built-in default."""
+	return os.environ.get("IVCS_LLM_MODEL") or _lm_studio_detect_loaded_model() or _LM_STUDIO_MODEL
 
 
 @dataclass
@@ -61,7 +91,7 @@ def llm_recorded_model(model: str) -> str:
 	Cloud models and `"ghidra"` pass through unchanged.
 	"""
 	if model == "local":
-		return os.environ.get("IVCS_LLM_MODEL", _LM_STUDIO_MODEL)
+		return _local_model_name()
 	return model
 
 
@@ -73,9 +103,7 @@ def llm_client_for(model: str, *, api_key: str | None = None) -> LiteLLMClient:
 	Anthropic model and requires `ANTHROPIC_API_KEY` (or an explicit `api_key`).
 	"""
 	if model == "local":
-		api_base = os.environ.get("IVCS_LLM_API_BASE", _LM_STUDIO_API_BASE)
-		local_model = os.environ.get("IVCS_LLM_MODEL", _LM_STUDIO_MODEL)
-		return LiteLLMClient(model=f"openai/{local_model}", api_base=api_base)
+		return LiteLLMClient(model=f"openai/{_local_model_name()}", api_base=_lm_studio_api_base())
 
 	key = api_key or os.environ.get("ANTHROPIC_API_KEY")
 	if not key:
