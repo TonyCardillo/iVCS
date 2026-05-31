@@ -11,6 +11,7 @@ from hypothesis import strategies as st
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
 from webui import (  # noqa: E402
+	SweepState,
 	_attempt_model_label,
 	_attempt_status_labels,
 	_best_attempt,
@@ -20,12 +21,15 @@ from webui import (  # noqa: E402
 	_path_query_suffix,
 	_progress_bar,
 	_project_crumb,
+	_register_sweep,
 	_run_action_bar,
 	_run_interrupted,
+	_sweep_section,
 	_va_from_workspace,
 )
 
 from src.notes import notes_load  # noqa: E402
+from src.project import ProjectStats  # noqa: E402
 from src.symbols import symbol_map_load  # noqa: E402
 
 
@@ -289,3 +293,69 @@ class TestPagerWindow:
 			p for p in range(page - radius, page + radius + 1) if 1 <= p <= total_pages
 		}
 		assert expected_near <= set(window)
+
+
+def _stats(*, untouched, total=10):
+	return ProjectStats(
+		total_functions=total,
+		matched_functions=0,
+		partial_functions=0,
+		untouched_functions=untouched,
+		total_bytes=1000,
+		matched_bytes=0,
+		partial_bytes=0,
+		function_statuses=(),
+	)
+
+
+class TestSweepSection:
+	def test_idle_shows_launch_button_when_untouched(self):
+		html, active = _sweep_section("/no/such/sweep-a.json", _stats(untouched=42))
+		assert active is False
+		assert 'action="/sweep/launch' in html
+		assert "42 untouched" in html
+
+	def test_idle_no_button_when_all_touched(self):
+		html, active = _sweep_section("/no/such/sweep-b.json", _stats(untouched=0))
+		assert active is False
+		assert "/sweep/launch" not in html
+		assert "nothing untouched" in html
+
+	def test_active_shows_progress_and_stop(self):
+		path = "/no/such/sweep-c.json"
+		_register_sweep(
+			SweepState(
+				project_path=path,
+				project_name="c",
+				total=10,
+				done=4,
+				matched=2,
+				partial=1,
+				failed=1,
+				current="fn_00012200",
+			)
+		)
+		html, active = _sweep_section(path, _stats(untouched=6))
+		assert active is True
+		assert "SWEEPING" in html
+		assert "4/10" in html
+		assert "2 matched" in html
+		assert 'action="/sweep/stop' in html
+		assert "fn_00012200" in html
+
+	def test_finished_summary_then_relaunch_button(self):
+		path = "/no/such/sweep-d.json"
+		_register_sweep(
+			SweepState(
+				project_path=path,
+				project_name="d",
+				total=10,
+				state="done",
+				done=10,
+				matched=3,
+			)
+		)
+		html, active = _sweep_section(path, _stats(untouched=7))
+		assert active is False
+		assert "last sweep finished" in html
+		assert "/sweep/launch" in html  # can run again

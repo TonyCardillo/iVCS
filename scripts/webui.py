@@ -17,6 +17,7 @@ import sys
 import threading
 import time
 import traceback
+from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote, urlsplit
@@ -32,7 +33,7 @@ if "IVCS_OBJDIFF_CLI" not in os.environ and _BUNDLED_OBJDIFF.is_file():
 	os.environ["IVCS_OBJDIFF_CLI"] = str(_BUNDLED_OBJDIFF)
 
 
-from src.launcher import JobInfo, launch_decomp_job  # noqa: E402
+from src.launcher import JobInfo, ghidra_sweep_attempt_one, launch_decomp_job  # noqa: E402
 from src.libmatch import sdk_manifest_load  # noqa: E402
 from src.notes import notes_load, notes_save  # noqa: E402
 from src.objdiff import DiffKind, objdiff_parse  # noqa: E402
@@ -44,6 +45,7 @@ from src.project import (  # noqa: E402
 	project_aggregate,
 	project_load,
 )
+from src.sweep import SweepOutcome, sweep_queue, sweep_run  # noqa: E402
 from src.symbols import symbol_map_load, symbol_rename  # noqa: E402
 from src.xbe import (  # noqa: E402
 	ParsedXbe,
@@ -84,6 +86,53 @@ def _register_job(job: JobInfo) -> None:
 
 class JobsAtCapacity(Exception):
 	"""Raised when launching would exceed IVCS_MAX_CONCURRENT_JOBS."""
+
+
+# ── Ghidra sweep registry (project-wide baseline pass, one per project) ─────
+@dataclass
+class SweepState:
+	"""Live, mutable handle for a project-wide Ghidra baseline sweep.
+
+	One worker thread walks the queue and mutates this in place, so the progress
+	page can read counts/current/state by reference. Like JobInfo, it dies on a
+	server restart (the sweep just stops; banked baselines survive on disk)."""
+
+	project_path: str
+	project_name: str
+	total: int
+	state: str = "running"  # running | done | stopped | error
+	done: int = 0
+	matched: int = 0
+	partial: int = 0
+	failed: int = 0
+	current: str | None = None
+	started_at: float = 0.0
+	error: str | None = None
+	stop_requested: bool = False
+
+	def is_active(self) -> bool:
+		return self.state == "running"
+
+
+_SWEEPS_LOCK = threading.Lock()
+_SWEEPS: dict[str, SweepState] = {}  # keyed by the project manifest path string
+
+
+def _sweep_for(project_path_str: str) -> SweepState | None:
+	with _SWEEPS_LOCK:
+		return _SWEEPS.get(project_path_str)
+
+
+def _register_sweep(sweep: SweepState) -> None:
+	with _SWEEPS_LOCK:
+		_SWEEPS[sweep.project_path] = sweep
+
+
+def _active_workspace_paths() -> set[Path]:
+	"""Resolved workspace dirs with a live per-function job — the sweep skips
+	these so it never races another writer on the same function's files."""
+	with _JOBS_LOCK:
+		return {p for p, j in _JOBS.items() if j.is_active()}
 
 
 # ── Styling ─────────────────────────────────────────────────────────────────
@@ -565,6 +614,21 @@ pre.code {
 .run-banner .amber  { color: var(--amber); }
 .run-banner .cyan   { color: var(--cyan); }
 .run-banner .green  { color: var(--green); }
+.run-banner.sweeping { border-color: rgba(95, 215, 255, 0.45); }
+.run-banner .sweep-counts { letter-spacing: 0.04em; }
+.run-banner form.sweep-stop { margin-left: auto; }
+button.btn-run {
+  background: transparent;
+  cursor: pointer;
+  font-family: inherit;
+}
+.sweep-bar {
+  height: 4px;
+  background: var(--bg-row);
+  border: 1px solid var(--line);
+  margin: 0 0 14px 0;
+}
+.sweep-bar-fill { height: 100%; background: var(--cyan); transition: width 0.4s ease; }
 
 button, input[type=number], select {
   background: var(--bg);
@@ -1558,6 +1622,68 @@ def view_progress_index(current_path: str | None) -> str:
 	return page("progress", body, current_path=current_path)
 
 
+def _sweep_section(project_path_str: str, stats: ProjectStats) -> tuple[str, bool]:
+	"""Render the Ghidra-attempt-all control. Returns (panel_html, is_active).
+
+	Active → a live progress banner + bar + stop button (the caller turns on
+	auto-refresh). Idle → a launch button sized by the untouched count, plus a
+	one-line summary of the previous sweep if one ran this server session.
+	"""
+	sweep = _sweep_for(project_path_str)
+	active = sweep is not None and sweep.is_active()
+	untouched = stats.untouched_functions
+	path_q = quote(project_path_str)
+
+	if active and sweep is not None:
+		pct = (sweep.done / sweep.total * 100.0) if sweep.total else 100.0
+		current = (
+			f' · <span class="muted">at {html.escape(sweep.current)}</span>'
+			if sweep.current
+			else ""
+		)
+		body = (
+			'<div class="run-banner sweeping">'
+			'<span class="badge pending">SWEEPING</span>'
+			f'<span class="sweep-counts">{sweep.done}/{sweep.total} · '
+			f'<span class="green">{sweep.matched} matched</span> · '
+			f"{sweep.partial} partial · {sweep.failed} failed</span>"
+			f"{current}"
+			f'<form class="inline sweep-stop" method="post" action="/sweep/stop?path={path_q}">'
+			'<button type="submit">stop</button></form>'
+			"</div>"
+			f'<div class="sweep-bar"><div class="sweep-bar-fill" '
+			f'style="width:{pct:.1f}%"></div></div>'
+		)
+		return panel("Ghidra sweep", body, meta=f"{pct:.0f}% · serial baseline pass"), True
+
+	finished = ""
+	if sweep is not None and not active:
+		if sweep.state == "error":
+			finished = (
+				f'<p class="muted tight" style="margin-top:10px;">last sweep errored: '
+				f"{html.escape(sweep.error or '')}</p>"
+			)
+		else:
+			verb = "stopped" if sweep.state == "stopped" else "finished"
+			finished = (
+				f'<p class="muted tight" style="margin-top:10px;">last sweep {verb}: '
+				f"{sweep.done}/{sweep.total} done · "
+				f'<span class="green">{sweep.matched} matched</span> · '
+				f"{sweep.partial} partial · {sweep.failed} failed</p>"
+			)
+
+	if untouched == 0:
+		button = '<p class="muted">every function has a baseline — nothing untouched to sweep.</p>'
+	else:
+		button = (
+			f'<form class="inline" method="post" action="/sweep/launch?path={path_q}">'
+			'<button type="submit" class="btn-run">⚡ Ghidra attempt all</button>'
+			f'<span class="muted" style="margin-left:10px;">{untouched:,} untouched · '
+			"compiles each Ghidra warm-start, no LLM</span></form>"
+		)
+	return panel("Ghidra sweep", button + finished), False
+
+
 def view_progress(
 	project_path_str: str,
 	current_path: str | None,
@@ -1596,6 +1722,8 @@ def view_progress(
 		filters=filters,
 	)
 
+	sweep_html, sweep_active = _sweep_section(project_path_str, stats)
+
 	rng = f"{start + 1}–{min(start + page_size, total)} of {total}" if total else "0 of 0"
 	body = (
 		crumbs(("home", "/"), ("progress", "/progress"), (project.name, None))
@@ -1604,10 +1732,16 @@ def view_progress(
 		+ panel(
 			"Project", summary, meta=f"{total_unfiltered} functions · {stats.total_bytes:,} bytes"
 		)
+		+ sweep_html
 		+ panel("Match distribution", histogram, meta="function count per 10% bucket")
 		+ panel("Functions", filter_bar + table, meta=f"{rng} · page {page_n}/{total_pages}")
 	)
-	return page(f"progress · {project.name}", body, current_path=current_path)
+	# Auto-refresh only while a sweep is live; the poller stops once the server
+	# drops data-live (sweep no longer active), same contract as the run page.
+	refresh = 4 if sweep_active else None
+	return page(
+		f"progress · {project.name}", body, current_path=current_path, refresh_seconds=refresh
+	)
 
 
 def _model_stats_table(rows: list) -> str:
@@ -2331,6 +2465,85 @@ def launch_job_from_form(
 	return redirect, job
 
 
+def sweep_launch(project_path_str: str) -> SweepState:
+	"""Start a project-wide Ghidra baseline sweep in a daemon thread.
+
+	Plans the queue (untouched, non-SDK, not-actively-running functions), then
+	walks it serially — Ghidra headless is the bottleneck, so concurrency would
+	only thrash it. Returns immediately; the SweepState mutates as work lands.
+	Raises if a sweep is already live for this project.
+	"""
+	existing = _sweep_for(project_path_str)
+	if existing and existing.is_active():
+		return existing  # idempotent: a sweep is already walking this project
+
+	project = project_load(project_path_str)
+	sdk_vas = _sdk_vas_for(project_path_str)
+	stats = project_aggregate(project, sdk_vas=sdk_vas)
+
+	ws_by_va = {f.va: project.workspace_for(f).resolve() for f in project.functions}
+	active_ws = _active_workspace_paths()
+	queue = sweep_queue(
+		stats.function_statuses,
+		sdk_vas=sdk_vas,
+		is_active=lambda va: ws_by_va.get(va) in active_ws,
+	)
+
+	state = SweepState(
+		project_path=project_path_str,
+		project_name=project.name,
+		total=len(queue),
+	)
+	_register_sweep(state)
+
+	parsed = xbe_cached_load(str(project.xbe_path))
+	symbols = symbol_map_load(project_path_str)
+
+	def attempt_one(fn):
+		state.current = fn.name
+		try:
+			return ghidra_sweep_attempt_one(project, fn, parsed=parsed, label_for=symbols.label_for)
+		except Exception as e:  # noqa: BLE001 — one bad function must not kill the sweep
+			sys.stderr.write(f"[sweep] {fn.name} failed: {type(e).__name__}: {e}\n")
+			return SweepOutcome(fn.va, fn.name, "failed", None, f"{type(e).__name__}: {e}")
+
+	def log(outcome) -> None:
+		state.done += 1
+		if outcome.state == "matched":
+			state.matched += 1
+		elif outcome.state == "partial":
+			state.partial += 1
+		elif outcome.state == "failed":
+			state.failed += 1
+
+	def _run() -> None:
+		state.started_at = time.time()
+		try:
+			sweep_run(
+				queue,
+				attempt_one=attempt_one,
+				should_stop=lambda: state.stop_requested,
+				log=log,
+			)
+			state.state = "stopped" if state.stop_requested else "done"
+		except Exception as e:  # noqa: BLE001 — surface any orchestration failure
+			state.error = f"{type(e).__name__}: {e}"
+			state.state = "error"
+		finally:
+			state.current = None
+
+	threading.Thread(target=_run, daemon=True, name=f"sweep-{project.name}").start()
+	return state
+
+
+def sweep_stop(project_path_str: str) -> None:
+	"""Request a graceful stop: the worker finishes the current function, then
+	halts at the next kill-switch poll."""
+	sweep = _sweep_for(project_path_str)
+	if sweep is not None and sweep.is_active():
+		sweep.stop_requested = True
+
+
 def view_error(message: str, current_path: str | None = None) -> str:
 	body = (
 		crumbs(("home", "/"), ("error", None))
@@ -2368,6 +2581,16 @@ class Handler(BaseHTTPRequestHandler):
 				return
 			if route == "/notes/save":
 				self._redirect(_handle_notes_save(form))
+				return
+			if route == "/sweep/launch":
+				path = q.get("path", "") or form.get("path", "")
+				sweep_launch(path)
+				self._redirect(f"/progress?path={quote(path)}")
+				return
+			if route == "/sweep/stop":
+				path = q.get("path", "") or form.get("path", "")
+				sweep_stop(path)
+				self._redirect(f"/progress?path={quote(path)}")
 				return
 			self._send(404, view_error(f"unknown POST route: {route}"))
 		except JobsAtCapacity as e:

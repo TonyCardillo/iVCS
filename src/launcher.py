@@ -40,6 +40,7 @@ from src.relocs import (
 	relocs_discover,
 	relocs_kernel_ordinal_at,
 )
+from src.sweep import SweepOutcome, sweep_outcome_classify
 from src.workspace import FunctionWorkspace
 from src.xbe import ParsedXbe, xbe_function_carve, xbe_load, xbe_section_containing_va
 from src.xboxkrnl import (
@@ -244,6 +245,33 @@ def launch_decomp_job(
 
 	threading.Thread(target=_run, daemon=True, name=f"decomp-{fn.name}").start()
 	return job
+
+
+def ghidra_sweep_attempt_one(
+	project: Project,
+	fn: FunctionEntry,
+	*,
+	parsed: ParsedXbe,
+	compile_fn=default_compile_fn,
+	diff_fn=default_diff_fn,
+	label_for: Callable[[int], str] | None = None,
+) -> SweepOutcome:
+	"""Baseline one function for a project sweep: prepare its Ghidra warm-start
+	workspace, then compile + diff attempt 0 with no LLM.
+
+	Runs synchronously (the sweep's worker thread drives the queue) and returns a
+	classified SweepOutcome. Compile/diff are injected for testability; they bind
+	to Wine + objdiff by default.
+	"""
+	workspace, _target_asm = prepare_decomp_workspace(
+		project,
+		fn,
+		parsed=parsed,
+		label_for=label_for,
+		use_ghidra_warmstart=True,
+	)
+	result = ghidra_only_run(workspace=workspace, compile_fn=compile_fn, diff_fn=diff_fn)
+	return sweep_outcome_classify(fn.va, fn.name, result)
 
 
 def _mirror_warmstart_as_attempt_zero(
