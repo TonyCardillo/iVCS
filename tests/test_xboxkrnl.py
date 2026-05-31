@@ -6,6 +6,9 @@ checks plus structural invariants (range, parseability) are enough to
 catch a corrupted/regenerated DB.
 """
 
+from hypothesis import given
+from hypothesis import strategies as st
+
 from src.xboxkrnl import (
 	_SIGNATURES,
 	XBOXKRNL_ORDINAL_MAX,
@@ -26,6 +29,7 @@ _ARG_BYTES_8 = {"LARGE_INTEGER", "ULARGE_INTEGER", "ULONGLONG", "DWORD64", "__in
 
 def _signature_arg_bytes(arg_types: tuple[str, ...]) -> int:
 	return sum(8 if t in _ARG_BYTES_8 else 4 for t in arg_types)
+
 
 # Known stable anchors lifted from the Cxbx-Reloaded / xbdm_gdb_bridge tables.
 # These ordinals have been published consistently for years.
@@ -150,3 +154,28 @@ class TestSignatureExportConsistency:
 			if implied != at:
 				bad.append(f"{name}: sig @{implied} vs export @{at}")
 		assert not bad, "signature arg-bytes disagree with export @N: " + "; ".join(bad)
+
+
+# --- Property tests --------------------------------------------------------
+# The unknown/gap example lookups are arbitrary witnesses of one law: the three
+# ordinal surfaces are total functions that agree on what is "known".
+
+
+class TestLookupTotality:
+	@given(ordinal=st.integers(min_value=-5, max_value=400))
+	def test_name_and_mangled_defined_together_iff_ordinal_known(self, ordinal):
+		# For any int — in range, gap, negative, or past the end — name and
+		# mangled are both present exactly when the ordinal is in the table.
+		known = ordinal in xboxkrnl_ordinals_known()
+		assert (xboxkrnl_name_get(ordinal) is not None) is known
+		assert (xboxkrnl_mangled_get(ordinal) is not None) is known
+
+	def test_mangled_byte_count_agrees_with_mangled_suffix_for_every_export(self):
+		# byte_count(name) is exactly the parsed `@N` of that export's mangling,
+		# or None when the export carries no `@N` (variadic/cdecl). Catches a DB
+		# regen that desyncs the mangled column from the popped-byte column.
+		for ordinal in xboxkrnl_ordinals_known():
+			name = xboxkrnl_name_get(ordinal)
+			core = xboxkrnl_mangled_get(ordinal).lstrip("@")  # drop fastcall '@' prefix
+			expected = int(core.rsplit("@", 1)[1]) if "@" in core else None
+			assert xboxkrnl_mangled_byte_count(name) == expected, f"ordinal {ordinal} ({name})"

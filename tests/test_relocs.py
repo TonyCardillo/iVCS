@@ -7,6 +7,9 @@ import / sub_ / data_) so slice 4 can emit COFF external symbols.
 
 import struct
 
+from hypothesis import given
+from hypothesis import strategies as st
+
 from src.relocs import (
 	RelocKind,
 	RelocSite,
@@ -409,3 +412,69 @@ class TestKernelImportVaMap:
 		)
 		va_map = relocs_kernel_import_va_map(parsed)
 		assert va_map == {"NtClose@4": thunk_va}
+
+
+# --- Property tests --------------------------------------------------------
+# The single-instruction examples above each pin one branch shape; this builds
+# arbitrary mixed programs and asserts the discovery law they witness: every
+# DIR32 indirect branch and every *external* REL32 branch becomes a site, in
+# instruction order, with the right offset/kind/target — and internal REL32
+# branches never do.
+
+_FN_VA = 0x00400000
+_EXT_BASE = 0x00410000  # 64 KiB past _FN_VA — always outside any body we build
+
+
+@st.composite
+def _branch_program(draw):
+	specs = draw(
+		st.lists(
+			st.tuples(
+				st.sampled_from(["rel_call", "rel_jmp", "rel_je", "dir_call", "dir_jmp"]),
+				st.booleans(),  # REL32 only: target external? (DIR32 has no internal filter)
+			),
+			max_size=8,
+		)
+	)
+	body = b""
+	expected: list[RelocSite] = []
+	ext = 0
+	for kind, external in specs:
+		at = _FN_VA + len(body)
+		is_rel = kind.startswith("rel")
+		internal = is_rel and not external
+		if internal:
+			target = _FN_VA  # inside [fn_va, fn_end) → dropped by discover
+		else:
+			target = _EXT_BASE + ext * 0x100
+			ext += 1
+		if kind == "rel_call":
+			enc, off, rk = call_rel32(at, target), len(body) + 1, RelocKind.REL32
+		elif kind == "rel_jmp":
+			enc, off, rk = jmp_rel32(at, target), len(body) + 1, RelocKind.REL32
+		elif kind == "rel_je":
+			enc, off, rk = je_rel32(at, target), len(body) + 2, RelocKind.REL32
+		elif kind == "dir_call":
+			enc, off, rk = ff15_call_indirect(target), len(body) + 2, RelocKind.DIR32
+		else:
+			enc, off, rk = ff25_jmp_indirect(target), len(body) + 2, RelocKind.DIR32
+		if not internal:
+			expected.append(RelocSite(imm_offset=off, kind=rk, target_va=target))
+		body += enc
+	return body + b"\xc3", expected
+
+
+class TestRelocsDiscoverProperties:
+	@given(program=_branch_program())
+	def test_discover_recovers_exactly_external_branches_in_order(self, program):
+		body, expected = program
+		assert relocs_discover(body, _FN_VA) == expected
+
+
+class TestConventionProperties:
+	@given(n=st.integers(0, 0xFFFF), nops=st.integers(0, 6))
+	def test_ret_imm16_is_stdcall_with_byte_count(self, n, nops):
+		# Leading nops (anything before the first ret) don't change the verdict;
+		# `ret imm16` reports stdcall with exactly that popped byte count.
+		body = b"\x90" * nops + b"\xc2" + n.to_bytes(2, "little")
+		assert convention_from_bytes(body) == ("stdcall", n)

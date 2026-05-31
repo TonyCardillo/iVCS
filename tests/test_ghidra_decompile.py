@@ -9,14 +9,19 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
 from src import ghidra_decompile
 from src.ghidra_decompile import (
+	_PSEUDO_C_TYPE_MAP,
 	GhidraConfig,
 	GhidraError,
+	_count_top_level_args,
 	_decompile_argv,
 	_dump_structs_argv,
 	_import_argv,
+	_pad_call_args,
 	_run_with_lock_retry,
 	ghidra_config_from_env,
 	ghidra_decompile_function,
@@ -663,3 +668,92 @@ class TestDefaultRunTimeout:
 		monkeypatch.setattr(ghidra_decompile.subprocess, "run", fake_run)
 		ghidra_decompile_function(0x12000, cfg, timeout_seconds=77.0)
 		assert captured["timeout"] == 77.0
+
+
+# --- Property tests --------------------------------------------------------
+# The TestPseudoCNormalize examples each pin one rewrite on one hand-picked
+# token; these assert the laws those witnesses are arbitrary instances of, so
+# a regex tweak or rewrite-order change is caught wherever it drifts.
+
+_HEX8 = st.text(alphabet="0123456789abcdef", min_size=8, max_size=8)
+
+
+@st.composite
+def _normalize_atom(draw):
+	"""A Ghidra token paired with the form `normalize` must rewrite it to.
+
+	Every atom is self-delimiting (a bare token), so on the default path the
+	rewrites are independent word-boundary substitutions.
+	"""
+	kind = draw(st.sampled_from(["type", "fun", "dat_val", "dat_addr", "bool", "passthrough"]))
+	if kind == "type":
+		key = draw(st.sampled_from(sorted(_PSEUDO_C_TYPE_MAP)))
+		return key, _PSEUDO_C_TYPE_MAP[key]
+	if kind == "fun":
+		h = draw(_HEX8)
+		return f"FUN_{h}", f"fn_{h.upper()}"  # FUN hex is upper-cased
+	if kind == "dat_val":
+		h = draw(_HEX8)
+		return f"DAT_{h}", f"(*(int *)0x{h})"  # DAT hex kept verbatim
+	if kind == "dat_addr":
+		h = draw(_HEX8)
+		return f"&DAT_{h}", f"((int *)0x{h})"
+	if kind == "bool":
+		lit = draw(st.sampled_from(["true", "false"]))
+		return lit, ("1" if lit == "true" else "0")
+	# An identifier that dodges every rewrite (no type/FUN/DAT/bool token in it).
+	ident = f"loc_{draw(st.integers(0, 99999))}"
+	return ident, ident
+
+
+class TestNormalizeProperties:
+	@given(atoms=st.lists(_normalize_atom(), min_size=1, max_size=10))
+	def test_normalize_distributes_over_separated_atoms_oracle(self, atoms):
+		# normalize is a per-token homomorphism: rewriting ` ; `-joined atoms
+		# equals joining each atom's own rewrite. Generalizes the type/FUN/DAT/
+		# bool example tests into one law.
+		src = " ; ".join(a for a, _ in atoms)
+		expected = " ; ".join(b for _, b in atoms)
+		assert ghidra_pseudo_c_normalize(src) == expected
+
+	@given(c=st.text(max_size=200))
+	def test_normalize_is_idempotent_on_default_path(self, c):
+		# Re-normalizing already-normalized C is a no-op — no rewrite's output
+		# re-triggers another. (The stdcall_target path is deliberately excluded:
+		# it re-matches its own `int __stdcall` prefix and is NOT idempotent.)
+		once = ghidra_pseudo_c_normalize(c)
+		assert ghidra_pseudo_c_normalize(once) == once
+
+
+class TestCallPaddingProperties:
+	NAME = "fn_0012C090"
+
+	def _arg_list(self, k: int) -> str:
+		return ", ".join(f"a{i}" for i in range(k))
+
+	@given(k=st.integers(0, 6), arity=st.integers(0, 8))
+	def test_padding_brings_arg_count_up_to_arity_conservation(self, k, arity):
+		# A call ends with max(original, arity) args: short calls are filled with
+		# `0`; calls already at/over arity are left untouched.
+		call = f"{self.NAME}({self._arg_list(k)});"
+		out = ghidra_pseudo_c_normalize(call, callee_arities={self.NAME: arity})
+		inner = out[out.index("(") + 1 : out.rindex(")")]
+		assert _count_top_level_args(inner) == max(k, arity)
+
+	@given(k=st.integers(0, 6), arity=st.integers(1, 8))
+	def test_padding_is_idempotent(self, k, arity):
+		call = f"{self.NAME}({self._arg_list(k)});"
+		once = _pad_call_args(call, self.NAME, arity)
+		assert _pad_call_args(once, self.NAME, arity) == once
+
+	@given(
+		groups=st.lists(st.integers(0, 4), min_size=1, max_size=5),
+		flat=st.integers(0, 4),
+	)
+	def test_top_level_arg_count_ignores_nesting_invariant(self, groups, flat):
+		# A parenthesised group counts as one argument regardless of its inner
+		# commas; flat args each count once.
+		nested = [f"g({self._arg_list(n)})" for n in groups]
+		flat_args = [f"a{i}" for i in range(flat)]
+		args = ", ".join(nested + flat_args)
+		assert _count_top_level_args(args) == len(nested) + flat
