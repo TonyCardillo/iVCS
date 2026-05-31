@@ -88,7 +88,7 @@ def main() -> int:
 	print("=== Resolved relocations in entry-point region ===")
 	resolved = relocs_resolve(carved, entry_va, parsed)
 	if not resolved:
-		print("  (none; entry-point region has no REL32 externals in first 128 bytes)")
+		print("  (none — entry-point region has no REL32 externals in first 128 bytes)")
 	for r in resolved:
 		print(
 			f"  +{r.site.imm_offset:#06x} {r.site.kind.value} → "
@@ -129,7 +129,7 @@ def main() -> int:
 				print(f"  objdiff parsed OK; function symbols on left side: {fn_names}")
 				assert "_entry_point" in fn_names, "synthesized .obj missing function symbol"
 	else:
-		print(f"  (skipped objdiff round-trip; CLI not at {OBJDIFF_CLI})")
+		print(f"  (skipped objdiff round-trip — CLI not at {OBJDIFF_CLI})")
 	print()
 
 	print("=== Scanning .text for an FF 15 site that hits the kernel thunk table ===")

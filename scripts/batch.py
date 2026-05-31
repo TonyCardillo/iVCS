@@ -173,7 +173,7 @@ def _make_logger(log_path: Path):
 			f.write(json.dumps(record) + "\n")
 		mark = "✓" if outcome.matched else "·"
 		pct = outcome.best_match_percent
-		best = f"{pct:.1f}%" if pct is not None else "-"
+		best = f"{pct:.1f}%" if pct is not None else "—"
 		sys.stderr.write(
 			f"  {mark} {outcome.name}  {best:>7}  [{outcome.source}] {outcome.reason}\n"
 		)

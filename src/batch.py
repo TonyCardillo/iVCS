@@ -225,7 +225,7 @@ def propagate_to_twins(
 			outcomes.append(_flagged(twin, "representative has no saved solution"))
 			continue
 		if not is_leaf(twin):
-			outcomes.append(_flagged(twin, "non-leaf twin; needs manual decomp"))
+			outcomes.append(_flagged(twin, "non-leaf twin — needs manual decomp"))
 			continue
 
 		workspace = prepare(twin)
