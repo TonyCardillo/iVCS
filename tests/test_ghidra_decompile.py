@@ -417,6 +417,17 @@ class TestStdcallTargetRewrite:
 		assert "void fn_OTHER(int a)" in out
 		assert "__stdcall" not in out
 
+	def test_rewrite_is_idempotent(self):
+		# Applying the pin twice must not stack a second `int __stdcall` prefix.
+		# It doesn't: the match starts at `^` and its lazy prefix swallows the
+		# existing `int __stdcall ` too, so the sub replaces the whole header
+		# wholesale rather than prepending to it.
+		src = "void fn_X(int a, int b)\n{\n  return;\n}\n"
+		once = ghidra_pseudo_c_normalize(src, stdcall_target="fn_X")
+		twice = ghidra_pseudo_c_normalize(once, stdcall_target="fn_X")
+		assert once == twice
+		assert once.count("__stdcall") == 1
+
 
 class TestStdcallCallPadding:
 	# Ghidra under-counts call args; our `@N`-pinned stdcall callee decls are
@@ -717,10 +728,10 @@ class TestNormalizeProperties:
 		assert ghidra_pseudo_c_normalize(src) == expected
 
 	@given(c=st.text(max_size=200))
-	def test_normalize_is_idempotent_on_default_path(self, c):
+	def test_normalize_is_idempotent(self, c):
 		# Re-normalizing already-normalized C is a no-op — no rewrite's output
-		# re-triggers another. (The stdcall_target path is deliberately excluded:
-		# it re-matches its own `int __stdcall` prefix and is NOT idempotent.)
+		# re-triggers another. (The stdcall_target path holds too; see
+		# TestStdcallTargetRewrite.test_rewrite_is_idempotent for why.)
 		once = ghidra_pseudo_c_normalize(c)
 		assert ghidra_pseudo_c_normalize(once) == once
 
