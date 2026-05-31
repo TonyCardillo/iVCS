@@ -557,6 +557,39 @@ def _rel32_callee_conventions(
 	return [(va, *callee_convention_at(parsed, va)) for va in callee_vas]
 
 
+_C_IDENT_RE = re.compile(r"^[A-Za-z_]\w*$")
+
+# Labels we must never turn into a `#define` alias: C89 keywords and the typedef
+# names ctx.h already provides. Aliasing one of these would rewrite legitimate
+# tokens in the model's code (e.g. `#define int fn_X`) and break the compile.
+# fmt: off
+_C89_KEYWORDS = frozenset((
+	"auto", "break", "case", "char", "const", "continue", "default", "do", "double",
+	"else", "enum", "extern", "float", "for", "goto", "if", "int", "long", "register",
+	"return", "short", "signed", "sizeof", "static", "struct", "switch", "typedef",
+	"union", "unsigned", "void", "volatile", "while",
+))
+# fmt: on
+_CTX_TYPE_NAMES = frozenset(re.findall(r"\b([A-Za-z_]\w*)\s*;", _DEFAULT_CTX_H))
+_RESERVED_ALIAS_NAMES = _C89_KEYWORDS | _CTX_TYPE_NAMES
+
+
+def _callee_alias_line(label: str | None, name: str) -> str | None:
+	"""`#define <label> <name>` so the model may call a renamed callee by its
+	real name while the compiled call still emits the `name` (fn_<va>) symbol
+	objdiff pairs on — the alias is a pure source-level token rewrite, invisible
+	to the relocation the compiler emits.
+
+	None when the label is missing, equals the machine name, isn't a plain C
+	identifier, or would shadow a C keyword / ctx.h typedef.
+	"""
+	if not label or label == name:
+		return None
+	if not _C_IDENT_RE.match(label) or label in _RESERVED_ALIAS_NAMES:
+		return None
+	return f"#define {label} {name}"
+
+
 def _extract_rel32_callee_decls(
 	parsed: ParsedXbe,
 	fn_va: int,
@@ -567,18 +600,24 @@ def _extract_rel32_callee_decls(
 	"""Forward decls for same-binary callees of fn_va, with convention inferred
 	from the first ret in each callee's bytes.
 
-	`label_for(va)` supplies the human label for each callee; when it differs
-	from `fn_<va>` it is appended as a comment so a renamed callee reads by name.
+	`label_for(va)` supplies the human label for each callee. When it differs
+	from `fn_<va>` it rides along as a trailing comment AND, if it's a safe C
+	identifier, as a `#define <label> fn_<va>` so the model can call the callee
+	by its real name and still emit the matching symbol. Aliases are de-duped
+	(a label is defined at most once) to avoid macro redefinition.
 	"""
-	return tuple(
-		_format_callee_decl(
-			f"fn_{va:08X}",
-			conv,
-			byte_count,
-			label=label_for(va) if label_for else None,
-		)
-		for va, conv, byte_count in _rel32_callee_conventions(parsed, fn_va, fn_size)
-	)
+	decls: list[str] = []
+	seen_aliases: set[str] = set()
+	for va, conv, byte_count in _rel32_callee_conventions(parsed, fn_va, fn_size):
+		name = f"fn_{va:08X}"
+		label = label_for(va) if label_for else None
+		decl = _format_callee_decl(name, conv, byte_count, label=label)
+		alias = _callee_alias_line(label, name)
+		if alias is not None and label not in seen_aliases:
+			seen_aliases.add(label)
+			decl = f"{decl}\n{alias}"
+		decls.append(decl)
+	return tuple(decls)
 
 
 def _extract_callee_arities(parsed: ParsedXbe, fn_va: int, fn_size: int) -> dict[str, int]:

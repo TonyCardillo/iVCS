@@ -6,6 +6,7 @@ smoke-testing through the web UI, not the test suite.
 """
 
 from src.launcher import (
+	_callee_alias_line,
 	_compose_ctx_h,
 	_format_callee_decl,
 	_format_kernel_decl,
@@ -271,6 +272,37 @@ class TestFormatCalleeDecl:
 
 	def test_no_label_unchanged(self):
 		assert _format_callee_decl("fn_X", "cdecl", 0, label=None) == "int fn_X();"
+
+
+class TestCalleeAliasLine:
+	def test_real_label_becomes_define(self):
+		# The model can call unit_enter_vehicle(...); preprocessor rewrites it to
+		# fn_0009EBE0(...), so the compiled call still emits the matching symbol.
+		assert (
+			_callee_alias_line("unit_enter_vehicle", "fn_0009EBE0")
+			== "#define unit_enter_vehicle fn_0009EBE0"
+		)
+
+	def test_none_when_label_equals_machine_name(self):
+		assert _callee_alias_line("fn_0009EBE0", "fn_0009EBE0") is None
+
+	def test_none_when_no_label(self):
+		assert _callee_alias_line(None, "fn_X") is None
+		assert _callee_alias_line("", "fn_X") is None
+
+	def test_none_for_non_identifier_label(self):
+		# A C++-ish display label can't be a macro name; the comment still carries it.
+		assert _callee_alias_line("CPlayer::Update", "fn_X") is None
+		assert _callee_alias_line("has space", "fn_X") is None
+
+	def test_none_for_c_keyword(self):
+		assert _callee_alias_line("int", "fn_X") is None
+		assert _callee_alias_line("struct", "fn_X") is None
+
+	def test_none_for_ctx_h_typedef(self):
+		# Aliasing a ctx.h type (DWORD, HANDLE, …) would corrupt the header.
+		assert _callee_alias_line("DWORD", "fn_X") is None
+		assert _callee_alias_line("HANDLE", "fn_X") is None
 
 
 class TestWarmstartMirror:
