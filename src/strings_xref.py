@@ -13,6 +13,9 @@ knowledge — works on any parsed XBE, the basis for a project-wide naming-hint
 """
 
 import re
+from collections import Counter
+from collections.abc import Iterable
+from dataclasses import dataclass
 
 import capstone
 from capstone import x86
@@ -100,6 +103,46 @@ def _operand_address_candidates(instr) -> list[int]:
 		elif op.type == x86.X86_OP_MEM and op.mem.base == 0 and op.mem.index == 0:
 			candidates.append(op.mem.disp & 0xFFFFFFFF)
 	return candidates
+
+
+@dataclass(frozen=True)
+class NameSuggestion:
+	va: int
+	label: str
+
+
+def function_autoname_label(parsed: ParsedXbe, va: int, size: int) -> str | None:
+	"""The high-confidence auto-name label for a function, or None.
+
+	Only when the function references *exactly one* string and it sanitizes to a
+	usable label — the unambiguous case (e.g. a tiny accessor stub that returns a
+	single name string). More than one referenced string is left for human
+	judgement (surfaced as click-to-adopt hints, not auto-applied).
+	"""
+	refs = function_string_refs(parsed, va, size)
+	if len(refs) != 1:
+		return None
+	return string_label_sanitize(refs[0])
+
+
+def autoname_resolve(
+	candidates: Iterable[tuple[int, str]],
+	*,
+	taken_labels: frozenset[str] = frozenset(),
+) -> list[NameSuggestion]:
+	"""Filter (va, label) candidates down to the safe-to-apply set.
+
+	Drops any label that is not unique among the candidates (two functions
+	wanting the same name is ambiguous, not high-confidence) or that is already
+	taken by an existing rename. Preserves input order.
+	"""
+	pairs = list(candidates)
+	counts = Counter(label for _, label in pairs)
+	return [
+		NameSuggestion(va=va, label=label)
+		for va, label in pairs
+		if counts[label] == 1 and label not in taken_labels
+	]
 
 
 _LABEL_STRIP = re.compile(r"[^a-z0-9]+")

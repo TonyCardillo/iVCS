@@ -45,7 +45,12 @@ from src.project import (  # noqa: E402
 	project_aggregate,
 	project_load,
 )
-from src.strings_xref import function_string_refs, string_label_sanitize  # noqa: E402
+from src.strings_xref import (  # noqa: E402
+	autoname_resolve,
+	function_autoname_label,
+	function_string_refs,
+	string_label_sanitize,
+)
 from src.sweep import SweepOutcome, sweep_queue, sweep_run  # noqa: E402
 from src.symbols import symbol_map_load, symbol_rename  # noqa: E402
 from src.xbe import (  # noqa: E402
@@ -1749,6 +1754,33 @@ def _sweep_section(project_path_str: str, stats: ProjectStats) -> tuple[str, boo
 	return panel("Ghidra sweep", button + finished), False
 
 
+def _autoname_section(project_path_str: str, named: int | None) -> str:
+	"""The project-wide 'auto-name from strings' control + last-run notice.
+
+	`named` is the count from a just-completed run (via the ?named= redirect),
+	or None when the page wasn't reached from an auto-name."""
+	path_q = quote(project_path_str)
+	notice = ""
+	if named is not None and named > 0:
+		notice = (
+			'<div class="run-banner done"><span class="badge matched">NAMED</span>'
+			f'<span>auto-named <span class="green">{named}</span> '
+			f"function{'s' if named != 1 else ''} from referenced strings</span></div>"
+		)
+	elif named is not None:
+		notice = (
+			'<div class="run-banner"><span class="badge pending">—</span>'
+			'<span class="muted">no new high-confidence names found</span></div>'
+		)
+	button = (
+		f'<form class="inline" method="post" action="/autoname?path={path_q}">'
+		'<button type="submit" class="btn-run">✎ Auto-name stubs from strings</button>'
+		'<span class="muted" style="margin-left:10px;">names tiny functions whose single '
+		"referenced string is unambiguous · clean-room, re-runnable</span></form>"
+	)
+	return panel("Auto-name", notice + button)
+
+
 def view_progress(
 	project_path_str: str,
 	current_path: str | None,
@@ -1756,6 +1788,7 @@ def view_progress(
 	page_n: int = 1,
 	page_size: int = 100,
 	filters: dict[str, str] | None = None,
+	named: int | None = None,
 ) -> str:
 	project = project_load(project_path_str)
 	stats = project_aggregate(project, sdk_vas=_sdk_vas_for(project_path_str))
@@ -1798,6 +1831,7 @@ def view_progress(
 			"Project", summary, meta=f"{total_unfiltered} functions · {stats.total_bytes:,} bytes"
 		)
 		+ sweep_html
+		+ _autoname_section(project_path_str, named)
 		+ panel("Match distribution", histogram, meta="function count per 10% bucket")
 		+ panel("Functions", filter_bar + table, meta=f"{rng} · page {page_n}/{total_pages}")
 	)
@@ -2609,6 +2643,45 @@ def sweep_stop(project_path_str: str) -> None:
 		sweep.stop_requested = True
 
 
+# Confidence gate for the auto-name pass: only tiny functions qualify, because a
+# function whose *whole body* is small and references exactly one string is
+# almost certainly an accessor returning that name; in a large function the
+# single string is incidental. 24 bytes covers the `mov eax, offset str; ret`
+# stubs with margin while admitting no false positives on the Halo 2 retail XBE.
+_AUTONAME_MAX_SIZE = int(os.environ.get("IVCS_AUTONAME_MAX_SIZE", "24"))
+
+
+def autoname_run(project_path_str: str, *, max_size: int = _AUTONAME_MAX_SIZE) -> int:
+	"""Bulk-apply high-confidence string-derived names across a project.
+
+	Names only unnamed, non-SDK, tiny functions whose single referenced string
+	resolves to a unique, not-yet-taken label. Skips anything ambiguous (multiple
+	strings, colliding labels) or already named — so it's safe to re-run and never
+	clobbers a human rename. Fast (only small functions are disassembled); runs
+	synchronously. Returns the number of functions newly named.
+	"""
+	project = project_load(project_path_str)
+	parsed = xbe_cached_load(str(project.xbe_path))
+	symbols = symbol_map_load(project_path_str)
+	sdk_vas = _sdk_vas_for(project_path_str)
+
+	candidates: list[tuple[int, str]] = []
+	for fn in project.functions:
+		if fn.size > max_size or fn.va in sdk_vas or symbols.provenance(fn.va) != "default":
+			continue
+		label = function_autoname_label(parsed, fn.va, fn.size)
+		if label:
+			candidates.append((fn.va, label))
+
+	taken = frozenset(
+		symbols.label_for(f.va) for f in project.functions if symbols.provenance(f.va) != "default"
+	)
+	plan = autoname_resolve(candidates, taken_labels=taken)
+	for suggestion in plan:
+		symbol_rename(project_path_str, suggestion.va, suggestion.label)
+	return len(plan)
+
+
 def view_error(message: str, current_path: str | None = None) -> str:
 	body = (
 		crumbs(("home", "/"), ("error", None))
@@ -2657,6 +2730,11 @@ class Handler(BaseHTTPRequestHandler):
 				sweep_stop(path)
 				self._redirect(f"/progress?path={quote(path)}")
 				return
+			if route == "/autoname":
+				path = q.get("path", "") or form.get("path", "")
+				named = autoname_run(path)
+				self._redirect(f"/progress?path={quote(path)}&named={named}")
+				return
 			self._send(404, view_error(f"unknown POST route: {route}"))
 		except JobsAtCapacity as e:
 			self._send(429, view_error(f"jobs at capacity: {e}"))
@@ -2689,11 +2767,13 @@ class Handler(BaseHTTPRequestHandler):
 				else:
 					page_n = max(1, int(q.get("page", "1") or "1"))
 					size_n = max(10, min(500, int(q.get("page_size", "100") or "100")))
+					named_q = q.get("named", "")
 					html_out = view_progress(
 						project_path,
 						current_path=None,
 						page_n=page_n,
 						page_size=size_n,
+						named=int(named_q) if named_q.isdigit() else None,
 						filters={
 							"state": q.get("state", ""),
 							"q": q.get("q", ""),

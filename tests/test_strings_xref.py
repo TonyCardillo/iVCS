@@ -6,6 +6,9 @@ sections — no platform- or game-specific assumptions.
 """
 
 from src.strings_xref import (
+	NameSuggestion,
+	autoname_resolve,
+	function_autoname_label,
 	function_string_refs,
 	string_at_va,
 	string_label_sanitize,
@@ -130,3 +133,48 @@ class TestStringLabelSanitize:
 	def test_empty_or_unusable_returns_none(self):
 		assert string_label_sanitize("!!!") is None
 		assert string_label_sanitize("") is None
+
+
+class TestFunctionAutonameLabel:
+	def test_single_ref_yields_label(self):
+		code = _imm32(0x68, RODATA_VA) + b"\xc3"
+		parsed = _parsed(code, b"start-game\x00")
+		assert function_autoname_label(parsed, TEXT_VA, len(code)) == "start_game"
+
+	def test_multiple_refs_yields_none(self):
+		va_a, va_b = RODATA_VA, RODATA_VA + 0x10
+		code = _imm32(0x68, va_a) + _imm32(0x68, va_b) + b"\xc3"
+		rodata = bytearray(0x40)
+		rodata[0x00 : 0x00 + 6] = b"alpha\x00"
+		rodata[0x10 : 0x10 + 5] = b"beta\x00"
+		parsed = _parsed(code, bytes(rodata))
+		assert function_autoname_label(parsed, TEXT_VA, len(code)) is None
+
+	def test_no_refs_yields_none(self):
+		parsed = _parsed(b"\xc3", b"unused\x00")
+		assert function_autoname_label(parsed, TEXT_VA, 1) is None
+
+	def test_single_ref_that_does_not_sanitize_yields_none(self):
+		code = _imm32(0x68, RODATA_VA) + b"\xc3"
+		parsed = _parsed(code, b"!!!!\x00")
+		assert function_autoname_label(parsed, TEXT_VA, len(code)) is None
+
+
+class TestAutonameResolve:
+	def test_keeps_unique_labels(self):
+		plan = autoname_resolve([(0x10, "alpha"), (0x20, "beta")])
+		assert plan == [NameSuggestion(0x10, "alpha"), NameSuggestion(0x20, "beta")]
+
+	def test_drops_all_with_a_colliding_label(self):
+		# Two functions both want "player" → ambiguous → neither applied.
+		plan = autoname_resolve([(0x10, "player"), (0x20, "player"), (0x30, "unit")])
+		assert plan == [NameSuggestion(0x30, "unit")]
+
+	def test_drops_labels_already_taken(self):
+		plan = autoname_resolve(
+			[(0x10, "unit"), (0x20, "weapon")], taken_labels=frozenset({"unit"})
+		)
+		assert plan == [NameSuggestion(0x20, "weapon")]
+
+	def test_empty(self):
+		assert autoname_resolve([]) == []
