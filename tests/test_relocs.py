@@ -46,66 +46,26 @@ def je_rel32(at_va: int, target_va: int) -> bytes:
 
 
 class TestRelocsDiscoverRel32:
-	def test_call_outside_function_yields_one_reloc(self):
-		fn_va = 0x00011000
-		body = call_rel32(fn_va, 0x00020000) + b"\xc3"
-		assert relocs_discover(body, fn_va) == [
-			RelocSite(imm_offset=1, kind=RelocKind.REL32, target_va=0x00020000)
-		]
-
-	def test_call_inside_function_yields_no_reloc(self):
-		fn_va = 0x00011000
-		body = call_rel32(fn_va, fn_va + 10) + b"\x90" * 10 + b"\xc3"
-		assert relocs_discover(body, fn_va) == []
-
-	def test_jmp_rel32_outside_yields_one_reloc(self):
-		fn_va = 0x00011000
-		body = jmp_rel32(fn_va, 0x00030000)
-		assert relocs_discover(body, fn_va) == [
-			RelocSite(imm_offset=1, kind=RelocKind.REL32, target_va=0x00030000)
-		]
-
-	def test_je_rel32_outside_yields_one_reloc(self):
-		fn_va = 0x00011000
-		body = je_rel32(fn_va, 0x00040000)
-		assert relocs_discover(body, fn_va) == [
-			RelocSite(imm_offset=2, kind=RelocKind.REL32, target_va=0x00040000)
-		]
-
-	def test_je_rel8_short_yields_no_reloc(self):
+	# The positive REL32 cases (call/jmp/je outside, multi-external order, mixed
+	# internal/external) are covered by TestRelocsDiscoverProperties. What stays
+	# pins decode paths the property never emits: short rel8 branches, a bare
+	# `mov`, and empty input — all of which must yield no relocs.
+	def test_je_rel8_short_yields_no_reloc_example(self):
 		# 0x74 0x02 = je +2 (rel8). Always 2 bytes — no rel32 target.
 		body = b"\x74\x02" + b"\x90" * 4 + b"\xc3"
 		assert relocs_discover(body, 0x00011000) == []
 
-	def test_jmp_rel8_short_yields_no_reloc(self):
+	def test_jmp_rel8_short_yields_no_reloc_example(self):
 		# 0xEB 0x02 = jmp +2 (rel8).
 		body = b"\xeb\x02" + b"\x90" * 4 + b"\xc3"
 		assert relocs_discover(body, 0x00011000) == []
 
-	def test_no_branches_yields_no_relocs(self):
+	def test_no_branches_yields_no_relocs_example(self):
 		# mov eax, ebx; ret
 		assert relocs_discover(b"\x89\xd8\xc3", 0x00011000) == []
 
-	def test_empty_bytes_yields_no_relocs(self):
+	def test_empty_bytes_yields_no_relocs_example(self):
 		assert relocs_discover(b"", 0x00011000) == []
-
-	def test_multiple_externals_preserve_order(self):
-		fn_va = 0x00011000
-		body = call_rel32(fn_va, 0x00020000) + call_rel32(fn_va + 5, 0x00030000) + b"\xc3"
-		sites = relocs_discover(body, fn_va)
-		assert [s.target_va for s in sites] == [0x00020000, 0x00030000]
-		assert [s.imm_offset for s in sites] == [1, 6]
-
-	def test_mixed_internal_and_external_keeps_only_externals(self):
-		fn_va = 0x00011000
-		body = (
-			call_rel32(fn_va, 0x00020000)  # external — kept
-			+ call_rel32(fn_va + 5, fn_va + 10)  # internal — dropped
-			+ b"\xc3"
-		)
-		sites = relocs_discover(body, fn_va)
-		assert len(sites) == 1
-		assert sites[0].target_va == 0x00020000
 
 
 def _rel32_site(target_va: int) -> RelocSite:
@@ -113,23 +73,23 @@ def _rel32_site(target_va: int) -> RelocSite:
 
 
 class TestConventionFromBytes:
-	def test_cdecl_when_first_ret_has_no_immediate(self):
+	# `ret imm16 → stdcall N` (with leading padding) is covered by
+	# TestConventionProperties. What stays pins the cdecl branches the property
+	# never exercises: a bare `ret`, no ret at all, a realistic prologue before
+	# `ret 4`, and first-ret-wins.
+	def test_cdecl_when_first_ret_has_no_immediate_example(self):
 		body = b"\xb8\x00\x00\x00\x00\xc3"  # mov eax, 0; ret
 		assert convention_from_bytes(body) == ("cdecl", 0)
 
-	def test_stdcall_with_byte_count(self):
-		body = b"\xc2\x08\x00"  # ret 8
-		assert convention_from_bytes(body) == ("stdcall", 8)
-
-	def test_stdcall_with_one_arg(self):
-		body = b"\x56\x8b\xf1\x5e\xc2\x04\x00"  # ret 4
+	def test_stdcall_with_one_arg_example(self):
+		body = b"\x56\x8b\xf1\x5e\xc2\x04\x00"  # push esi; mov esi,ecx; pop esi; ret 4
 		assert convention_from_bytes(body) == ("stdcall", 4)
 
-	def test_no_ret_falls_back_to_cdecl(self):
+	def test_no_ret_falls_back_to_cdecl_example(self):
 		body = b"\x00" * 8
 		assert convention_from_bytes(body) == ("cdecl", 0)
 
-	def test_first_ret_wins(self):
+	def test_first_ret_wins_example(self):
 		# ret (c3) then later ret 8 — first wins.
 		body = b"\xc3\xc2\x08\x00"
 		assert convention_from_bytes(body) == ("cdecl", 0)
@@ -224,38 +184,18 @@ def ff25_jmp_indirect(target_va: int) -> bytes:
 
 
 class TestRelocsDiscoverDir32:
-	def test_ff15_call_indirect_yields_one_dir32(self):
-		fn_va = 0x00011000
-		body = ff15_call_indirect(0x00411520) + b"\xc3"
-		assert relocs_discover(body, fn_va) == [
-			RelocSite(imm_offset=2, kind=RelocKind.DIR32, target_va=0x00411520)
-		]
-
-	def test_ff25_jmp_indirect_yields_one_dir32(self):
-		fn_va = 0x00011000
-		body = ff25_jmp_indirect(0x00411520)
-		assert relocs_discover(body, fn_va) == [
-			RelocSite(imm_offset=2, kind=RelocKind.DIR32, target_va=0x00411520)
-		]
-
-	def test_ff_d0_register_indirect_call_yields_no_reloc(self):
+	# The positive DIR32 cases (ff15/ff25 indirect, mixed with rel32) are covered
+	# by TestRelocsDiscoverProperties. What stays pins the non-absolute indirect
+	# forms the property never emits: register-indirect and base+disp.
+	def test_ff_d0_register_indirect_call_yields_no_reloc_example(self):
 		# call eax — register-indirect, no memory operand
 		body = b"\xff\xd0\xc3"
 		assert relocs_discover(body, 0x00011000) == []
 
-	def test_call_through_register_with_disp_yields_no_reloc(self):
+	def test_call_through_register_with_disp_yields_no_reloc_example(self):
 		# call [eax + 0x10] — base + disp, not absolute disp32
 		body = b"\xff\x50\x10\xc3"
 		assert relocs_discover(body, 0x00011000) == []
-
-	def test_mixed_rel32_and_dir32_both_discovered(self):
-		fn_va = 0x00011000
-		body = call_rel32(fn_va, 0x00020000) + ff15_call_indirect(0x00411520) + b"\xc3"
-		sites = relocs_discover(body, fn_va)
-		assert sites == [
-			RelocSite(imm_offset=1, kind=RelocKind.REL32, target_va=0x00020000),
-			RelocSite(imm_offset=7, kind=RelocKind.DIR32, target_va=0x00411520),
-		]
 
 
 class TestRelocSymbolNameDir32:

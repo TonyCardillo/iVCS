@@ -29,38 +29,16 @@ def _archive(members: list[tuple[str, bytes]]) -> bytes:
 
 
 class TestArchiveMembers:
-	def test_rejects_bad_magic(self):
+	# Reading object members (single, multiple, skipping linker tables, 2-byte
+	# alignment) is covered by TestArchiveRoundTrip. What stays pins behaviour the
+	# round-trip generator never produces: a bad-magic rejection, and a longname-
+	# referenced object ("/4") that must be kept rather than skipped like "/".
+	def test_rejects_bad_magic_example(self):
 		with pytest.raises(ArchiveError):
 			archive_members(b"not an archive")
 
-	def test_reads_a_single_object_member(self):
-		ar = _archive([("foo.obj/", b"\x01\x02\x03\x04")])
-		members = archive_members(ar)
-		assert len(members) == 1
-		assert members[0].name == "foo.obj"
-		assert members[0].data == b"\x01\x02\x03\x04"
-
-	def test_skips_linker_symbol_table_members(self):
-		ar = _archive(
-			[
-				("/", b"\x00\x00\x00\x00"),  # first linker member
-				("/", b"\x00\x00\x00\x00"),  # second linker member
-				("//", b"longnames\x00"),  # longnames member
-				("bar.obj/", b"\xc3"),  # the only real object
-			]
-		)
-		members = archive_members(ar)
-		assert [m.name for m in members] == ["bar.obj"]
-
-	def test_odd_sized_member_is_padded(self):
-		# A 1-byte member forces the 2-byte alignment pad; the next member must
-		# still be found at the correct offset.
-		ar = _archive([("a.obj/", b"\xc3"), ("b.obj/", b"\x90\x90")])
-		members = archive_members(ar)
-		assert [(m.name, m.data) for m in members] == [("a.obj", b"\xc3"), ("b.obj", b"\x90\x90")]
-
-	def test_longname_referenced_object_is_kept(self):
-		# "/123" names an object whose real name lives in the longnames member;
+	def test_longname_referenced_object_is_kept_example(self):
+		# "/4" names an object whose real name lives in the longnames member;
 		# it is a real object and must not be skipped like "/" or "//".
 		ar = _archive([("/4", b"\xc3")])
 		members = archive_members(ar)

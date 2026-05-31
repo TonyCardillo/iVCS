@@ -231,86 +231,34 @@ class TestProjectEnsure:
 
 
 class TestPseudoCNormalize:
-	def test_undefined_types_to_real_types(self):
-		out = ghidra_pseudo_c_normalize(
-			"undefined1 a; undefined2 b; undefined4 c; undefined8 d; undefined *p;"
-		)
-		assert "char a" in out
-		assert "short b" in out
-		assert "int c" in out
-		assert "__int64 d" in out
-		assert "void *p" in out  # bare `undefined` → void
-
-	def test_undefined_does_not_swallow_numbered_variant(self):
-		# Order in the alternation matters: undefined4 must match before bare undefined.
-		out = ghidra_pseudo_c_normalize("undefined4 x;")
-		assert "int x" in out
-		assert "void" not in out
-
-	def test_lowercase_type_aliases(self):
-		out = ghidra_pseudo_c_normalize("byte x; ushort y; uint z; dword w;")
-		assert "BYTE x" in out
-		assert "USHORT y" in out
-		assert "UINT z" in out
-		assert "DWORD w" in out
-
-	def test_fun_renamed_to_fn_with_uppercase_hex(self):
-		out = ghidra_pseudo_c_normalize("FUN_002d0cf5(x); FUN_abcdef01(y);")
-		assert "fn_002D0CF5" in out
-		assert "fn_ABCDEF01" in out
-		assert "FUN_" not in out
-
-	def test_preserves_identifiers_that_contain_type_names(self):
+	# The type/FUN/DAT/bool token-mapping examples that used to live here are now
+	# covered by TestNormalizeProperties.test_normalize_distributes_over_
+	# separated_atoms_oracle (which asserts the exact rewrite of every such token,
+	# including the _DAT_/PTR_DAT_ variants). What remains pins behaviour the law
+	# abstracts away: word-boundary non-matching, the XAPILIB strip, untouched
+	# LAB_ labels, and realistic multi-line composition.
+	def test_preserves_identifiers_that_contain_type_names_example(self):
 		# `bytes` and `_byte` shouldn't be touched.
 		out = ghidra_pseudo_c_normalize("int bytes = 0; int my_byte = 0;")
 		assert "int bytes = 0" in out
 		assert "int my_byte = 0" in out
 		assert "BYTE" not in out  # nothing matched
 
-	def test_bool_and_code_types_mapped(self):
-		# Ghidra emits C99 `bool` and the `code` function-pointer type; neither
-		# parses under MSVC 7.1 /TC (C89).
-		out = ghidra_pseudo_c_normalize("bool bVar1; code *pcVar2;")
-		assert "int bVar1" in out
-		assert "void *pcVar2" in out
-		assert "bool" not in out and "code" not in out
-
-	def test_strips_xapilib_namespace(self):
+	def test_strips_xapilib_namespace_example(self):
 		out = ghidra_pseudo_c_normalize("XAPILIB::CloseHandle(h);")
 		assert out == "CloseHandle(h);"
 
-	def test_dat_value_becomes_absolute_deref(self):
-		# Xbox images load at a fixed base, so DAT_<addr> globals are absolute
-		# references with no reloc in target.obj. Rewrite to absolute derefs so
-		# the draft compiles and can match the baked disp32.
-		out = ghidra_pseudo_c_normalize("DAT_00485aa0 = 1;")
-		assert out == "(*(int *)0x00485aa0) = 1;"
-
-	def test_dat_address_of_becomes_pointer_cast(self):
-		# &DAT_x must become a plain pointer cast, not &(*(int *)x).
-		out = ghidra_pseudo_c_normalize("p = &DAT_004618c8;")
-		assert out == "p = ((int *)0x004618c8);"
-
-	def test_dat_underscore_and_ptr_variants(self):
-		# Ghidra's _DAT_ (overlap) and PTR_DAT_ (pointer-at-addr) name variants.
-		assert ghidra_pseudo_c_normalize("_DAT_005107fc = 0;") == "(*(int *)0x005107fc) = 0;"
-		assert ghidra_pseudo_c_normalize("x = PTR_DAT_0043e86c;") == "x = (*(int *)0x0043e86c);"
-
-	def test_c99_bool_literals_mapped(self):
-		out = ghidra_pseudo_c_normalize("bVar1 = true; bVar2 = false;")
-		assert out == "bVar1 = 1; bVar2 = 0;"
-
-	def test_leaves_LAB_references_alone(self):
+	def test_leaves_LAB_references_alone_example(self):
 		# LAB_ are valid local goto labels; leave them untouched.
 		src = "goto LAB_002d0d7c;"
 		assert ghidra_pseudo_c_normalize(src) == src
 
-	def test_preserves_identifiers_that_contain_DAT(self):
+	def test_preserves_identifiers_that_contain_DAT_example(self):
 		# A 6-hex-digit or non-DAT_ token must not be rewritten.
 		src = "int my_DAT_thing = 0; DAT_12ab = 0;"
 		assert ghidra_pseudo_c_normalize(src) == src
 
-	def test_realistic_excerpt(self):
+	def test_realistic_excerpt_example(self):
 		src = """\
 void FUN_002d0cf5(int param_1, undefined4 param_2)
 {
@@ -705,10 +653,12 @@ def _normalize_atom(draw):
 		return f"FUN_{h}", f"fn_{h.upper()}"  # FUN hex is upper-cased
 	if kind == "dat_val":
 		h = draw(_HEX8)
-		return f"DAT_{h}", f"(*(int *)0x{h})"  # DAT hex kept verbatim
+		prefix = draw(st.sampled_from(["", "_", "PTR_"]))  # plain / overlap / pointer-at-addr
+		return f"{prefix}DAT_{h}", f"(*(int *)0x{h})"  # prefix consumed; hex kept verbatim
 	if kind == "dat_addr":
 		h = draw(_HEX8)
-		return f"&DAT_{h}", f"((int *)0x{h})"
+		prefix = draw(st.sampled_from(["", "_", "PTR_"]))
+		return f"&{prefix}DAT_{h}", f"((int *)0x{h})"
 	if kind == "bool":
 		lit = draw(st.sampled_from(["true", "false"]))
 		return lit, ("1" if lit == "true" else "0")

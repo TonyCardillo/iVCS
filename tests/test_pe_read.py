@@ -54,31 +54,17 @@ def _make_pe(image_base: int, sections: list[tuple[str, int, bytes]]) -> bytes:
 
 
 class TestPeImageRead:
-	def test_image_base_parsed(self):
-		pe = pe_image_read(_make_pe(0x00170000, [(".text", 0x1000, b"\xc3")]))
-		assert pe.image_base == 0x00170000
-
-	def test_section_va_is_image_base_plus_rva(self):
-		pe = pe_image_read(_make_pe(0x00170000, [(".text", 0x1000, b"\x90\xc3")]))
-		text = pe.sections[0]
-		assert text.name == ".text"
-		assert text.virtual_address == 0x00171000
-		assert text.raw == b"\x90\xc3"
-
-	def test_multiple_sections(self):
-		pe = pe_image_read(
-			_make_pe(0x10000, [(".text", 0x1000, b"\xc3"), (".data", 0x2000, b"\x01\x02")])
-		)
-		assert [s.name for s in pe.sections] == [".text", ".data"]
-		assert pe.sections[1].virtual_address == 0x12000
-
-	def test_section_at_va_finds_containing_section(self):
+	# Image-base parsing, VA = base + rva, raw bytes, and multiple sections in
+	# order are covered by TestPeImageReadRoundTrip. What stays pins behaviour the
+	# round-trip never exercises: section_at_va containment lookup and the
+	# non-PE rejection.
+	def test_section_at_va_finds_containing_section_example(self):
 		pe = pe_image_read(_make_pe(0x00170000, [(".text", 0x1000, b"\x90" * 0x100)]))
 		found = pe.section_at_va(0x00171050)
 		assert found is not None and found.name == ".text"
 		assert pe.section_at_va(0x00180000) is None
 
-	def test_rejects_non_pe(self):
+	def test_rejects_non_pe_example(self):
 		with pytest.raises(PeReadError):
 			pe_image_read(b"not a pe file at all")
 
