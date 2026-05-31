@@ -8,7 +8,15 @@ exercised in the recon scripts, not here.
 
 from pathlib import Path
 
-from src.compile_tool import CompileOutput, compile_and_view_assembly, compile_error_format
+from hypothesis import given
+from hypothesis import strategies as st
+
+from src.compile_tool import (
+	CompileOutput,
+	compile_and_view_assembly,
+	compile_error_format,
+	function_match_percent,
+)
 from src.objdiff import (
 	SYMBOL_KIND_FUNCTION,
 	DiffInstruction,
@@ -292,3 +300,35 @@ class TestCompileErrorFormat:
 		msg = compile_error_format(out)
 		assert "C2065" in msg
 		assert "kerberos" not in msg.lower()
+
+
+def _function_symbol(name: str, percent: float | None) -> DiffSymbol:
+	return DiffSymbol(name=name, kind=SYMBOL_KIND_FUNCTION, match_percent=percent)
+
+
+class TestFunctionMatchPercent:
+	"""function_match_percent (shared by the agent loop and ghidra_only_run):
+	the target symbol is the diff's left side; the base is the right."""
+
+	_PCT = st.floats(min_value=0.0, max_value=100.0)
+
+	@given(left=_PCT, right=_PCT)
+	def test_left_side_wins_when_symbol_on_both_oracle(self, left, right):
+		# When the same symbol appears on both sides, left (the target) decides.
+		diff = DiffResult(
+			left=DiffSide(symbols=(_function_symbol("fn_x", left),)),
+			right=DiffSide(symbols=(_function_symbol("fn_x", right),)),
+		)
+		assert function_match_percent(diff, "fn_x") == left
+
+	@given(right=_PCT)
+	def test_falls_back_to_right_when_absent_from_left_oracle(self, right):
+		diff = DiffResult(
+			left=DiffSide(symbols=()),
+			right=DiffSide(symbols=(_function_symbol("fn_x", right),)),
+		)
+		assert function_match_percent(diff, "fn_x") == right
+
+	def test_none_when_symbol_on_neither_side_example(self):
+		diff = DiffResult(left=DiffSide(symbols=()), right=DiffSide(symbols=()))
+		assert function_match_percent(diff, "fn_x") is None

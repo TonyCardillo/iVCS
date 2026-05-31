@@ -29,10 +29,6 @@ def _fn(va: int, size: int) -> FunctionEntry:
 	return FunctionEntry(name=f"fn_{va:08X}", va=va, size=size)
 
 
-def _fn(va: int, size: int) -> FunctionEntry:
-	return FunctionEntry(name=f"fn_{va:08X}", va=va, size=size)
-
-
 def _outcome(fn: FunctionEntry, *, matched: bool, source: str = "model") -> RunOutcome:
 	return RunOutcome(
 		va=fn.va,

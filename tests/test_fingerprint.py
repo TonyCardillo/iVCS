@@ -6,6 +6,9 @@ kept, register/immediate identity abstracted). Clusters group equal-hash
 functions; similarity is edit distance over the opcode sequence.
 """
 
+from hypothesis import given
+from hypothesis import strategies as st
+
 from src.fingerprint import (
 	Fingerprint,
 	fingerprint_clusters,
@@ -129,3 +132,85 @@ class TestSimilarTo:
 		names = [fp.name for fp, _ in ranked]
 		assert "q" not in names
 		assert names[0] == "near"
+
+
+# --- Property tests --------------------------------------------------------
+# The example tests above each pin one intent; these assert the laws those
+# examples are arbitrary witnesses of, so codegen/hashing drift is caught.
+
+
+def _mov_eax_imm_ret(imm: int) -> bytes:
+	"""`mov eax, imm32 ; ret` — same skeleton for any immediate."""
+	return b"\xb8" + imm.to_bytes(4, "little") + b"\xc3"
+
+
+_BYTES = st.binary(min_size=0, max_size=48)
+_KEY = {
+	"exact": lambda f: f.exact_hash,
+	"opcode": lambda f: f.opcode_hash,
+	"equiv": lambda f: f.equiv_hash,
+}
+
+
+class TestFingerprintProperties:
+	@given(
+		body=st.binary(min_size=1, max_size=48),
+		va_a=st.integers(0, 2**32 - 1),
+		va_b=st.integers(0, 2**32 - 1),
+	)
+	def test_hashes_depend_only_on_bytes_not_va_or_name_invariant(self, body, va_a, va_b):
+		# Determinism + VA/name independence: the bytes alone decide the hashes.
+		a = function_fingerprint("a", va_a, len(body), body)
+		b = function_fingerprint("b", va_b, len(body), body)
+		assert (a.exact_hash, a.opcode_hash, a.equiv_hash) == (
+			b.exact_hash,
+			b.opcode_hash,
+			b.equiv_hash,
+		)
+
+	@given(imm_a=st.integers(0, 2**32 - 1), imm_b=st.integers(0, 2**32 - 1))
+	def test_immediate_change_preserves_skeleton_metamorphic(self, imm_a, imm_b):
+		# Same opcode skeleton + same operand shape regardless of the immediate;
+		# the raw-byte hash differs iff the immediates differ.
+		a = _fp("a", 0x1000, _mov_eax_imm_ret(imm_a))
+		b = _fp("b", 0x1000, _mov_eax_imm_ret(imm_b))
+		assert a.opcode_hash == b.opcode_hash
+		assert a.equiv_hash == b.equiv_hash
+		assert (a.exact_hash == b.exact_hash) == (imm_a == imm_b)
+
+	@given(n=st.integers(0, 40))
+	def test_opcode_count_equals_instruction_count_invariant(self, n):
+		# n single-byte nops then a ret decode to exactly n+1 instructions.
+		fp = _fp("a", 0x1000, b"\x90" * n + b"\xc3")
+		assert len(fp.opcodes) == n + 1
+
+	@given(
+		bodies=st.lists(st.binary(min_size=1, max_size=24), max_size=12),
+		by=st.sampled_from(["exact", "opcode", "equiv"]),
+	)
+	def test_clusters_partition_input_invariant(self, bodies, by):
+		fps = [_fp(f"f{i}", i * 0x10, b) for i, b in enumerate(bodies)]
+		clusters = fingerprint_clusters(fps, by=by, min_size=1)
+		members = [m for c in clusters for m in c.members]
+		# Every input lands in exactly one cluster (distinct VAs ⇒ compare by VA).
+		assert sorted(m.va for m in members) == sorted(fp.va for fp in fps)
+		# Members of a cluster all share the selecting hash.
+		key = _KEY[by]
+		for c in clusters:
+			assert len({key(m) for m in c.members}) == 1
+		# Largest first, with each cluster's lowest member VA as the tie-break.
+		assert [(-c.size, c.members[0].va) for c in clusters] == sorted(
+			(-c.size, c.members[0].va) for c in clusters
+		)
+
+	@given(a=_BYTES, b=_BYTES)
+	def test_similarity_is_symmetric_commutation(self, a, b):
+		fa, fb = _fp("a", 0x1000, a), _fp("b", 0x2000, b)
+		assert fingerprint_similarity(fa, fb) == fingerprint_similarity(fb, fa)
+
+	@given(body=_BYTES)
+	def test_similarity_reflexive_and_bounded_invariant(self, body):
+		fp = _fp("a", 0x1000, body)
+		assert fingerprint_similarity(fp, fp) == 1.0
+		twin = _fp("b", 0x2000, body)
+		assert 0.0 <= fingerprint_similarity(fp, twin) <= 1.0

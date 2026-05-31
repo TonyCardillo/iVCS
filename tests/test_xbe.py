@@ -771,13 +771,10 @@ class TestEnumerateFunctions:
 		assert fns == (XbeFunction(name="fn_00011000", va=0x00011000, size=5),)
 
 	def test_back_to_back_not_split_when_no_prologue(self):
-		# Two consecutive `ret` instructions with no padding and no prologue
-		# after. The first ret is not a boundary (treated as early return).
-		text = b"\xc3\x90\x90" + FN_LEAF_RET0  # one early ret, then padding, then leaf
-		# Actually: the early ret IS followed by padding (0x90), so it IS a
-		# boundary. Construct a cleaner case: ret, then another non-prologue
-		# instruction that itself ends in ret with padding.
-		text = b"\xc3" + b"\x33\xc0\xc3" + b"\xcc"  # ret; xor eax,eax; ret; pad
+		# ret; xor eax,eax; ret; pad. The first ret is followed by a non-prologue
+		# instruction (`xor eax,eax`), not padding or a prologue, so it does not
+		# close the function — the whole run stays one function.
+		text = b"\xc3" + b"\x33\xc0\xc3" + b"\xcc"
 		parsed = xbe_parse(
 			build_minimal_xbe(
 				base_addr=0x00010000,

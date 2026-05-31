@@ -1,7 +1,11 @@
 """Tests for the few pure helpers in scripts/webui.py."""
 
+import re
 import sys
 from pathlib import Path
+
+from hypothesis import assume, given
+from hypothesis import strategies as st
 
 # Make scripts/ importable without installing it
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
@@ -12,7 +16,9 @@ from webui import (  # noqa: E402
 	_best_attempt,
 	_handle_notes_save,
 	_handle_symbol_rename,
+	_pager_window,
 	_path_query_suffix,
+	_progress_bar,
 	_project_crumb,
 	_run_action_bar,
 	_run_interrupted,
@@ -243,3 +249,43 @@ def test_handle_notes_save_writes_notes(tmp_path):
 	redirect = _handle_notes_save({"root": str(root), "path": "", "notes": "thiscall in ecx"})
 	assert notes_load(root) == "thiscall in ecx"
 	assert redirect.startswith("/decomp/run?root=")
+
+
+# --- Property tests for the pure rendering helpers --------------------------
+# These take untrusted/derived numeric input (a match percent, a page number)
+# and must never produce a malformed bar / out-of-range pager, whatever the
+# input.
+
+
+class TestProgressBar:
+	@given(
+		value=st.one_of(
+			st.none(),
+			st.floats(allow_nan=False, allow_infinity=False, min_value=-1e6, max_value=1e6),
+		)
+	)
+	def test_fill_width_is_clamped_to_0_100_invariant(self, value):
+		# The CSS width is always a real percentage, even for None/negative/>100.
+		width = float(re.search(r"width:\s*([\d.]+)%", _progress_bar(value)).group(1))
+		assert 0.0 <= width <= 100.0
+
+
+class TestPagerWindow:
+	@given(
+		total_pages=st.integers(min_value=1, max_value=500),
+		page=st.integers(min_value=1, max_value=500),
+		radius=st.integers(min_value=0, max_value=6),
+	)
+	def test_window_is_sorted_bounded_and_centered_invariant(self, total_pages, page, radius):
+		assume(page <= total_pages)
+		window = _pager_window(page, total_pages, radius)
+		# Strictly increasing (it is a sorted set) and every page is in range.
+		assert window == sorted(set(window))
+		assert all(1 <= p <= total_pages for p in window)
+		# Always shows the ends and the current page.
+		assert {1, total_pages, page} <= set(window)
+		# Complete around the cursor: every in-range page within radius is present.
+		expected_near = {
+			p for p in range(page - radius, page + radius + 1) if 1 <= p <= total_pages
+		}
+		assert expected_near <= set(window)

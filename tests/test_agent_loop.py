@@ -9,9 +9,14 @@ functions, so no Wine / cl.exe / objdiff-cli are needed.
 import json
 from pathlib import Path
 
+from hypothesis import given
+from hypothesis import strategies as st
+
 from src.agent_loop import (
+	COMPILE_TOOL_NAME,
 	AgentConfig,
 	FakeLLMClient,
+	_extract_c_code,
 	agent_loop_run,
 	assistant_text,
 	assistant_tool_call,
@@ -590,3 +595,25 @@ class TestToollessResponse:
 		)
 		assert result.success is False
 		assert result.termination_reason == "llm_no_progress"
+
+
+class TestExtractCCode:
+	# Code with no fence delimiters and no surrounding whitespace, so the two
+	# encodings carry exactly the same payload.
+	_code = (
+		st.text(alphabet=st.characters(blacklist_characters="`"), max_size=200)
+		.map(str.strip)
+		.filter(bool)
+	)
+
+	@given(code=_code)
+	def test_tool_call_and_fence_extract_the_same_code_oracle(self, code):
+		# The same C, whether submitted as a tool call or as a ```c fence in
+		# prose, must extract identically (the tool-call path is the oracle).
+		via_tool = _extract_c_code(assistant_tool_call(COMPILE_TOOL_NAME, {"c_code": code}))
+		via_fence = _extract_c_code(assistant_text(f"```c\n{code}\n```"))
+		assert via_tool == via_fence == code
+
+	@given(prose=st.text(alphabet=st.characters(blacklist_characters="`"), max_size=200))
+	def test_returns_none_without_tool_call_or_fence_invariant(self, prose):
+		assert _extract_c_code(assistant_text(prose)) is None

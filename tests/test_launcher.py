@@ -412,13 +412,12 @@ class TestKernelImportsInCtxH:
 		assert "NtClose(HANDLE)" in out
 		assert "DbgPrint" in out
 
-	def test_kernel_imports_sorted(self):
-		# Composer trusts caller-provided order; the extractor produces
-		# sorted tuples, so the rendered block is sorted too.
-		out = _compose_ctx_h("fn_X", "_fn_X", (), ("DbgPrint", "NtClose"))
-		d_pos = out.index("DbgPrint")
-		n_pos = out.index("NtClose")
-		assert d_pos < n_pos
+	def test_kernel_imports_render_in_caller_order(self):
+		# The composer preserves caller order verbatim — it does NOT sort (that
+		# is _extract_kernel_imports' job). Feeding *reverse*-sorted names proves
+		# it: a sorting composer would flip them, an order-preserving one won't.
+		out = _compose_ctx_h("fn_X", "_fn_X", (), ("NtClose", "DbgPrint"))
+		assert out.index("NtClose") < out.index("DbgPrint")
 
 	def test_no_kernel_imports_section_when_empty(self):
 		out = _compose_ctx_h("fn_X", "_fn_X", (), ())
