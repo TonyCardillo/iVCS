@@ -45,6 +45,7 @@ from src.project import (  # noqa: E402
 	project_aggregate,
 	project_load,
 )
+from src.strings_xref import function_string_refs, string_label_sanitize  # noqa: E402
 from src.sweep import SweepOutcome, sweep_queue, sweep_run  # noqa: E402
 from src.symbols import symbol_map_load, symbol_rename  # noqa: E402
 from src.xbe import (  # noqa: E402
@@ -530,6 +531,20 @@ pre.code {
 
 .rename-form, .notes-form { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 6px 0; }
 .rename-form input[type=text] { width: 260px; }
+.string-hints { margin: 4px 0 10px 0; }
+.hint-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; align-items: center; }
+.hint-form { display: inline; margin: 0; }
+button.hint {
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--fg);
+  font-family: inherit;
+  font-size: 11px;
+  padding: 3px 8px;
+  cursor: pointer;
+}
+button.hint:hover { border-color: var(--cyan); }
+span.hint { font-size: 11px; padding: 3px 8px; border: 1px dashed var(--line); }
 .notes-form textarea {
   width: 100%; font-family: var(--mono, monospace); font-size: 12px;
   background: var(--bg-dim, #11151c); color: var(--fg); border: 1px solid var(--fg-faint);
@@ -1080,8 +1095,58 @@ def _symbol_notes_panel(root: Path, current_path: str | None) -> str:
   <button type="submit">save notes</button>
 </form>
 """
+	hints = _string_hints_html(root, current_path, va)
 	meta = "display label · machine symbol stays fn_<va>" if va is not None else "notes"
-	return panel("Symbol &amp; notes", rename_form + notes_form, meta=meta)
+	return panel("Symbol &amp; notes", rename_form + hints + notes_form, meta=meta)
+
+
+def _string_hints_html(root: Path, current_path: str | None, va: int | None) -> str:
+	"""Naming hints from the string literals this function references.
+
+	Each sanitizable string becomes a one-click button that adopts it as the
+	display label (POST to /symbol/rename). Binary-derived and clean-room — a
+	"quick start" for naming an unknown function from what it prints/asserts.
+	Silent (empty) when there's no project path, no matching function, or no
+	referenced strings.
+	"""
+	if not current_path or va is None:
+		return ""
+	try:
+		project = project_load(current_path)
+		fn = next((f for f in project.functions if f.va == va), None)
+		if fn is None:
+			return ""
+		parsed = xbe_cached_load(str(project.xbe_path))
+		refs = function_string_refs(parsed, fn.va, fn.size)
+	except Exception:  # noqa: BLE001 — hints are best-effort; never break the page
+		return ""
+	if not refs:
+		return ""
+
+	shown, rows = refs[:12], []
+	for s in shown:
+		disp = html.escape(s if len(s) <= 48 else s[:45] + "…")
+		label = string_label_sanitize(s)
+		if label:
+			rows.append(
+				'<form class="hint-form" method="post" action="/symbol/rename">'
+				f'<input type="hidden" name="path" value="{html.escape(current_path)}">'
+				f'<input type="hidden" name="va" value="0x{va:08X}">'
+				f'<input type="hidden" name="root" value="{html.escape(str(root))}">'
+				f'<input type="hidden" name="label" value="{html.escape(label)}">'
+				f'<button type="submit" class="hint" title="adopt: {html.escape(s)}">'
+				f'{disp} → <span class="cyan">{html.escape(label)}</span></button>'
+				"</form>"
+			)
+		else:
+			rows.append(f'<span class="hint muted" title="{html.escape(s)}">{disp}</span>')
+	more = f'<span class="muted tight">+{len(refs) - 12} more</span>' if len(refs) > 12 else ""
+	return (
+		'<div class="string-hints">'
+		'<div class="muted tight">referenced strings — click to adopt as the name:</div>'
+		f'<div class="hint-row">{"".join(rows)}{more}</div>'
+		"</div>"
+	)
 
 
 def view_decomp_run(root_str: str, current_path: str | None) -> str:
