@@ -3,7 +3,7 @@
 
 Targets `_classify` from recon/objdiff-smoke/target.obj (compiled from
 fixture.c by the XDK 5849 VC7.1 toolchain, cl 13.10). Uses Claude Haiku as
-a stand-in for a real local model — same OpenAI-shape tool-call surface
+a stand-in for a real local model; same OpenAI-shape tool-call surface
 that any local LLM endpoint would present.
 
 Prereqs:
@@ -13,7 +13,7 @@ Prereqs:
   - From the project root: `.venv/bin/python scripts/smoke_run.py`
 
 This script intentionally hardcodes the target disassembly rather than
-dumping it dynamically — that's a deliberate scope choice while the
+dumping it dynamically; that's a deliberate scope choice while the
 COFF-to-asm extraction story is still TBD. The disassembly comes from
 `recon/objdiff-smoke/identical.json` which captured it during the
 smoke test.
@@ -55,7 +55,7 @@ CLASSIFY_ASM = """\
 0x15 ret
 """
 
-# Empty for this fixture — no Xbox kernel calls or external types.
+# Empty for this fixture; no Xbox kernel calls or external types.
 CTX_H = "/* no external dependencies for this fixture */\n"
 
 

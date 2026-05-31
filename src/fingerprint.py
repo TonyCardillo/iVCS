@@ -1,12 +1,12 @@
-"""Structural function fingerprints for x86 — a coddog-style codebase index.
+"""Structural function fingerprints for x86; a coddog-style codebase index.
 
 coddog (github.com/ethteck/coddog) finds duplicate and near-duplicate functions
 so one decompilation can cover many; its arch backends are MIPS/PPC/ARM, so this
 ports the *technique* to the Xbox's x86 over the Capstone disassembler iVCS
 already carries. Each function gets three hashes, mirroring coddog's Symbol:
 
-  - exact_hash : the raw bytes — byte-identical functions
-  - opcode_hash: the Capstone instruction-id sequence, operands stripped — the
+  - exact_hash : the raw bytes; byte-identical functions
+  - opcode_hash: the Capstone instruction-id sequence, operands stripped; the
                  same instruction skeleton regardless of registers/immediates
   - equiv_hash : opcode ids plus operand *types* (reg/imm/mem), so register and
                  immediate identity is abstracted but operand shape is kept

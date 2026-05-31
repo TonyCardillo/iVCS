@@ -200,7 +200,7 @@ def xbe_functions_enumerate(parsed: ParsedXbe) -> tuple[XbeFunction, ...]:
 	detected function. Names follow `fn_VVVVVVVV` (8 hex digits uppercase).
 
 	Two-pass per section. First, disassemble the whole section and record every
-	direct `call` target that lands within it — each is a guaranteed function
+	direct `call` target that lands within it; each is a guaranteed function
 	start. Second, walk the instruction stream and split functions at three
 	signals, so that endings other than `ret` (tail-call `jmp`, `noreturn` calls)
 	don't merge the following function in. The signals:
@@ -208,7 +208,7 @@ def xbe_functions_enumerate(parsed: ParsedXbe) -> tuple[XbeFunction, ...]:
 	1. a `ret` closes the function iff the byte after it is padding (0xCC/0x90),
 	the section ends, the next instruction is a recognized MSVC /O2 prologue, or
 	its VA is a call target;
-	2. reaching a call-target VA mid-function closes the previous function — a
+	2. reaching a call-target VA mid-function closes the previous function; a
 	directly-called entry cannot lie inside another function;
 	3. an `int3` run that leads into a prologue or call-target closes the current
 	function (int3 is never intra-function padding under /O2, unlike `nop`).
@@ -328,7 +328,7 @@ def _int3_run_is_boundary(
 	int3 is reliable inter-function padding (you never `__debugbreak` twice, and
 	intra-function alignment uses `nop`). A lone int3 is ambiguous, so it counts
 	only when the following non-padding instruction is itself a new-function
-	start — a directly-called entry or a recognized prologue — or the section ends.
+	start; a directly-called entry or a recognized prologue; or the section ends.
 	"""
 	run = 0
 	j = idx

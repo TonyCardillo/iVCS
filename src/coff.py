@@ -102,7 +102,7 @@ def coff_absolute_symbols_build(symbols: dict[str, int]) -> bytes:
 	"""A sectionless COFF/i386 object defining each name as an absolute symbol.
 
 	The real-relink path (Phase 4b) feeds this to Link.Exe so the linker resolves
-	a function's REL32/DIR32 externals — other functions' VAs, kernel thunk slots —
+	a function's REL32/DIR32 externals; other functions' VAs, kernel thunk slots -
 	to fixed image addresses, exactly as they sit in the original image. An
 	`IMAGE_SYM_ABSOLUTE` (section number -1) symbol's value IS its virtual address.
 	"""
@@ -131,13 +131,13 @@ def coff_defined_function_rename(data: bytes, new_name: str) -> bytes:
 	objdiff and the relink oracle pair symbols by name against the canonical
 	`_fn_<VA>`. This lets a matching-decomp attempt keep a readable function name
 	in its C source (CPlayer, XMemAlloc) while the object still exports the name
-	the rest of the pipeline expects — so a correct match counts instead of
+	the rest of the pipeline expects; so a correct match counts instead of
 	scoring zero on a symbol-name mismatch.
 
 	The defined function is the lone symbol with storage class EXTERNAL, a real
 	section, and function type. Returns `data` unchanged when it's already named
 	`new_name`, when the function can't be uniquely identified (zero or several
-	candidates), or when the string-table layout is unexpected — best-effort,
+	candidates), or when the string-table layout is unexpected; best-effort,
 	never raises on a normal object.
 	"""
 	if len(data) < COFF_HEADER_SIZE:

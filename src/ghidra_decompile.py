@@ -320,7 +320,7 @@ def _pseudo_c_dat_rewrite(c: str) -> str:
 	"""Rewrite Ghidra's DAT_<addr> globals to absolute-address references.
 
 	Xbox images load at a fixed base, so a global accessed as DAT_004618c8 is
-	an absolute disp32 in the original — target.obj carries no relocation for
+	an absolute disp32 in the original; target.obj carries no relocation for
 	it. An `extern` decl would emit one (mismatch); an absolute-address deref
 	emits the same baked disp32, so the draft both compiles and can match.
 
@@ -337,7 +337,7 @@ def _pseudo_c_struct_instance_rewrite(c: str, struct_names: tuple[str, ...]) -> 
 
 	Ghidra names a recognized struct instance at a fixed address as
 	`XBE_FILE_HEADER_00010000`. Xbox images load at a fixed base, so that is an
-	absolute reference carrying no reloc — `(*(XBE_FILE_HEADER *)0x00010000)`
+	absolute reference carrying no reloc; `(*(XBE_FILE_HEADER *)0x00010000)`
 	emits the same baked disp32 and lets `.member` resolve against the harvested
 	layout. `&inst` collapses to a plain typed pointer cast.
 
@@ -362,8 +362,8 @@ def _pseudo_c_stdcall_target_rewrite(c: str, name: str) -> str:
 	return, while ctx.h forward-declares a stdcall target as
 	`int __stdcall <name>(...)`. Left as-is the two collide (MSVC C2373 on the
 	modifier, C2371 on the return type) and attempt 0 never compiles. Only the
-	definition header — the `<name>(...)` occurrence immediately followed by
-	`{` — is rewritten; call sites (which end in `;`) are left untouched.
+	definition header; the `<name>(...)` occurrence immediately followed by
+	`{`; is rewritten; call sites (which end in `;`) are left untouched.
 	"""
 	pattern = re.compile(
 		r"(?m)^[A-Za-z_][\w \t\*]*?\b" + re.escape(name) + r"(\s*\([^;{}]*\))(?=\s*\{)"
@@ -487,7 +487,7 @@ def ghidra_pseudo_c_normalize_for_prompt(c: str) -> str:
 	names. Strips XAPILIB:: (C++ namespace doesn't parse as C). Drops the
 	noisy "Globals starting with '_'" warning Ghidra emits.
 
-	Keeps `undefined4`/`byte`/etc. unchanged — those are the LLM's signal
+	Keeps `undefined4`/`byte`/etc. unchanged; those are the LLM's signal
 	that Ghidra was uncertain about the type.
 	"""
 	c = _PSEUDO_C_FUN_PATTERN.sub(lambda m: f"fn_{m.group(1).upper()}", c)

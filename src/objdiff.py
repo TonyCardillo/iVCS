@@ -1,9 +1,7 @@
-"""Typed Python wrapper around `objdiff-cli diff`.
+"""Typed wrapper around `objdiff-cli diff`.
 
-Split into a pure parser (objdiff_parse, testable from fixture JSON) and
-a subprocess runner (objdiff_run) so tests stay offline.
-
-We mirror only the diff.proto fields the agent loop consumes. Full schema:
+Pure parser (objdiff_parse) split from the subprocess runner (objdiff_run) so
+tests stay offline. Mirrors only the diff.proto fields the agent loop consumes:
 https://github.com/encounter/objdiff/blob/main/objdiff-core/protos/diff.proto
 """
 

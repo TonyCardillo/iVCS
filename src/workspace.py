@@ -13,8 +13,7 @@ Layout (rooted at workspace.root):
     best.c              ← copy of the highest-match_percent attempt
     result.json         ← final state when the loop exits
 
-This module is purely a path manager — it doesn't compile, doesn't diff,
-doesn't run the loop. Those concerns live in compile_tool.py and
+Purely a path manager; compile/diff/loop live in compile_tool.py and
 agent_loop.py.
 """
 
@@ -69,8 +68,8 @@ class FunctionWorkspace:
 		)
 
 	def attempt_model_path(self, n: int) -> Path:
-		"""Sidecar naming the model that produced attempt `n` — lets multiple
-		models attack one function while we still know which AI made each try."""
+		"""Sidecar naming the model that produced attempt `n`, so multiple models
+		can attack one function and we still know which made each try."""
 		if n < 0:
 			raise ValueError(f"attempt number must be >= 0, got {n}")
 		return self.history_dir / f"{n:04d}.model"

@@ -1,21 +1,15 @@
-"""Place one compiled function's bytes at a virtual address — a one-function linker.
+"""Place one compiled function's bytes at a virtual address; a one-function linker.
 
-Reads a parsed compiled object (`coff_read`), resolves each relocation's target
-symbol to a virtual address, and patches the field so the bytes are correct *at
-the VA the function actually occupies in the image*. This is what lets the
-whole-image splice verifier byte-compare compiled output against the original:
-the per-function objdiff is relocation-aware and masks these fields, so they are
-exactly the bytes that must be reconstructed to catch a wrong target address.
+Patches each relocation field so the bytes are correct at the VA the function
+occupies, reconstructing exactly the fields objdiff masks; so the splice
+verifier catches a wrong target address.
 
-Symbol resolution:
-  - A symbol defined in this object (section_number >= 1) sits at
-    `placement_va + value` — the function symbol itself and `.text`-relative
-    local branches. These are placement-relative and need no external lookup.
-  - An external symbol (section_number 0) is handed to the caller's `resolve`,
-    which decodes the target VA from the synthesized name (`_fn_<va>`,
-    `_data_<va>`, `__imp__<export>`).
+Symbol resolution: defined symbols (section_number >= 1) sit at
+`placement_va + value`; externals (section_number 0) go to the caller's `resolve`,
+which decodes the VA from the synthesized name (`_fn_<va>`, `_data_<va>`,
+`__imp__<export>`).
 
-Patch math (A = signed addend already in the field, P = placement_va + offset):
+Patch math (A = addend in the field, P = placement_va + offset):
   - REL32: field = (S + A) - (P + 4)
   - DIR32: field = (S + A)
 """

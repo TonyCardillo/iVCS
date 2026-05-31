@@ -1,14 +1,9 @@
-"""Drive XDK 5849's Link.Exe under Wine — the real-relink half of whole-image verify.
+"""Drive XDK 5849's Link.Exe under Wine; the real-relink half of whole-image verify.
 
-The byte-splice verifier (integrator Phase 4a) places each function with our own
-one-function relocator. This module is the path to proving a match with the
-*real* linker: feed the committed `.obj` files to Link.Exe and let it produce a
-candidate image, which a section-level diff then compares against the original.
-
-Producing a bootable XBE (headers, certificate, XOR'd fields) is out of scope;
-verification stays at the section-bytes level. `link_argv` is pure and tested;
-`default_link_fn` binds it to the real binary via the same IVCS_* environment
-variables `compile_tool` documents.
+The independent cross-check for integrator Phase 4a: link committed `.obj`s into a
+candidate image for a section-level diff against the original. Verification stays
+at the section-bytes level; a bootable XBE is out of scope. `link_argv` is pure;
+`default_link_fn` binds it to the binary via the same IVCS_* vars as compile_tool.
 """
 
 import os
@@ -38,10 +33,9 @@ def link_argv(
 ) -> list[str]:
 	"""Build the Link.Exe command line.
 
-	Defaults produce a fixed-base, CRT-free resource DLL (`/DLL /NOENTRY
-	/NODEFAULTLIB /FIXED`) so a relocatable section can be linked and its bytes
-	extracted without dragging in startup code. An explicit `entry` swaps
-	`/NOENTRY` for `/ENTRY:<symbol>`. All paths are already Windows-form.
+	Defaults to a fixed-base, CRT-free DLL (`/DLL /NOENTRY /NODEFAULTLIB /FIXED`)
+	so a section links and its bytes extract without startup code. Paths are
+	already Windows-form.
 	"""
 	argv = [link_exe, "/nologo", "/DLL", "/NODEFAULTLIB", "/FIXED"]
 	argv.append("/NOENTRY" if entry is None else f"/ENTRY:{entry}")
@@ -60,10 +54,9 @@ def default_link_fn(
 	entry: str | None = None,
 	extra_flags: tuple[str, ...] = (),
 ) -> LinkOutput:
-	"""Spawn XDK 5849's Link.Exe 7.10.3077 under Wine to link `objs` → `out_path`.
+	"""Link `objs` → `out_path` via Link.Exe 7.10.3077 under Wine.
 
-	IVCS_MSVC_DIR (default <repo>/compilers/xdk5849-vc71) and IVCS_WINE (default
-	"wine") override the toolchain location, matching `default_compile_fn`.
+	IVCS_MSVC_DIR and IVCS_WINE override the toolchain, matching default_compile_fn.
 	"""
 	default_msvc_dir = Path(__file__).parent.parent / "compilers" / "xdk5849-vc71"
 	msvc_dir = Path(os.environ.get("IVCS_MSVC_DIR", str(default_msvc_dir)))

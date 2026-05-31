@@ -3,7 +3,7 @@
 Built for a slow, free local model (LM Studio). The scarcest resource is model
 attempts, so the queue is **cluster-aware**: byte-identical functions are solved
 once via a representative and the solution is propagated to its twins, never
-re-derived. Ordering is smallest-first — a weak model succeeds most reliably on
+re-derived. Ordering is smallest-first; a weak model succeeds most reliably on
 small leaves, so you wake up to the largest number of verified matches.
 
 Resume is implicit: already-matched functions are skipped, so re-running the
@@ -26,7 +26,7 @@ from src.workspace import FunctionWorkspace
 class QueueItem:
 	"""One unit of overnight work: a function to solve, plus the byte-identical
 	twins its solution should propagate to. `already_matched` marks a resume
-	case — the representative was solved a prior night, so skip the model and go
+	case; the representative was solved a prior night, so skip the model and go
 	straight to propagating its existing solution to the still-open twins."""
 
 	fn: FunctionEntry
@@ -47,7 +47,7 @@ def batch_queue(
 	Excludes SDK functions and already-matched ones. Byte-identical functions
 	(same exact hash) collapse to their lowest-VA representative; the others
 	ride along as `twins`. A representative that's already matched but still has
-	open twins becomes a propagation-only item (sorted first — it's free work).
+	open twins becomes a propagation-only item (sorted first; it's free work).
 	"""
 	by_va = {fn.va: fn for fn in functions}
 
@@ -160,7 +160,7 @@ def batch_run(
 def _rename_to_twin(source: str, rep_va: int, twin_va: int) -> str:
 	"""Rewrite the representative's defined function to the twin's canonical name.
 
-	A leaf's solution names its function after the representative's address — but
+	A leaf's solution names its function after the representative's address; but
 	the prefix and case vary by origin (`fn_00175F40` from the agent/normalizer,
 	`FUN_00175f40` from a raw Ghidra draft). We rewrite any such token to the
 	twin's canonical `fn_<TWIN_VA>` so the compiled symbol is `_fn_<twin_va>` and
@@ -172,7 +172,7 @@ def _rename_to_twin(source: str, rep_va: int, twin_va: int) -> str:
 
 
 def _flagged(twin: FunctionEntry, reason: str) -> RunOutcome:
-	"""A twin we couldn't (or wouldn't) auto-finish — left for manual follow-up."""
+	"""A twin we couldn't (or wouldn't) auto-finish; left for manual follow-up."""
 	return RunOutcome(
 		va=twin.va,
 		name=twin.name,
@@ -214,7 +214,7 @@ def propagate_to_twins(
 ) -> list[RunOutcome]:
 	"""Carry a matched representative's solution to its byte-identical twins.
 
-	Only *leaf* twins (no calls / no data refs — propagation is a pure function
+	Only *leaf* twins (no calls / no data refs; propagation is a pure function
 	rename) are auto-finished, and only after a real recompile + diff confirms
 	100%. Everything else is flagged for manual follow-up. No model is used, and
 	nothing is claimed that the diff didn't verify.
@@ -225,7 +225,7 @@ def propagate_to_twins(
 			outcomes.append(_flagged(twin, "representative has no saved solution"))
 			continue
 		if not is_leaf(twin):
-			outcomes.append(_flagged(twin, "non-leaf twin — needs manual decomp"))
+			outcomes.append(_flagged(twin, "non-leaf twin; needs manual decomp"))
 			continue
 
 		workspace = prepare(twin)

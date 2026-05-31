@@ -4,13 +4,13 @@ The XDK static libraries are the exact SDK code a title linked, so most of an
 image's "SDK" functions are near-copies of a library object. We fingerprint each
 library function and look the game's functions up against that signature DB,
 recovering names for the SDK portion and leaving the game-specific code as the
-real decompilation target — the FLIRT / signature-database idea, reusing the
+real decompilation target; the FLIRT / signature-database idea, reusing the
 coddog-style fingerprint index.
 
 Matching is on the **relocation-invariant** hashes (opcode skeleton and operand
 shape), never raw bytes: the linker patches a function's call targets and
 absolute addresses when it places it in the image, so the game's bytes differ
-from the library object's — but the opcodes and operand types are identical.
+from the library object's; but the opcodes and operand types are identical.
 
 Functions are located by symbol type (`IMAGE_SYM_TYPE_FUNCTION`), not section
 name, because library code sections are not always called `.text` (d3d8 uses
@@ -68,7 +68,7 @@ def library_signatures(archive_bytes: bytes) -> list[LibrarySignature]:
 	"""Fingerprint every function in an `!<arch>` static library.
 
 	Members that don't parse as COFF (import descriptors, e.g. xboxkrnl.lib) are
-	skipped — those are resolved through the kernel thunk table, not matched here.
+	skipped; those are resolved through the kernel thunk table, not matched here.
 	"""
 	sigs: list[LibrarySignature] = []
 	for member in archive_members(archive_bytes):
@@ -125,7 +125,7 @@ def match_fingerprints(
 	"""Match game function fingerprints against the library signature index.
 
 	Prefers an operand-shape (`equiv`) match; falls back to the opcode skeleton.
-	Functions smaller than `min_size` bytes are skipped — their skeletons collide
+	Functions smaller than `min_size` bytes are skipped; their skeletons collide
 	with hundreds of unrelated stubs, so a match would be meaningless.
 	"""
 	matches: list[LibMatch] = []

@@ -1,14 +1,8 @@
-"""Read a Microsoft COFF/i386 object back into its constituent parts.
+"""Read a Microsoft COFF/i386 object into sections, relocs, and symbols.
 
-The inverse of `coff.py`. The whole-image splice verifier needs a function's
-compiled machine code, its relocation records, and its symbol table pulled out
-of a `.obj` so it can place the bytes at the function's real virtual address
-and byte-compare against the original image. objdiff does its comparison inside
-the Rust binary, so there is no other reader to lean on.
-
-Only the subset iVCS produces and `cl.exe` emits for one function is modeled:
-i386 objects, short/long symbol names, `IMAGE_REL_I386_{REL32,DIR32}`, and
-section symbols with one aux record. Line numbers are ignored.
+The inverse of `coff.py`, feeding the splice verifier. Models only the subset
+iVCS and `cl.exe` emit for one function: i386, short/long names,
+`IMAGE_REL_I386_{REL32,DIR32}`, section symbols with one aux record.
 """
 
 import struct

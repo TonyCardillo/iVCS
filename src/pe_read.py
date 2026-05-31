@@ -1,11 +1,8 @@
-"""Minimal reader for a linked PE32 image — just enough to extract section bytes.
+"""Minimal PE32 reader; just enough to extract laid-out section bytes.
 
-The real-relink path (Phase 4b) links committed objects with Link.Exe into a
-PE/DLL and needs the laid-out section bytes back, at their virtual addresses, to
-byte-compare against the original XBE section. Only what that requires is
-modelled: the DOS stub's `e_lfanew`, the PE signature, the COFF file header, the
-PE32 optional header's `ImageBase`, and the section table. Data directories,
-imports, and relocations are ignored.
+The real-relink path (Phase 4b) needs Link.Exe's section bytes back at their VAs
+to diff against the original XBE. Models only `e_lfanew`, the PE signature, the
+COFF header, the optional header's `ImageBase`, and the section table.
 """
 
 import struct

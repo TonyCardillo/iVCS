@@ -9,7 +9,7 @@ Supported kinds:
   - DIR32: call/jmp dword ptr [disp32] (FF 15 / FF 25 + imm32)
 
 DIR32 sites that target a kernel thunk-table slot resolve to the
-`__imp__<mangled>` symbol — matching what MSVC emits for
+`__imp__<mangled>` symbol; matching what MSVC emits for
 `__declspec(dllimport) __stdcall` calls. Other DIR32 sites fall back to
 `data_*` / `sub_*` like REL32 does.
 
@@ -151,7 +151,7 @@ def _site_from_branch(instr, function_va: int, function_end: int) -> RelocSite |
 		imm_offset = (instr.address + instr.size - 4) - function_va
 		return RelocSite(imm_offset=imm_offset, kind=RelocKind.REL32, target_va=target)
 
-	# DIR32: FF 15 / FF 25 — call/jmp dword ptr [disp32]; disp is an absolute VA.
+	# DIR32: FF 15 / FF 25; call/jmp dword ptr [disp32]; disp is an absolute VA.
 	if (
 		op.type == capstone.x86.X86_OP_MEM
 		and instr.size == 6

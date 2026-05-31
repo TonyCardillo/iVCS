@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Overnight batch decompiler — grind the agent loop over a whole project unattended.
+"""Overnight batch decompiler; grind the agent loop over a whole project unattended.
 
 Built for a free local model (LM Studio). Smallest functions first; byte-identical
 duplicates are solved once and the solution is propagated (verified) to its twins,
-never re-derived. Resume is implicit — already-matched functions are skipped — so
+never re-derived. Resume is implicit; already-matched functions are skipped; so
 re-running picks up where it left off.
 
 Usage:
@@ -98,7 +98,7 @@ def _make_run_one(project, parsed, symbols, *, max_iterations: int, timeout: flo
 				reason=result.termination_reason,
 				source="model",
 			)
-		except Exception as e:  # noqa: BLE001 — keep the batch alive
+		except Exception as e:  # noqa: BLE001; keep the batch alive
 			return RunOutcome(
 				va=fn.va,
 				name=fn.name,
@@ -138,7 +138,7 @@ def _make_propagate(project, parsed, symbols):
 				compile_fn=default_compile_fn,
 				diff_fn=default_diff_fn,
 			)
-		except Exception as e:  # noqa: BLE001 — a twin failure shouldn't abort the night
+		except Exception as e:  # noqa: BLE001; a twin failure shouldn't abort the night
 			return [
 				RunOutcome(
 					va=t.va,
@@ -173,7 +173,7 @@ def _make_logger(log_path: Path):
 			f.write(json.dumps(record) + "\n")
 		mark = "✓" if outcome.matched else "·"
 		pct = outcome.best_match_percent
-		best = f"{pct:.1f}%" if pct is not None else "—"
+		best = f"{pct:.1f}%" if pct is not None else "-"
 		sys.stderr.write(
 			f"  {mark} {outcome.name}  {best:>7}  [{outcome.source}] {outcome.reason}\n"
 		)

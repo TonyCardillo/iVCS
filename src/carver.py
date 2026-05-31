@@ -1,8 +1,7 @@
-"""End-to-end XBE→target.obj orchestration.
+"""XBE→target.obj: carve bytes, resolve relocations, synthesize a COFF object.
 
-Thin glue that chains the three slices: carve the function bytes, discover
-and resolve relocations, synthesize a COFF object. The result is bytes; the
-caller decides where it lands (typically `FunctionWorkspace.target_obj`).
+Returns bytes; the caller decides where they land (usually
+`FunctionWorkspace.target_obj`).
 """
 
 from src.coff import coff_object_build

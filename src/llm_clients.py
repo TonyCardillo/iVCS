@@ -1,7 +1,7 @@
 """LiteLLM-backed LLMClient: pure shape translator from ModelResponse to
 the OpenAI tool-call dict shape agent_loop_run expects.
 
-Works against any provider LiteLLM supports — local OpenAI-compatible
+Works against any provider LiteLLM supports; local OpenAI-compatible
 servers (LM Studio, Ollama, vLLM) via api_base, or cloud providers like
 Anthropic via api_key. Loop policy lives in src/agent_loop.py.
 """
@@ -29,7 +29,7 @@ def _lm_studio_detect_loaded_model() -> str | None:
 	"""Ask the LM Studio server which model is actually loaded.
 
 	Returns the first non-embedding model id from `/models`, or None if the
-	server is unreachable — so we name the real AI rather than a guessed default.
+	server is unreachable; so we name the real AI rather than a guessed default.
 	"""
 	try:
 		# noqa justified: always the http(s) LM Studio API base from env/default,
