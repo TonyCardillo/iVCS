@@ -24,9 +24,8 @@ SECTION_FLAG_INSERTED_FILE = 0x00000008
 SECTION_FLAG_HEAD_PAGE_RO = 0x00000010
 SECTION_FLAG_TAIL_PAGE_RO = 0x00000020
 
-# Per-build XOR keys. Entry-point and kernel-thunk addresses use DIFFERENT
-# keys; the pairing is fixed by build flavor. Verified against Cxbx-Reloaded
-# and Halo 2 retail default.xbe (entry=0x002D0AEE, thunk=0x00411520).
+# EP and KT use different keys, paired by build flavor. Verified against
+# Cxbx-Reloaded and Halo 2 retail default.xbe (entry=0x002D0AEE, thunk=0x00411520).
 XBE_EP_KEY_RETAIL = 0xA8FC57AB
 XBE_EP_KEY_DEBUG = 0x94859D4B
 XBE_EP_KEY_CHIHIRO = 0x40B5C16E
@@ -144,8 +143,7 @@ def xbe_function_carve(parsed: ParsedXbe, virtual_address: int, size: int) -> by
 			f"(flags={section.flags:#x})"
 		)
 
-	# virtual_size may exceed raw_size for BSS-style zero-fill tails; carving
-	# past raw bytes would read zeros that aren't really code.
+	# virtual_size can exceed raw_size (BSS zero-fill tail); carving past raw bytes reads non-code zeros.
 	offset = virtual_address - section.virtual_address
 	if offset + size > section.raw_size:
 		raise XbeFormatError(
@@ -183,15 +181,10 @@ def xbe_load(path: Path | str) -> ParsedXbe:
 
 
 # Function enumeration ──────────────────────────────────────────────────────
-# Padding bytes MSVC emits between functions for alignment. Used to detect
-# function boundaries: a `ret` followed by one of these is the end of a
-# function; a `ret` followed by anything else is an early return.
+# MSVC inter-function alignment padding; a `ret` followed by one marks a boundary.
 FUNCTION_PADDING_BYTES = frozenset({0xCC, 0x90})
 
-# Cap on a single function's size during enumeration. Real MSVC /O2 functions
-# rarely exceed a few hundred bytes; anything past this is almost certainly
-# capstone scanning into data (a jump table, an embedded constant pool, etc.)
-# and we'd rather under-count than emit a 64KB monstrosity.
+# Past this, capstone is almost certainly scanning into data, not code; under-count instead.
 MAX_FUNCTION_SIZE = 16384
 
 
@@ -239,8 +232,7 @@ def xbe_functions_enumerate(parsed: ParsedXbe) -> tuple[XbeFunction, ...]:
 			offset = addr - section_va
 			end_off = offset + size
 
-			# A directly-called entry can't be in the middle of another function:
-			# reaching it closes the previous one and starts a new one here.
+			# A directly-called entry can't lie inside another function: it closes the previous one.
 			if fn_start_off is not None and offset > fn_start_off and addr in call_targets:
 				_maybe_emit(found, section_va, fn_start_off, offset)
 				fn_start_off = offset
@@ -250,10 +242,7 @@ def xbe_functions_enumerate(parsed: ParsedXbe) -> tuple[XbeFunction, ...]:
 					continue
 				fn_start_off = offset
 
-			# An int3 run ends this function — catching tail-jmp / noreturn endings
-			# that never reach a `ret`. A run of two-plus int3 is reliable
-			# inter-function padding; a lone int3 only counts when it leads into a
-			# clear new-function start (could otherwise be a `__debugbreak`).
+			# int3 run closes functions whose body ended in a tail-jmp/noreturn, not a `ret`.
 			if mnem == "int3" and offset > fn_start_off and _int3_run_is_boundary(
 				instrs, i, call_targets
 			):

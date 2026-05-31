@@ -75,7 +75,7 @@ def library_signatures(archive_bytes: bytes) -> list[LibrarySignature]:
 		try:
 			obj = coff_object_read(member.data)
 		except (ValueError, IndexError, struct.error):
-			continue  # import descriptors and non-COFF members aren't matchable
+			continue
 		for name, fp in _object_function_fingerprints(obj):
 			sigs.append(LibrarySignature(name, fp.opcode_hash, fp.equiv_hash, fp.size))
 	return sigs
@@ -144,11 +144,9 @@ def match_fingerprints(
 	return matches
 
 
-# --- Persistence: an SDK manifest the coverage report and web UI consume -----
-#
-# Only *confident* (single-name) matches are persisted as the excludable SDK set:
-# excluding a function from the real decomp target must be high-precision, so an
-# ambiguous skeleton-shared match is left out rather than risk hiding game code.
+# Persist only confident (single-name) matches: excluding a function from the
+# real decomp target must be high-precision, so ambiguous matches are dropped
+# rather than risk hiding game code.
 
 
 def sdk_manifest_write(path: Path, matches: list[LibMatch]) -> int:

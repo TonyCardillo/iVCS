@@ -124,7 +124,7 @@ def fingerprint_clusters(
 		for h, members in buckets.items()
 		if len(members) >= min_size
 	]
-	# Largest clusters first; ties broken by the lowest member VA for determinism.
+	# ties broken by lowest member VA for determinism
 	clusters.sort(key=lambda c: (-c.size, c.members[0].va))
 	return clusters
 

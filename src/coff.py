@@ -38,7 +38,7 @@ IMAGE_SYM_CLASS_STATIC = 3
 IMAGE_SYM_TYPE_NULL = 0x0000
 IMAGE_SYM_TYPE_FUNCTION = 0x0020
 
-IMAGE_SYM_ABSOLUTE = -1  # section number for a symbol with an absolute value
+IMAGE_SYM_ABSOLUTE = -1  # section number signalling an absolute-valued symbol
 
 _SHORT_NAME_LEN = 8
 
@@ -147,7 +147,7 @@ def coff_defined_function_rename(data: bytes, new_name: str) -> bytes:
 		return data
 	string_table_start = sym_ptr + sym_count * COFF_SYMBOL_SIZE
 
-	candidates: list[int] = []  # byte offset of each defined-function name field
+	candidates: list[int] = []
 	already_named = False
 	slot = 0
 	while slot < sym_count:
@@ -205,7 +205,6 @@ def _coff_symbol_name_repoint(
 		out += encoded
 		struct.pack_into("<I", out, string_table_start, old_size + len(encoded))
 	else:
-		# No string table yet: create one (size field + the single entry).
 		new_offset = 4
 		out += struct.pack("<I", 4 + len(encoded)) + encoded
 

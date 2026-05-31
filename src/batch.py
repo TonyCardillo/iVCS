@@ -51,14 +51,13 @@ def batch_queue(
 	"""
 	by_va = {fn.va: fn for fn in functions}
 
-	# Map each byte-identical cluster to (representative_va, [twin_va, ...]).
-	rep_of: dict[int, int] = {}  # twin va -> its representative va
-	twins_of: dict[int, list[int]] = {}  # representative va -> twin vas
+	rep_of: dict[int, int] = {}
+	twins_of: dict[int, list[int]] = {}
 	for cluster in fingerprint_clusters(list(fingerprints), by="exact", min_size=2):
 		members = [m.va for m in cluster.members if m.va in by_va]
 		if not members:
 			continue
-		rep_va, *twin_vas = members  # members are VA-sorted → lowest is representative
+		rep_va, *twin_vas = members  # VA-sorted, so lowest is the representative
 		twins_of[rep_va] = twin_vas
 		for tv in twin_vas:
 			rep_of[tv] = rep_va
@@ -73,10 +72,10 @@ def batch_queue(
 		)
 		matched = is_matched(fn.va)
 		if matched and not open_twins:
-			continue  # nothing left to do for this function or its family
+			continue
 		items.append(QueueItem(fn=fn, twins=open_twins, already_matched=matched))
 
-	# Propagation-only items (already matched, free) first; then smallest-first.
+	# Free propagation-only items first, then smallest-first.
 	items.sort(key=lambda i: (not i.already_matched, i.fn.size, i.fn.va))
 	return items
 

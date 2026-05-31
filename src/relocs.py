@@ -43,7 +43,7 @@ class RelocKind(Enum):
 
 @dataclass(frozen=True)
 class RelocSite:
-	imm_offset: int  # byte offset of the imm32 within the carved bytes
+	imm_offset: int  # offset within the carved bytes, not the VA
 	kind: RelocKind
 	target_va: int
 
@@ -116,9 +116,8 @@ def callee_convention_at(parsed: ParsedXbe, target_va: int) -> tuple[str, int]:
 
 
 def reloc_symbol_name(site: RelocSite, parsed: ParsedXbe) -> str:
-	# MSVC mangles cdecl as `_name`; stdcall as `_name@N`. For same-binary
-	# callees we read the callee's bytes to recover N so target.obj's call-site
-	# symbol matches the ctx.h-declared convention (and the call-site codegen).
+	# stdcall mangles as `_name@N`; recover N from the callee's bytes so the
+	# call-site symbol matches ctx.h's declared convention.
 	if site.kind == RelocKind.DIR32:
 		kernel_name = _kernel_import_name_at(site.target_va, parsed)
 		if kernel_name is not None:
@@ -152,8 +151,7 @@ def _site_from_branch(instr, function_va: int, function_end: int) -> RelocSite |
 		imm_offset = (instr.address + instr.size - 4) - function_va
 		return RelocSite(imm_offset=imm_offset, kind=RelocKind.REL32, target_va=target)
 
-	# DIR32: FF 15 / FF 25 — call/jmp dword ptr [disp32]. Size 6, no base or
-	# index register; the disp is an absolute VA.
+	# DIR32: FF 15 / FF 25 — call/jmp dword ptr [disp32]; disp is an absolute VA.
 	if (
 		op.type == capstone.x86.X86_OP_MEM
 		and instr.size == 6
@@ -179,9 +177,8 @@ def relocs_kernel_ordinal_at(target_va: int, parsed: ParsedXbe) -> int | None:
 	except XbeFormatError:
 		return None
 
-	# Halo 2 retail has .rdata flags = PRELOAD|EXECUTABLE, so we can't filter
-	# by section.is_executable here. The IMAGE_ORDINAL_FLAG32 check below
-	# provides the actual safety against treating arbitrary data as a slot.
+	# Can't filter by is_executable: Halo 2 retail marks .rdata EXECUTABLE.
+	# The IMAGE_ORDINAL_FLAG32 check below is the real guard against stray data.
 	section = xbe_section_containing_va(parsed, target_va)
 	if section is None:
 		return None
@@ -232,7 +229,7 @@ def relocs_kernel_import_va_map(parsed: ParsedXbe) -> dict[str, int]:
 			break
 		raw = struct.unpack_from("<I", parsed.data, file_offset)[0]
 		if raw == 0:
-			break  # null terminator ends the table
+			break
 		if not (raw & _IMAGE_ORDINAL_FLAG32):
 			continue
 		ordinal = raw & 0x7FFFFFFF

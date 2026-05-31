@@ -136,9 +136,7 @@ def agent_loop_run(
 	]
 	tools = [_TOOL_SCHEMA]
 
-	# Seed the global best from any prior run on this workspace, so a second AI
-	# attacking the same function never clobbers a stronger solution — and we
-	# keep crediting best.c to the model that actually produced it.
+	# Inherit prior best so a weaker second run can't clobber a stronger best.c.
 	best_match, best_model = _prior_best(workspace)
 	best_c_code: str | None = None
 	start_time = time.monotonic()
@@ -189,8 +187,7 @@ def agent_loop_run(
 		tool_call_id = _tool_call_id(response)
 		rendered = _render_tool_result(result, workspace.function_name)
 		if tool_call_id is None:
-			# Code came from a markdown fence, not a tool call — can't reply
-			# with a tool message (no tool_use to pair with). Use a user msg.
+			# Fence-sourced code has no tool_use to pair a tool message with.
 			messages.append({"role": "user", "content": rendered})
 		else:
 			messages.append(
@@ -272,18 +269,34 @@ def ghidra_only_run(
 	match = function_match_percent(diff, workspace.function_name)
 
 	if match is not None and match >= 100.0:
-		# Surface as a "matched" success so the aggregator counts it.
+		# "matched" so the aggregator counts it. best.c MUST be the normalized
+		# source that actually compiled+matched (attempt 0), NOT the raw Ghidra
+		# draft — the draft has undefined4/DAT_/FUN_ and won't recompile, which
+		# breaks the relink oracle and the source-tree integrator downstream.
 		return _finalize(
 			workspace,
 			"matched",
 			match,
 			0,
-			best_c_code=workspace.ghidra_warmstart.read_text()
-			if workspace.ghidra_warmstart.is_file()
-			else None,
+			best_c_code=_baseline_source_body(workspace),
 			model="ghidra",
 		)
 	return _finalize(workspace, "ghidra_only", match, 0, model="ghidra")
+
+
+def _baseline_source_body(workspace: FunctionWorkspace) -> str | None:
+	"""The compilable C the baseline matched with: attempt 0's source minus the
+	prepended ctx.h preamble. `_mirror_warmstart_as_attempt_zero` writes
+	`0000.c = ctx.h + "\\n" + normalized`, so stripping the ctx.h prefix recovers
+	exactly the normalized body — the right thing to record as best.c."""
+	paths = workspace.attempt_paths(0)
+	if not paths.c.is_file():
+		return None
+	full = paths.c.read_text()
+	ctx = workspace.ctx_h.read_text() if workspace.ctx_h.is_file() else ""
+	if ctx and full.startswith(ctx):
+		return full[len(ctx) :].lstrip("\n")
+	return full
 
 
 def _system_prompt_build(workspace: FunctionWorkspace, target_asm: str) -> str:

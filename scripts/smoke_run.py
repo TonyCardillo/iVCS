@@ -29,7 +29,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-# Make `import src.*` work when running this script directly.
+# Make `import src.*` work when run directly.
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.agent_loop import AgentConfig, agent_loop_run  # noqa: E402
@@ -41,8 +41,7 @@ REPO_ROOT = Path(__file__).parent.parent
 TARGET_OBJ = REPO_ROOT / "recon" / "objdiff-smoke" / "target.obj"
 OBJDIFF_CLI = REPO_ROOT / "recon" / "objdiff-smoke" / "objdiff-cli"
 
-# Disassembly of _classify captured during recon/objdiff-smoke/.
-# The function signature was: int classify(int x) { ... }
+# Disassembly of _classify captured during recon/objdiff-smoke/; src was `int classify(int x)`.
 CLASSIFY_ASM = """\
 0x00 mov   eax, [esp+0x4]
 0x04 test  eax, eax

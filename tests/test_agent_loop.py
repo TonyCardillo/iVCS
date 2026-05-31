@@ -560,6 +560,25 @@ class TestGhidraOnlyRun:
 		assert result.termination_reason == "matched"
 		assert ws.best_c.is_file()
 
+	def test_best_c_is_normalized_source_not_raw_draft(self, tmp_path):
+		# The bug: best.c was saved from the raw Ghidra draft (undefined4/FUN_/DAT_,
+		# won't recompile) instead of the normalized 0000.c that actually matched.
+		# best.c must be attempt-0's source minus the ctx.h preamble.
+		ws = _make_workspace(tmp_path, fn_name="_fn_003808BE")
+		ctx = ws.ctx_h.read_text()
+		normalized = "void fn_003808BE(USHORT *p, USHORT v)\n{\n  *p = *p | v;\n}\n"
+		ws.attempt_paths(0).c.write_text(ctx + "\n" + normalized)
+		ws.ghidra_warmstart.write_text(
+			"undefined4 __fastcall FUN_003808be(ushort *param_1)\n{\n  return DAT_00480118;\n}\n"
+		)
+		result = ghidra_only_run(
+			workspace=ws, compile_fn=_compile_ok, diff_fn=_scripted_diff(100.0)
+		)
+		assert result.success is True
+		best = ws.best_c.read_text()
+		assert best == normalized
+		assert "undefined4" not in best and "FUN_" not in best and "DAT_" not in best
+
 
 class TestToollessResponse:
 	def test_text_only_with_c_block_is_treated_as_tool_call(self, tmp_path):

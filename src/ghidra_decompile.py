@@ -302,7 +302,7 @@ _PSEUDO_C_TYPE_MAP = {
 	"longlong": "__int64",
 	"ulonglong": "ULONGLONG",
 	"bool": "int",  # Ghidra emits C99 bool; MSVC 7.1 /TC is C89
-	"code": "void",  # Ghidra's `code *` function-pointer element type
+	"code": "void",  # Ghidra's function-pointer element type
 }
 
 _PSEUDO_C_TYPE_PATTERN = re.compile(
@@ -418,7 +418,7 @@ def _pad_call_args(c: str, name: str, arity: int) -> str:
 			pad = ", ".join(["0"] * (arity - n))
 			args = pad if n == 0 else f"{args.rstrip()}, {pad}"
 		out.append(args)
-		out.append(c[j : j + 1])  # the ')'
+		out.append(c[j : j + 1])
 		i = j + 1
 	return "".join(out)
 

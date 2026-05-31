@@ -182,7 +182,6 @@ def _find_first_ff15_into_thunk_table(parsed, text_section, thunk_va: int):
 			disp = _struct.unpack_from("<I", text_bytes, i + 2)[0]
 			if thunk_va <= disp < thunk_end and (disp - thunk_va) % 4 == 0:
 				call_va = base_va + i
-				# Read the ordinal from the .rdata thunk slot
 				rdata_sec = xbe_section_containing_va(parsed, disp)
 				file_off = rdata_sec.raw_address + (disp - rdata_sec.virtual_address)
 				raw = _struct.unpack_from("<I", parsed.data, file_off)[0]
