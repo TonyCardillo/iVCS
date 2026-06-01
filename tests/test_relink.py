@@ -4,9 +4,9 @@ import struct
 
 import pytest
 
-from src.coff import IMAGE_REL_I386_DIR32, IMAGE_REL_I386_REL32, IMAGE_SYM_CLASS_STATIC
-from src.coff_read import CoffObject, CoffReloc, CoffSection, CoffSymbol
-from src.relink import RelinkError, relink_place
+from src.formats.coff import IMAGE_REL_I386_DIR32, IMAGE_REL_I386_REL32, IMAGE_SYM_CLASS_STATIC
+from src.formats.coff_read import CoffObject, CoffReloc, CoffSection, CoffSymbol
+from src.verify.relink import RelinkError, relink_place
 
 
 def _obj(text: bytes, relocs, symbols_by_slot) -> CoffObject:

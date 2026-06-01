@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from src.notes import notes_load, notes_save
+from src.analysis.notes import notes_load, notes_save
 
 
 class TestNotes:

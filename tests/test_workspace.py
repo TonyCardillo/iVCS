@@ -8,7 +8,7 @@ the directory-creation behavior.
 
 import pytest
 
-from src.workspace import FunctionWorkspace
+from src.core.workspace import FunctionWorkspace
 
 
 class TestPaths:

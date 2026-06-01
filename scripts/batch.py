@@ -37,23 +37,23 @@ _BUNDLED_OBJDIFF = REPO_ROOT / "recon" / "objdiff-smoke" / "objdiff-cli"
 if "IVCS_OBJDIFF_CLI" not in os.environ and _BUNDLED_OBJDIFF.is_file():
 	os.environ["IVCS_OBJDIFF_CLI"] = str(_BUNDLED_OBJDIFF)
 
-from src.agent_loop import AgentConfig, agent_loop_run  # noqa: E402
-from src.batch import (  # noqa: E402
+from src.analysis.fingerprint import project_fingerprints  # noqa: E402
+from src.analysis.libmatch import sdk_manifest_load  # noqa: E402
+from src.analysis.symbols import symbol_map_load  # noqa: E402
+from src.core.project import FunctionEntry, function_status, project_load  # noqa: E402
+from src.decomp.agent_loop import AgentConfig, agent_loop_run  # noqa: E402
+from src.decomp.compile_tool import default_compile_fn, default_diff_fn  # noqa: E402
+from src.decomp.llm_clients import llm_client_for, llm_recorded_model  # noqa: E402
+from src.drivers.batch import (  # noqa: E402
 	QueueItem,
 	RunOutcome,
 	batch_queue,
 	batch_run,
 	propagate_to_twins,
 )
-from src.compile_tool import default_compile_fn, default_diff_fn  # noqa: E402
-from src.fingerprint import project_fingerprints  # noqa: E402
-from src.launcher import prepare_decomp_workspace  # noqa: E402
-from src.libmatch import sdk_manifest_load  # noqa: E402
-from src.llm_clients import llm_client_for, llm_recorded_model  # noqa: E402
-from src.project import FunctionEntry, function_status, project_load  # noqa: E402
-from src.relocs import relocs_discover  # noqa: E402
-from src.symbols import symbol_map_load  # noqa: E402
-from src.xbe import xbe_function_carve, xbe_load  # noqa: E402
+from src.drivers.launcher import prepare_decomp_workspace  # noqa: E402
+from src.formats.relocs import relocs_discover  # noqa: E402
+from src.formats.xbe import xbe_function_carve, xbe_load  # noqa: E402
 
 
 def _sdk_vas_for(project_path: Path) -> frozenset[int]:

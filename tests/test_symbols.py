@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from src.symbols import (
+from src.analysis.symbols import (
 	SymbolMap,
 	symbol_map_load,
 	symbol_rename,

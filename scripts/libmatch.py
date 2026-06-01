@@ -20,15 +20,15 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
-from src.fingerprint import project_fingerprints  # noqa: E402
-from src.libmatch import (  # noqa: E402
+from src.analysis.fingerprint import project_fingerprints  # noqa: E402
+from src.analysis.libmatch import (  # noqa: E402
 	library_signatures,
 	match_fingerprints,
 	sdk_manifest_write,
 	signature_index,
 )
-from src.project import project_load  # noqa: E402
-from src.xbe import xbe_load  # noqa: E402
+from src.core.project import project_load  # noqa: E402
+from src.formats.xbe import xbe_load  # noqa: E402
 
 
 def main() -> int:

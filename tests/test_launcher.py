@@ -1,11 +1,12 @@
-"""Tests for src.launcher.
+"""Tests for src.drivers.launcher.
 
 We only exercise the pure helpers here. The end-to-end launch flow
 spawns a real LLM client + Wine + objdiff and is covered by manual
 smoke-testing through the web UI, not the test suite.
 """
 
-from src.launcher import (
+from src.core.workspace import FunctionWorkspace
+from src.drivers.launcher import (
 	_callee_alias_line,
 	_compose_ctx_h,
 	_format_callee_decl,
@@ -17,8 +18,7 @@ from src.launcher import (
 	_select_referenced_structs,
 	_wipe_workspace_history,
 )
-from src.relocs import RelocKind, RelocSite
-from src.workspace import FunctionWorkspace
+from src.formats.relocs import RelocKind, RelocSite
 
 
 def test_infer_mangled_cdecl_ret_zero():
@@ -80,7 +80,7 @@ def test_forward_decl_unusual_byte_count_warns_and_uses_one_int():
 
 
 def test_compose_ctx_h_cdecl_matches_default_stub():
-	from src.launcher import _DEFAULT_CTX_H
+	from src.drivers.launcher import _DEFAULT_CTX_H
 
 	assert _compose_ctx_h("fn_X", "_fn_X") == _DEFAULT_CTX_H
 

@@ -20,15 +20,15 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from src.coff_read import CoffObject, coff_object_read
-from src.compile_tool import CompileOutput, default_compile_fn
-from src.link_tool import default_link_fn
-from src.project import FunctionEntry, FunctionStatus, Project, function_status
-from src.relink import RelinkError, relink_place
-from src.relink_image import LinkFn, function_object_compile, function_real_relink
-from src.relocs import relocs_image_va_resolver
-from src.workspace import FunctionWorkspace
-from src.xbe import ParsedXbe, XbeFormatError, xbe_function_carve, xbe_section_containing_va
+from src.core.project import FunctionEntry, FunctionStatus, Project, function_status
+from src.core.workspace import FunctionWorkspace
+from src.decomp.compile_tool import CompileOutput, default_compile_fn
+from src.formats.coff_read import CoffObject, coff_object_read
+from src.formats.relocs import relocs_image_va_resolver
+from src.formats.xbe import ParsedXbe, XbeFormatError, xbe_function_carve, xbe_section_containing_va
+from src.verify.link_tool import default_link_fn
+from src.verify.relink import RelinkError, relink_place
+from src.verify.relink_image import LinkFn, function_object_compile, function_real_relink
 
 CompileFn = Callable[[Path, Path, Path], CompileOutput]
 """(c_source, out_obj, workspace_root) -> CompileOutput. Injected for testing."""

@@ -9,7 +9,7 @@ catch a corrupted/regenerated DB.
 from hypothesis import given
 from hypothesis import strategies as st
 
-from src.xboxkrnl import (
+from src.formats.xboxkrnl import (
 	_SIGNATURES,
 	XBOXKRNL_ORDINAL_MAX,
 	XBOXKRNL_ORDINAL_MIN,

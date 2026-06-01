@@ -3,14 +3,14 @@
 from hypothesis import given
 from hypothesis import strategies as st
 
-from src.coff import (
+from src.formats.coff import (
 	IMAGE_FILE_MACHINE_I386,
 	IMAGE_SYM_ABSOLUTE,
 	coff_absolute_symbols_build,
 	coff_object_build,
 )
-from src.coff_read import coff_object_read
-from src.relocs import RelocKind, RelocSite, ResolvedReloc
+from src.formats.coff_read import coff_object_read
+from src.formats.relocs import RelocKind, RelocSite, ResolvedReloc
 
 
 class TestReadHeaderAndText:

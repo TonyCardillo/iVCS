@@ -12,10 +12,10 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from src.coff import coff_defined_function_rename
-from src.objdiff import DiffResult, objdiff_run
+from src.core.workspace import FunctionWorkspace
+from src.decomp.objdiff import DiffResult, objdiff_run
+from src.formats.coff import coff_defined_function_rename
 from src.paths import COMPILERS_DIR
-from src.workspace import FunctionWorkspace
 
 
 @dataclass(frozen=True)

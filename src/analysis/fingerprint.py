@@ -23,8 +23,8 @@ from dataclasses import dataclass
 import capstone
 import capstone.x86
 
-from src.project import Project
-from src.xbe import ParsedXbe, XbeFormatError, xbe_function_carve
+from src.core.project import Project
+from src.formats.xbe import ParsedXbe, XbeFormatError, xbe_function_carve
 
 _OP_TYPE_TOKEN = {
 	capstone.x86.X86_OP_REG: 1,

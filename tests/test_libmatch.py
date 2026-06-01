@@ -1,8 +1,7 @@
 """Tests for the library signature matcher (relocation-invariant)."""
 
-from src.coff import coff_object_build
-from src.fingerprint import function_fingerprint
-from src.libmatch import (
+from src.analysis.fingerprint import function_fingerprint
+from src.analysis.libmatch import (
 	LibMatch,
 	library_signatures,
 	match_fingerprints,
@@ -10,6 +9,7 @@ from src.libmatch import (
 	sdk_manifest_write,
 	signature_index,
 )
+from src.formats.coff import coff_object_build
 from tests.test_archive import _archive
 
 # A non-trivial leaf so opcode/equiv hashes are specific (5 instructions).

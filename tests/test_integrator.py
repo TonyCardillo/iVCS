@@ -1,4 +1,4 @@
-"""Tests for src.integrator — the source-tree integrator.
+"""Tests for src.verify.integrator — the source-tree integrator.
 
 Phase 1 covers the segment model: grouping a project's functions under the
 XBE section they live in, finding the gaps/overlaps between them, and deriving
@@ -10,7 +10,10 @@ import json
 import types
 from pathlib import Path
 
-from src.integrator import (
+from src.core.project import FunctionEntry, Project
+from src.core.workspace import FunctionWorkspace
+from src.formats.xbe import SECTION_FLAG_EXECUTABLE, ParsedXbe, XbeHeader, XbeSection
+from src.verify.integrator import (
 	function_source_path,
 	integrate_commit,
 	project_coverage,
@@ -18,9 +21,6 @@ from src.integrator import (
 	segment_gaps,
 	segment_overlaps,
 )
-from src.project import FunctionEntry, Project
-from src.workspace import FunctionWorkspace
-from src.xbe import SECTION_FLAG_EXECUTABLE, ParsedXbe, XbeHeader, XbeSection
 
 
 def _ok_compile(c_source, out_obj, workspace_root):
@@ -400,7 +400,7 @@ class TestProjectCoverage:
 
 
 def _fstatus(va, size, state, *, name="fn"):
-	from src.project import FunctionStatus
+	from src.core.project import FunctionStatus
 
 	return FunctionStatus(
 		name=name,
@@ -416,7 +416,7 @@ def _fstatus(va, size, state, *, name="fn"):
 
 class TestImageCoverage:
 	def test_data_section_is_all_gap(self):
-		from src.integrator import image_coverage
+		from src.verify.integrator import image_coverage
 
 		# .text (code) at 0x1000 holds one matched fn; .data at 0x9000 holds none.
 		parsed = _parsed(
@@ -434,7 +434,7 @@ class TestImageCoverage:
 		assert by[".data"].matched_bytes == 0
 
 	def test_whole_image_denominator_includes_data(self):
-		from src.integrator import image_coverage
+		from src.verify.integrator import image_coverage
 
 		parsed = _parsed(
 			_section(".text", 0x1000, 0x100),
@@ -448,7 +448,7 @@ class TestImageCoverage:
 		assert cov.from_source_percent == 0x40 / 0x200 * 100.0
 
 	def test_sdk_bytes_separated_from_matched(self):
-		from src.integrator import image_coverage
+		from src.verify.integrator import image_coverage
 
 		parsed = _parsed(_section(".text", 0x1000, 0x100))
 		statuses = [
@@ -464,8 +464,8 @@ class TestImageCoverage:
 
 class TestImageVerifyCache:
 	def test_write_then_load_round_trip(self, tmp_path):
-		from src.integrator import FunctionVerify as FV
-		from src.integrator import (
+		from src.verify.integrator import FunctionVerify as FV
+		from src.verify.integrator import (
 			ImageVerify,
 			image_verify_cache_load,
 			image_verify_cache_path,
@@ -494,14 +494,14 @@ class TestImageVerifyCache:
 		assert got["generated_at"] == 1234.0
 
 	def test_load_missing_returns_none(self, tmp_path):
-		from src.integrator import image_verify_cache_load
+		from src.verify.integrator import image_verify_cache_load
 
 		assert image_verify_cache_load(tmp_path / "project.json") is None
 
 
 class TestImageCoverageBudget:
 	def test_todo_code_separates_unmatched_code_from_data(self):
-		from src.integrator import image_coverage
+		from src.verify.integrator import image_coverage
 
 		# Code section: 0x40 matched, 0x20 partial, 0x10 sdk, rest of enumerated todo.
 		parsed = _parsed(
@@ -525,7 +525,7 @@ class TestImageCoverageBudget:
 
 class TestImageVerifyProgress:
 	def test_on_result_called_per_matched_function(self, tmp_path):
-		from src.integrator import image_splice_verify
+		from src.verify.integrator import image_splice_verify
 
 		# Two matched functions; stub compile so no Wine. relink will fail (no real
 		# obj), but on_result must still fire once per matched function.

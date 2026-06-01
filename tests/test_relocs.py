@@ -10,7 +10,7 @@ import struct
 from hypothesis import given
 from hypothesis import strategies as st
 
-from src.relocs import (
+from src.formats.relocs import (
 	RelocKind,
 	RelocSite,
 	ResolvedReloc,
@@ -20,7 +20,7 @@ from src.relocs import (
 	relocs_kernel_import_va_map,
 	relocs_resolve,
 )
-from src.xbe import (
+from src.formats.xbe import (
 	SECTION_FLAG_EXECUTABLE,
 	SECTION_FLAG_WRITABLE,
 	XBE_EP_KEY_RETAIL,

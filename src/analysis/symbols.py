@@ -18,7 +18,7 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-from src.libmatch import sdk_manifest_load
+from src.analysis.libmatch import sdk_manifest_load
 
 _USER_SIDECAR = "symbols.json"
 _SDK_SIDECAR = "sdk.json"

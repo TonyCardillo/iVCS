@@ -14,7 +14,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from src.coff import (
+from src.formats.coff import (
 	COFF_HEADER_SIZE,
 	COFF_RELOC_SIZE,
 	COFF_SECTION_SIZE,
@@ -31,8 +31,8 @@ from src.coff import (
 	coff_defined_function_rename,
 	coff_object_build,
 )
-from src.coff_read import coff_object_read
-from src.relocs import RelocKind, RelocSite, ResolvedReloc
+from src.formats.coff_read import coff_object_read
+from src.formats.relocs import RelocKind, RelocSite, ResolvedReloc
 
 
 def _defined_function_name(blob: bytes) -> str | None:

@@ -1,11 +1,11 @@
-"""Tests for binary-agnostic string cross-referencing (src.strings_xref).
+"""Tests for binary-agnostic string cross-referencing (src.analysis.strings_xref).
 
 A function's referenced string literals are recovered by disassembling it and
 checking immediate / absolute-memory operands against the read-only data
 sections — no platform- or game-specific assumptions.
 """
 
-from src.strings_xref import (
+from src.analysis.strings_xref import (
 	NameSuggestion,
 	autoname_resolve,
 	function_autoname_label,
@@ -13,7 +13,7 @@ from src.strings_xref import (
 	string_at_va,
 	string_label_sanitize,
 )
-from src.xbe import (
+from src.formats.xbe import (
 	SECTION_FLAG_EXECUTABLE,
 	ParsedXbe,
 	XbeHeader,

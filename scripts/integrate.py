@@ -29,16 +29,16 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
-from src.integrator import (  # noqa: E402
+from src.analysis.libmatch import sdk_manifest_load  # noqa: E402
+from src.core.project import function_status, project_load  # noqa: E402
+from src.formats.xbe import xbe_load  # noqa: E402
+from src.verify.integrator import (  # noqa: E402
 	image_real_relink_verify,
 	image_splice_verify,
 	image_verify_cache_write,
 	integrate_commit,
 	project_coverage,
 )
-from src.libmatch import sdk_manifest_load  # noqa: E402
-from src.project import function_status, project_load  # noqa: E402
-from src.xbe import xbe_load  # noqa: E402
 
 
 def _sdk_vas_for(project_path: Path) -> frozenset[int]:

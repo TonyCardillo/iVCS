@@ -22,10 +22,10 @@ import struct
 from dataclasses import dataclass
 from pathlib import Path
 
-from src.archive import archive_members
-from src.coff import IMAGE_SYM_CLASS_EXTERNAL, IMAGE_SYM_TYPE_FUNCTION
-from src.coff_read import CoffObject, coff_object_read
-from src.fingerprint import Fingerprint, function_fingerprint
+from src.analysis.fingerprint import Fingerprint, function_fingerprint
+from src.formats.archive import archive_members
+from src.formats.coff import IMAGE_SYM_CLASS_EXTERNAL, IMAGE_SYM_TYPE_FUNCTION
+from src.formats.coff_read import CoffObject, coff_object_read
 
 
 @dataclass(frozen=True)

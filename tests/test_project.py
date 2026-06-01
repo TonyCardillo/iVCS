@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from src.project import (
+from src.core.project import (
 	FunctionEntry,
 	FunctionStatus,
 	model_attempt_stats,

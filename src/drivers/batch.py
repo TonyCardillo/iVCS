@@ -16,10 +16,10 @@ import re
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 
-from src.compile_tool import CompileFn, DiffFn, compile_and_view_assembly
-from src.fingerprint import Fingerprint, fingerprint_clusters
-from src.project import FunctionEntry
-from src.workspace import FunctionWorkspace
+from src.analysis.fingerprint import Fingerprint, fingerprint_clusters
+from src.core.project import FunctionEntry
+from src.core.workspace import FunctionWorkspace
+from src.decomp.compile_tool import CompileFn, DiffFn, compile_and_view_assembly
 
 
 @dataclass(frozen=True)

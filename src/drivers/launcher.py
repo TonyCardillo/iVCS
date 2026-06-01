@@ -19,10 +19,11 @@ from pathlib import Path
 
 import capstone
 
-from src.agent_loop import AgentConfig, agent_loop_run, ghidra_only_run
-from src.carver import carver_target_obj_build
-from src.compile_tool import default_compile_fn, default_diff_fn
-from src.ghidra_decompile import (
+from src.core.project import FunctionEntry, Project
+from src.core.workspace import FunctionWorkspace
+from src.decomp.agent_loop import AgentConfig, agent_loop_run, ghidra_only_run
+from src.decomp.compile_tool import default_compile_fn, default_diff_fn
+from src.decomp.ghidra_decompile import (
 	GhidraError,
 	ghidra_config_from_env,
 	ghidra_decompile_function,
@@ -30,9 +31,10 @@ from src.ghidra_decompile import (
 	ghidra_pseudo_c_normalize,
 	ghidra_structs_dump,
 )
-from src.llm_clients import llm_client_for, llm_recorded_model
-from src.project import FunctionEntry, Project
-from src.relocs import (
+from src.decomp.llm_clients import llm_client_for, llm_recorded_model
+from src.drivers.sweep import SweepOutcome, sweep_outcome_classify
+from src.formats.carver import carver_target_obj_build
+from src.formats.relocs import (
 	RelocKind,
 	RelocSite,
 	callee_convention_at,
@@ -40,10 +42,8 @@ from src.relocs import (
 	relocs_discover,
 	relocs_kernel_ordinal_at,
 )
-from src.sweep import SweepOutcome, sweep_outcome_classify
-from src.workspace import FunctionWorkspace
-from src.xbe import ParsedXbe, xbe_function_carve, xbe_load, xbe_section_containing_va
-from src.xboxkrnl import (
+from src.formats.xbe import ParsedXbe, xbe_function_carve, xbe_load, xbe_section_containing_va
+from src.formats.xboxkrnl import (
 	KernelFunctionSig,
 	KernelVariableSig,
 	xboxkrnl_mangled_byte_count,

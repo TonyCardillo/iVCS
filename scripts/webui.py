@@ -31,18 +31,16 @@ if "IVCS_OBJDIFF_CLI" not in os.environ and _BUNDLED_OBJDIFF.is_file():
 	os.environ["IVCS_OBJDIFF_CLI"] = str(_BUNDLED_OBJDIFF)
 
 
-from src.integrator import (  # noqa: E402
-	image_coverage,
-	image_real_relink_verify,
-	image_splice_verify,
-	image_verify_cache_load,
-	image_verify_cache_write,
+from src.analysis.libmatch import sdk_manifest_load  # noqa: E402
+from src.analysis.notes import notes_load, notes_save  # noqa: E402
+from src.analysis.strings_xref import (  # noqa: E402
+	autoname_resolve,
+	function_autoname_label,
+	function_string_refs,
+	string_label_sanitize,
 )
-from src.launcher import JobInfo, ghidra_sweep_attempt_one, launch_decomp_job  # noqa: E402
-from src.libmatch import sdk_manifest_load  # noqa: E402
-from src.notes import notes_load, notes_save  # noqa: E402
-from src.objdiff import DiffKind, objdiff_parse  # noqa: E402
-from src.project import (  # noqa: E402
+from src.analysis.symbols import symbol_map_load, symbol_rename  # noqa: E402
+from src.core.project import (  # noqa: E402
 	Project,
 	ProjectStats,
 	json_load_or_none,
@@ -51,18 +49,20 @@ from src.project import (  # noqa: E402
 	project_aggregate,
 	project_load,
 )
-from src.strings_xref import (  # noqa: E402
-	autoname_resolve,
-	function_autoname_label,
-	function_string_refs,
-	string_label_sanitize,
-)
-from src.sweep import SweepOutcome, sweep_queue, sweep_run  # noqa: E402
-from src.symbols import symbol_map_load, symbol_rename  # noqa: E402
-from src.xbe import (  # noqa: E402
+from src.decomp.objdiff import DiffKind, objdiff_parse  # noqa: E402
+from src.drivers.launcher import JobInfo, ghidra_sweep_attempt_one, launch_decomp_job  # noqa: E402
+from src.drivers.sweep import SweepOutcome, sweep_queue, sweep_run  # noqa: E402
+from src.formats.xbe import (  # noqa: E402
 	ParsedXbe,
 	XbeFormatError,
 	xbe_load,
+)
+from src.verify.integrator import (  # noqa: E402
+	image_coverage,
+	image_real_relink_verify,
+	image_splice_verify,
+	image_verify_cache_load,
+	image_verify_cache_write,
 )
 
 # ── XBE parse cache ─────────────────────────────────────────────────────────

@@ -10,12 +10,12 @@ import struct
 import types
 from pathlib import Path
 
-from src.coff import coff_object_build
-from src.integrator import image_splice_verify
-from src.project import FunctionEntry, Project
-from src.relocs import RelocKind, RelocSite, ResolvedReloc
-from src.workspace import FunctionWorkspace
-from src.xbe import SECTION_FLAG_EXECUTABLE, ParsedXbe, XbeHeader, XbeSection
+from src.core.project import FunctionEntry, Project
+from src.core.workspace import FunctionWorkspace
+from src.formats.coff import coff_object_build
+from src.formats.relocs import RelocKind, RelocSite, ResolvedReloc
+from src.formats.xbe import SECTION_FLAG_EXECUTABLE, ParsedXbe, XbeHeader, XbeSection
+from src.verify.integrator import image_splice_verify
 
 TEXT_VA = 0x00011000
 

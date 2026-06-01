@@ -11,13 +11,14 @@ from pathlib import Path
 from hypothesis import given
 from hypothesis import strategies as st
 
-from src.compile_tool import (
+from src.core.workspace import FunctionWorkspace
+from src.decomp.compile_tool import (
 	CompileOutput,
 	compile_and_view_assembly,
 	compile_error_format,
 	function_match_percent,
 )
-from src.objdiff import (
+from src.decomp.objdiff import (
 	SYMBOL_KIND_FUNCTION,
 	DiffInstruction,
 	DiffInstructionRow,
@@ -26,7 +27,6 @@ from src.objdiff import (
 	DiffSide,
 	DiffSymbol,
 )
-from src.workspace import FunctionWorkspace
 
 
 def _make_workspace(tmp_path: Path, fn_name: str = "_classify") -> FunctionWorkspace:

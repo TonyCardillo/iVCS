@@ -17,9 +17,9 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
-from src.coff import coff_object_build  # noqa: E402
-from src.relocs import relocs_resolve  # noqa: E402
-from src.xbe import (  # noqa: E402
+from src.formats.coff import coff_object_build  # noqa: E402
+from src.formats.relocs import relocs_resolve  # noqa: E402
+from src.formats.xbe import (  # noqa: E402
 	xbe_build_flavor_detect,
 	xbe_entry_point_get,
 	xbe_function_carve,
@@ -169,7 +169,7 @@ def main() -> int:
 def _find_first_ff15_into_thunk_table(parsed, text_section, thunk_va: int):
 	import struct as _struct
 
-	from src.xboxkrnl import xboxkrnl_name_get
+	from src.formats.xboxkrnl import xboxkrnl_name_get
 
 	text_bytes = parsed.data[
 		text_section.raw_address : text_section.raw_address + text_section.raw_size
@@ -198,7 +198,7 @@ def _find_first_ff15_into_thunk_table(parsed, text_section, thunk_va: int):
 def _thunk_table_print(parsed, thunk_va: int, max_slots: int) -> None:
 	import struct
 
-	from src.xboxkrnl import xboxkrnl_name_get
+	from src.formats.xboxkrnl import xboxkrnl_name_get
 
 	section = xbe_section_containing_va(parsed, thunk_va)
 	file_offset = section.raw_address + (thunk_va - section.virtual_address)

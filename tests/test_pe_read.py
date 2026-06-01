@@ -6,7 +6,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from src.pe_read import PeReadError, pe_image_read
+from src.formats.pe_read import PeReadError, pe_image_read
 
 
 def _make_pe(image_base: int, sections: list[tuple[str, int, bytes]]) -> bytes:

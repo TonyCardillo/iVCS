@@ -18,7 +18,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from src.xbe import (
+from src.formats.xbe import (
 	SECTION_FLAG_EXECUTABLE,
 	SECTION_FLAG_PRELOAD,
 	SECTION_FLAG_WRITABLE,

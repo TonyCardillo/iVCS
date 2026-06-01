@@ -33,9 +33,9 @@ from webui import (  # noqa: E402
 	_va_from_workspace,
 )
 
-from src.notes import notes_load  # noqa: E402
-from src.project import ProjectStats  # noqa: E402
-from src.symbols import symbol_map_load  # noqa: E402
+from src.analysis.notes import notes_load  # noqa: E402
+from src.analysis.symbols import symbol_map_load  # noqa: E402
+from src.core.project import ProjectStats  # noqa: E402
 
 
 def _attempt(*, compiled: bool, diff_exists: bool, match_percent: float | None):

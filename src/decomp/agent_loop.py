@@ -11,7 +11,8 @@ import time
 from dataclasses import dataclass
 from typing import Protocol
 
-from src.compile_tool import (
+from src.core.workspace import FunctionWorkspace
+from src.decomp.compile_tool import (
 	CompileAndViewResult,
 	CompileFn,
 	DiffFn,
@@ -20,8 +21,7 @@ from src.compile_tool import (
 	function_match_percent,
 	obj_function_symbol_canonicalize,
 )
-from src.ghidra_decompile import ghidra_pseudo_c_normalize_for_prompt
-from src.workspace import FunctionWorkspace
+from src.decomp.ghidra_decompile import ghidra_pseudo_c_normalize_for_prompt
 
 COMPILE_TOOL_NAME = "compile_and_view_assembly"
 

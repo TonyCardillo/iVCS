@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from src.objdiff import (
+from src.decomp.objdiff import (
 	DiffKind,
 	DiffResult,
 	objdiff_parse,

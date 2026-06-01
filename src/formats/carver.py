@@ -4,9 +4,9 @@ Returns bytes; the caller decides where they land (usually
 `FunctionWorkspace.target_obj`).
 """
 
-from src.coff import coff_object_build
-from src.relocs import relocs_resolve
-from src.xbe import ParsedXbe, xbe_function_carve
+from src.formats.coff import coff_object_build
+from src.formats.relocs import relocs_resolve
+from src.formats.xbe import ParsedXbe, xbe_function_carve
 
 
 def carver_target_obj_build(

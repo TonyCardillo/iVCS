@@ -4,7 +4,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from src.archive import ARCHIVE_MAGIC, ArchiveError, archive_members
+from src.formats.archive import ARCHIVE_MAGIC, ArchiveError, archive_members
 
 
 def _member(name: str, data: bytes) -> bytes:

@@ -22,13 +22,13 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
-from src.fingerprint import (  # noqa: E402
+from src.analysis.fingerprint import (  # noqa: E402
 	fingerprint_clusters,
 	fingerprints_similar_to,
 	project_fingerprints,
 )
-from src.project import project_load  # noqa: E402
-from src.xbe import xbe_load  # noqa: E402
+from src.core.project import project_load  # noqa: E402
+from src.formats.xbe import xbe_load  # noqa: E402
 
 
 def _cluster(project, parsed, *, by: str, min_size: int, top: int) -> int:

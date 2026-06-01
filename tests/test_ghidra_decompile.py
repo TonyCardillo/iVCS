@@ -12,8 +12,8 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from src import ghidra_decompile
-from src.ghidra_decompile import (
+from src.decomp import ghidra_decompile
+from src.decomp.ghidra_decompile import (
 	_PSEUDO_C_TYPE_MAP,
 	GhidraConfig,
 	GhidraError,

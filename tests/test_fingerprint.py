@@ -9,7 +9,7 @@ functions; similarity is edit distance over the opcode sequence.
 from hypothesis import given
 from hypothesis import strategies as st
 
-from src.fingerprint import (
+from src.analysis.fingerprint import (
 	Fingerprint,
 	fingerprint_clusters,
 	fingerprint_similarity,

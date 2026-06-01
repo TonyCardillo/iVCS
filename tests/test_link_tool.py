@@ -4,7 +4,7 @@ The real link runs under Wine and is exercised by a manual smoke; here we pin
 the command line the wrapper builds so flag regressions are caught cheaply.
 """
 
-from src.link_tool import link_argv
+from src.verify.link_tool import link_argv
 
 LINK = "Z:\\link\\Link.Exe"
 OBJS = ["Z:\\a.obj", "Z:\\b.obj"]

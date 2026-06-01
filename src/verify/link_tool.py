@@ -11,7 +11,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from src.compile_tool import _winepath
+from src.decomp.compile_tool import _winepath
 from src.paths import COMPILERS_DIR
 
 

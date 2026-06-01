@@ -12,7 +12,8 @@ from pathlib import Path
 from hypothesis import given
 from hypothesis import strategies as st
 
-from src.agent_loop import (
+from src.core.workspace import FunctionWorkspace
+from src.decomp.agent_loop import (
 	COMPILE_TOOL_NAME,
 	AgentConfig,
 	FakeLLMClient,
@@ -22,8 +23,8 @@ from src.agent_loop import (
 	assistant_tool_call,
 	ghidra_only_run,
 )
-from src.compile_tool import CompileOutput
-from src.objdiff import (
+from src.decomp.compile_tool import CompileOutput
+from src.decomp.objdiff import (
 	SYMBOL_KIND_FUNCTION,
 	DiffInstruction,
 	DiffInstructionRow,
@@ -32,7 +33,6 @@ from src.objdiff import (
 	DiffSide,
 	DiffSymbol,
 )
-from src.workspace import FunctionWorkspace
 
 
 def _make_workspace(tmp_path: Path, fn_name: str = "_classify") -> FunctionWorkspace:
@@ -377,7 +377,7 @@ class TestModelByAttempt:
 
 class TestBaselineCompileAttemptZero:
 	def test_noop_when_no_attempt_zero_c(self, tmp_path):
-		from src.agent_loop import _baseline_compile_attempt_zero
+		from src.decomp.agent_loop import _baseline_compile_attempt_zero
 
 		ws = _make_workspace(tmp_path)
 		calls = {"n": 0}
@@ -390,7 +390,7 @@ class TestBaselineCompileAttemptZero:
 		assert calls["n"] == 0
 
 	def test_skips_if_obj_already_present(self, tmp_path):
-		from src.agent_loop import _baseline_compile_attempt_zero
+		from src.decomp.agent_loop import _baseline_compile_attempt_zero
 
 		ws = _make_workspace(tmp_path)
 		ws.attempt_paths(0).c.write_text("// already compiled")
@@ -405,7 +405,7 @@ class TestBaselineCompileAttemptZero:
 		assert calls["n"] == 0
 
 	def test_compiles_when_c_present_no_obj(self, tmp_path):
-		from src.agent_loop import _baseline_compile_attempt_zero
+		from src.decomp.agent_loop import _baseline_compile_attempt_zero
 
 		ws = _make_workspace(tmp_path)
 		ws.attempt_paths(0).c.write_text("void fn(void){}")
@@ -418,7 +418,7 @@ class TestBaselineCompileAttemptZero:
 		assert ws.attempt_paths(0).obj.is_file()
 
 	def test_persists_stderr_on_compile_failure(self, tmp_path):
-		from src.agent_loop import _baseline_compile_attempt_zero
+		from src.decomp.agent_loop import _baseline_compile_attempt_zero
 
 		ws = _make_workspace(tmp_path)
 		ws.attempt_paths(0).c.write_text("garbage")
@@ -434,14 +434,14 @@ class TestBaselineCompileAttemptZero:
 
 class TestGhidraWarmstartInSystemPrompt:
 	def test_section_omitted_when_warmstart_absent(self, tmp_path):
-		from src.agent_loop import _system_prompt_build
+		from src.decomp.agent_loop import _system_prompt_build
 
 		ws = _make_workspace(tmp_path)
 		prompt = _system_prompt_build(ws, "ret")
 		assert "Ghidra warm-start" not in prompt
 
 	def test_section_included_when_warmstart_present(self, tmp_path):
-		from src.agent_loop import _system_prompt_build
+		from src.decomp.agent_loop import _system_prompt_build
 
 		ws = _make_workspace(tmp_path)
 		ws.ghidra_warmstart.write_text("void FUN_002d0cf5(int param_1) { return; }\n")
@@ -454,7 +454,7 @@ class TestGhidraWarmstartInSystemPrompt:
 		assert "```c" in prompt
 
 	def test_warmstart_appears_after_ctx_h(self, tmp_path):
-		from src.agent_loop import _system_prompt_build
+		from src.decomp.agent_loop import _system_prompt_build
 
 		ws = _make_workspace(tmp_path)
 		ws.ctx_h.write_text("// CTX_MARKER\n")
@@ -464,7 +464,7 @@ class TestGhidraWarmstartInSystemPrompt:
 		assert prompt.index("CTX_MARKER") < prompt.index("WARMSTART_MARKER")
 
 	def test_target_asm_is_code_fenced(self, tmp_path):
-		from src.agent_loop import _system_prompt_build
+		from src.decomp.agent_loop import _system_prompt_build
 
 		ws = _make_workspace(tmp_path)
 		prompt = _system_prompt_build(ws, "0x00012080  c3  ret")
@@ -477,7 +477,7 @@ class TestGhidraWarmstartInSystemPrompt:
 		assert "ret" in between
 
 	def test_ctx_h_is_code_fenced(self, tmp_path):
-		from src.agent_loop import _system_prompt_build
+		from src.decomp.agent_loop import _system_prompt_build
 
 		ws = _make_workspace(tmp_path)
 		ws.ctx_h.write_text("typedef int MARKER;\n")

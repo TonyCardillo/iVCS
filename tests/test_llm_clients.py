@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.llm_clients import LiteLLMClient, llm_client_for, llm_recorded_model
+from src.decomp.llm_clients import LiteLLMClient, llm_client_for, llm_recorded_model
 
 
 def _mock_response(content: str | None = None, tool_calls: list[dict] | None = None) -> MagicMock:
@@ -39,14 +39,14 @@ def _mock_response(content: str | None = None, tool_calls: list[dict] | None = N
 class TestNormalizeResponse:
 	def test_text_only_response(self):
 		client = LiteLLMClient(model="anthropic/claude-haiku-4-5")
-		with patch("src.llm_clients.litellm_completion") as mock_completion:
+		with patch("src.decomp.llm_clients.litellm_completion") as mock_completion:
 			mock_completion.return_value = _mock_response(content="Just text.")
 			result = client.complete(messages=[], tools=[])
 		assert result == {"role": "assistant", "content": "Just text."}
 
 	def test_tool_call_response(self):
 		client = LiteLLMClient(model="anthropic/claude-haiku-4-5")
-		with patch("src.llm_clients.litellm_completion") as mock_completion:
+		with patch("src.decomp.llm_clients.litellm_completion") as mock_completion:
 			mock_completion.return_value = _mock_response(
 				content=None,
 				tool_calls=[
@@ -65,7 +65,7 @@ class TestNormalizeResponse:
 
 	def test_mixed_text_and_tool_call(self):
 		client = LiteLLMClient(model="anthropic/claude-haiku-4-5")
-		with patch("src.llm_clients.litellm_completion") as mock_completion:
+		with patch("src.decomp.llm_clients.litellm_completion") as mock_completion:
 			mock_completion.return_value = _mock_response(
 				content="Trying this:",
 				tool_calls=[{"id": "c1", "name": "compile_and_view_assembly", "arguments": "{}"}],
@@ -82,7 +82,7 @@ class TestCallPassthrough:
 			api_base="http://127.0.0.1:1234/v1",
 			api_key="sk-local",
 		)
-		with patch("src.llm_clients.litellm_completion") as mock_completion:
+		with patch("src.decomp.llm_clients.litellm_completion") as mock_completion:
 			mock_completion.return_value = _mock_response(content="ok")
 			client.complete(
 				messages=[{"role": "user", "content": "hi"}], tools=[{"type": "function"}]
@@ -96,7 +96,7 @@ class TestCallPassthrough:
 
 	def test_api_base_omitted_when_not_set(self):
 		client = LiteLLMClient(model="anthropic/claude-haiku-4-5")
-		with patch("src.llm_clients.litellm_completion") as mock_completion:
+		with patch("src.decomp.llm_clients.litellm_completion") as mock_completion:
 			mock_completion.return_value = _mock_response(content="ok")
 			client.complete(messages=[], tools=[])
 		call_kwargs = mock_completion.call_args.kwargs
@@ -108,7 +108,7 @@ class TestLlmClientFor:
 		monkeypatch.delenv("IVCS_LLM_API_BASE", raising=False)
 		monkeypatch.delenv("IVCS_LLM_MODEL", raising=False)
 		# No server reachable → fall back to the honest "we don't know" default.
-		monkeypatch.setattr("src.llm_clients._lm_studio_detect_loaded_model", lambda: None)
+		monkeypatch.setattr("src.decomp.llm_clients._lm_studio_detect_loaded_model", lambda: None)
 		client = llm_client_for("local")
 		assert client.model == "openai/local (unknown)"
 		assert client.api_base == "http://127.0.0.1:1234/v1"
@@ -116,7 +116,7 @@ class TestLlmClientFor:
 	def test_local_uses_detected_loaded_model(self, monkeypatch):
 		monkeypatch.delenv("IVCS_LLM_MODEL", raising=False)
 		monkeypatch.setattr(
-			"src.llm_clients._lm_studio_detect_loaded_model", lambda: "qwen/qwen3.5-9b"
+			"src.decomp.llm_clients._lm_studio_detect_loaded_model", lambda: "qwen/qwen3.5-9b"
 		)
 		client = llm_client_for("local")
 		assert client.model == "openai/qwen/qwen3.5-9b"
@@ -153,20 +153,20 @@ class TestRecordedModel:
 
 	def test_local_default_when_env_unset_and_no_server(self, monkeypatch):
 		monkeypatch.delenv("IVCS_LLM_MODEL", raising=False)
-		monkeypatch.setattr("src.llm_clients._lm_studio_detect_loaded_model", lambda: None)
+		monkeypatch.setattr("src.decomp.llm_clients._lm_studio_detect_loaded_model", lambda: None)
 		assert llm_recorded_model("local") == "local (unknown)"
 
 	def test_local_records_detected_loaded_model(self, monkeypatch):
 		monkeypatch.delenv("IVCS_LLM_MODEL", raising=False)
 		monkeypatch.setattr(
-			"src.llm_clients._lm_studio_detect_loaded_model", lambda: "qwen/qwen3.5-9b"
+			"src.decomp.llm_clients._lm_studio_detect_loaded_model", lambda: "qwen/qwen3.5-9b"
 		)
 		assert llm_recorded_model("local") == "qwen/qwen3.5-9b"
 
 	def test_explicit_env_beats_detection(self, monkeypatch):
 		monkeypatch.setenv("IVCS_LLM_MODEL", "deepseek-coder")
 		monkeypatch.setattr(
-			"src.llm_clients._lm_studio_detect_loaded_model", lambda: "qwen/qwen3.5-9b"
+			"src.decomp.llm_clients._lm_studio_detect_loaded_model", lambda: "qwen/qwen3.5-9b"
 		)
 		assert llm_recorded_model("local") == "deepseek-coder"
 

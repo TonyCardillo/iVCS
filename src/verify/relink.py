@@ -17,8 +17,8 @@ Patch math (A = addend in the field, P = placement_va + offset):
 import struct
 from collections.abc import Callable
 
-from src.coff import IMAGE_REL_I386_DIR32, IMAGE_REL_I386_REL32
-from src.coff_read import CoffObject
+from src.formats.coff import IMAGE_REL_I386_DIR32, IMAGE_REL_I386_REL32
+from src.formats.coff_read import CoffObject
 
 SymbolVaResolve = Callable[[str], int | None]
 """(symbol_name) -> target virtual address, or None if it cannot be resolved."""

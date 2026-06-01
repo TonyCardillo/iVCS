@@ -32,10 +32,10 @@ from pathlib import Path
 # Make `import src.*` work when run directly.
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.agent_loop import AgentConfig, agent_loop_run  # noqa: E402
-from src.compile_tool import default_compile_fn, default_diff_fn  # noqa: E402
-from src.llm_clients import LiteLLMClient  # noqa: E402
-from src.workspace import FunctionWorkspace  # noqa: E402
+from src.core.workspace import FunctionWorkspace  # noqa: E402
+from src.decomp.agent_loop import AgentConfig, agent_loop_run  # noqa: E402
+from src.decomp.compile_tool import default_compile_fn, default_diff_fn  # noqa: E402
+from src.decomp.llm_clients import LiteLLMClient  # noqa: E402
 
 REPO_ROOT = Path(__file__).parent.parent
 TARGET_OBJ = REPO_ROOT / "recon" / "objdiff-smoke" / "target.obj"

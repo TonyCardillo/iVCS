@@ -1,7 +1,7 @@
 """Tests for the end-to-end XBE→target.obj orchestrator."""
 
-from src.carver import carver_target_obj_build
-from src.xbe import SECTION_FLAG_EXECUTABLE, xbe_parse
+from src.formats.carver import carver_target_obj_build
+from src.formats.xbe import SECTION_FLAG_EXECUTABLE, xbe_parse
 from tests.test_xbe import build_minimal_xbe
 
 

@@ -13,7 +13,7 @@ thunk table).
 import struct
 from dataclasses import dataclass
 
-from src.relocs import RelocKind, ResolvedReloc
+from src.formats.relocs import RelocKind, ResolvedReloc
 
 COFF_HEADER_SIZE = 20
 COFF_SECTION_SIZE = 40

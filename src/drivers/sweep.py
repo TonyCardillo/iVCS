@@ -12,8 +12,8 @@ threaded wiring (registry + live progress + Ghidra/Wine) lives in scripts/webui.
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
-from src.agent_loop import AgentResult
-from src.project import FunctionEntry, FunctionStatus
+from src.core.project import FunctionEntry, FunctionStatus
+from src.decomp.agent_loop import AgentResult
 
 
 @dataclass(frozen=True)

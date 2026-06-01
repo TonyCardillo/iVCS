@@ -1,4 +1,4 @@
-"""Tests for the project-wide Ghidra baseline sweep (src.sweep).
+"""Tests for the project-wide Ghidra baseline sweep (src.drivers.sweep).
 
 The sweep planning and run loop are pure (dependencies injected), so we can
 exercise queueing, classification, and orchestration without Ghidra or Wine.
@@ -6,9 +6,9 @@ exercise queueing, classification, and orchestration without Ghidra or Wine.
 
 from pathlib import Path
 
-from src.agent_loop import AgentResult
-from src.project import FunctionStatus
-from src.sweep import (
+from src.core.project import FunctionStatus
+from src.decomp.agent_loop import AgentResult
+from src.drivers.sweep import (
 	SweepOutcome,
 	sweep_outcome_classify,
 	sweep_queue,
@@ -102,7 +102,7 @@ class TestSweepOutcomeClassify:
 
 class TestSweepRun:
 	def test_processes_whole_queue_and_aggregates(self):
-		from src.project import FunctionEntry
+		from src.core.project import FunctionEntry
 
 		queue = [FunctionEntry(name=f"f{v}", va=v, size=8) for v in (1, 2, 3, 4)]
 		scripted = {
@@ -127,7 +127,7 @@ class TestSweepRun:
 		assert [o.va for o in seen] == [1, 2, 3, 4]
 
 	def test_stops_early_when_kill_switch_fires(self):
-		from src.project import FunctionEntry
+		from src.core.project import FunctionEntry
 
 		queue = [FunctionEntry(name=f"f{v}", va=v, size=8) for v in (1, 2, 3)]
 		processed = []

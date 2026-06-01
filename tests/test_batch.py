@@ -3,16 +3,11 @@
 import json
 from pathlib import Path
 
-from src.batch import (
-	QueueItem,
-	RunOutcome,
-	batch_queue,
-	batch_run,
-	propagate_to_twins,
-)
-from src.compile_tool import CompileOutput
-from src.fingerprint import Fingerprint
-from src.objdiff import (
+from src.analysis.fingerprint import Fingerprint
+from src.core.project import FunctionEntry
+from src.core.workspace import FunctionWorkspace
+from src.decomp.compile_tool import CompileOutput
+from src.decomp.objdiff import (
 	SYMBOL_KIND_FUNCTION,
 	DiffInstruction,
 	DiffInstructionRow,
@@ -21,8 +16,13 @@ from src.objdiff import (
 	DiffSide,
 	DiffSymbol,
 )
-from src.project import FunctionEntry
-from src.workspace import FunctionWorkspace
+from src.drivers.batch import (
+	QueueItem,
+	RunOutcome,
+	batch_queue,
+	batch_run,
+	propagate_to_twins,
+)
 
 
 def _fn(va: int, size: int) -> FunctionEntry:

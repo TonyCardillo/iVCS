@@ -23,7 +23,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
-from src.xbe import (  # noqa: E402
+from src.formats.xbe import (  # noqa: E402
 	xbe_functions_enumerate,
 	xbe_load,
 	xbe_section_containing_va,

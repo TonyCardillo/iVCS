@@ -20,7 +20,12 @@ from dataclasses import dataclass
 import capstone
 from capstone import x86
 
-from src.xbe import ParsedXbe, xbe_function_carve, xbe_section_containing_va, xbe_section_read
+from src.formats.xbe import (
+	ParsedXbe,
+	xbe_function_carve,
+	xbe_section_containing_va,
+	xbe_section_read,
+)
 
 _PRINTABLE = frozenset(range(0x20, 0x7F))
 

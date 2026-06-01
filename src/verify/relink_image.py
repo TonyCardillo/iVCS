@@ -23,19 +23,19 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from src.coff import (
+from src.core.project import FunctionEntry, Project
+from src.core.workspace import FunctionWorkspace
+from src.decomp.compile_tool import default_compile_fn
+from src.formats.coff import (
 	IMAGE_SYM_CLASS_EXTERNAL,
 	coff_absolute_symbols_build,
 	coff_object_build,
 )
-from src.coff_read import CoffObject, coff_object_read
-from src.compile_tool import default_compile_fn
-from src.link_tool import LinkOutput, default_link_fn
-from src.pe_read import pe_image_read
-from src.project import FunctionEntry, Project
-from src.relocs import relocs_image_va_resolver
-from src.workspace import FunctionWorkspace
-from src.xbe import ParsedXbe
+from src.formats.coff_read import CoffObject, coff_object_read
+from src.formats.pe_read import pe_image_read
+from src.formats.relocs import relocs_image_va_resolver
+from src.formats.xbe import ParsedXbe
+from src.verify.link_tool import LinkOutput, default_link_fn
 
 _IMAGE_SYM_UNDEFINED = 0
 _DEFAULT_TEXT_RVA = 0x1000

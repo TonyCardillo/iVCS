@@ -8,7 +8,7 @@ iVCS and `cl.exe` emit for one function: i386, short/long names,
 import struct
 from dataclasses import dataclass
 
-from src.coff import (
+from src.formats.coff import (
 	COFF_HEADER_SIZE,
 	COFF_RELOC_SIZE,
 	COFF_SECTION_SIZE,

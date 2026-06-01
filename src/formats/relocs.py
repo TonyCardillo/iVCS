@@ -26,14 +26,14 @@ from enum import Enum
 import capstone
 import capstone.x86
 
-from src.xbe import (
+from src.formats.xbe import (
 	ParsedXbe,
 	XbeFormatError,
 	xbe_function_carve,
 	xbe_kernel_thunk_address_get,
 	xbe_section_containing_va,
 )
-from src.xboxkrnl import xboxkrnl_mangled_get, xboxkrnl_name_get
+from src.formats.xboxkrnl import xboxkrnl_mangled_get, xboxkrnl_name_get
 
 
 class RelocKind(Enum):

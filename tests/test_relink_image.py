@@ -10,14 +10,14 @@ import json
 import types
 from pathlib import Path
 
-from src.coff import coff_object_build
-from src.coff_read import coff_object_read
-from src.link_tool import LinkOutput
-from src.project import FunctionEntry, Project
-from src.relink_image import function_object_compile, function_real_relink, relink_placement
-from src.relocs import RelocKind, RelocSite, ResolvedReloc
-from src.workspace import FunctionWorkspace
-from src.xbe import SECTION_FLAG_EXECUTABLE, ParsedXbe, XbeHeader, XbeSection
+from src.core.project import FunctionEntry, Project
+from src.core.workspace import FunctionWorkspace
+from src.formats.coff import coff_object_build
+from src.formats.coff_read import coff_object_read
+from src.formats.relocs import RelocKind, RelocSite, ResolvedReloc
+from src.formats.xbe import SECTION_FLAG_EXECUTABLE, ParsedXbe, XbeHeader, XbeSection
+from src.verify.link_tool import LinkOutput
+from src.verify.relink_image import function_object_compile, function_real_relink, relink_placement
 from tests.test_pe_read import _make_pe
 
 
