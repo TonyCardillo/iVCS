@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from src.compile_tool import _winepath
+from src.paths import COMPILERS_DIR
 
 
 @dataclass(frozen=True)
@@ -58,7 +59,7 @@ def default_link_fn(
 
 	IVCS_MSVC_DIR and IVCS_WINE override the toolchain, matching default_compile_fn.
 	"""
-	default_msvc_dir = Path(__file__).parent.parent / "compilers" / "xdk5849-vc71"
+	default_msvc_dir = COMPILERS_DIR / "xdk5849-vc71"
 	msvc_dir = Path(os.environ.get("IVCS_MSVC_DIR", str(default_msvc_dir)))
 	wine = os.environ.get("IVCS_WINE", "wine")
 

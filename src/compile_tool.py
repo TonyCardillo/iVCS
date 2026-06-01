@@ -14,6 +14,7 @@ from pathlib import Path
 
 from src.coff import coff_defined_function_rename
 from src.objdiff import DiffResult, objdiff_run
+from src.paths import COMPILERS_DIR
 from src.workspace import FunctionWorkspace
 
 
@@ -105,7 +106,7 @@ def default_compile_fn(c_source: Path, out_obj: Path, workspace_root: Path) -> C
 	(default "wine") override the toolchain location. The layout expected
 	under IVCS_MSVC_DIR is `bin/`, `include/`, `lib/`.
 	"""
-	default_msvc_dir = Path(__file__).parent.parent / "compilers" / "xdk5849-vc71"
+	default_msvc_dir = COMPILERS_DIR / "xdk5849-vc71"
 	msvc_dir = Path(os.environ.get("IVCS_MSVC_DIR", str(default_msvc_dir)))
 	wine = os.environ.get("IVCS_WINE", "wine")
 

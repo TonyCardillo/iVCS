@@ -13,9 +13,9 @@ Data sources:
 
 import json
 from dataclasses import dataclass
-from pathlib import Path
 
-_DATA_DIR = Path(__file__).parent.parent / "data"
+from src.paths import DATA_DIR as _DATA_DIR
+
 _ORDINALS_PATH = _DATA_DIR / "xboxkrnl_ordinals.json"
 _SIGNATURES_PATH = _DATA_DIR / "xboxkrnl_signatures.json"
 

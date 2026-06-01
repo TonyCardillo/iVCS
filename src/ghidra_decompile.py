@@ -18,7 +18,9 @@ from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
 
-_GHIDRA_SCRIPTS_DIR = Path(__file__).parent.parent / "ghidra_scripts"
+from src.paths import GHIDRA_HOME, GHIDRA_SCRIPTS_DIR
+
+_GHIDRA_SCRIPTS_DIR = GHIDRA_SCRIPTS_DIR
 _DECOMPILE_SCRIPT = "DecompileOne.java"
 _DUMP_STRUCTS_SCRIPT = "DumpStructs.java"
 _XBE_LOADER = "XbeLoader"
@@ -73,7 +75,7 @@ def ghidra_config_from_env(xbe_path: Path) -> GhidraConfig:
 	their own analyzed project under /tmp/ghidra-projects/ instead of
 	sharing one and re-analyzing on every switch.
 	"""
-	default_ghidra_home = Path(__file__).parent.parent / "tools" / "ghidra_12.0.3_PUBLIC"
+	default_ghidra_home = GHIDRA_HOME
 	home = Path(
 		os.environ.get(
 			"IVCS_GHIDRA_HOME",
