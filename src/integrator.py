@@ -412,13 +412,22 @@ def _function_splice_verify(
 
 
 def _image_verify(
-	project: Project, verify_one: Callable[[FunctionEntry], FunctionVerify]
+	project: Project,
+	verify_one: Callable[[FunctionEntry], FunctionVerify],
+	*,
+	on_result: Callable[[FunctionVerify], None] | None = None,
 ) -> ImageVerify:
 	"""Assemble an ImageVerify by running `verify_one` over every matched function.
 
 	The two verifiers differ only in how they check one function; this owns the
-	shared per-image tally so neither has to repeat it."""
-	results = [verify_one(fn) for fn in _matched_functions(project)]
+	shared per-image tally so neither has to repeat it. `on_result`, when given,
+	is called with each FunctionVerify as it lands — for live progress."""
+	results: list[FunctionVerify] = []
+	for fn in _matched_functions(project):
+		fv = verify_one(fn)
+		results.append(fv)
+		if on_result is not None:
+			on_result(fv)
 	return ImageVerify(
 		functions=tuple(results),
 		matched_bytes=sum(r.size for r in results),
@@ -431,13 +440,16 @@ def image_splice_verify(
 	parsed: ParsedXbe,
 	*,
 	compile_fn: CompileFn = default_compile_fn,
+	on_result: Callable[[FunctionVerify], None] | None = None,
 ) -> ImageVerify:
 	"""Recompile every matched function, relocate it to its VA, and byte-compare
 	against the original image. Returns per-function and whole-image verified
 	byte counts."""
 	resolve = relocs_image_va_resolver(parsed)
 	return _image_verify(
-		project, lambda fn: _function_splice_verify(project, parsed, fn, resolve, compile_fn)
+		project,
+		lambda fn: _function_splice_verify(project, parsed, fn, resolve, compile_fn),
+		on_result=on_result,
 	)
 
 
@@ -469,11 +481,14 @@ def image_real_relink_verify(
 	*,
 	compile_fn: CompileFn = default_compile_fn,
 	link_fn: LinkFn = default_link_fn,
+	on_result: Callable[[FunctionVerify], None] | None = None,
 ) -> ImageVerify:
 	"""Relink every matched function with Link.Exe at its true VA and byte-compare
 	against the original image."""
 	return _image_verify(
-		project, lambda fn: _function_real_relink_verify(project, parsed, fn, compile_fn, link_fn)
+		project,
+		lambda fn: _function_real_relink_verify(project, parsed, fn, compile_fn, link_fn),
+		on_result=on_result,
 	)
 
 
@@ -518,12 +533,29 @@ class ImageCoverage:
 		return sum(s.matched_bytes for s in self.sections)
 
 	@property
+	def partial_bytes(self) -> int:
+		return sum(s.partial_bytes for s in self.sections)
+
+	@property
 	def sdk_bytes(self) -> int:
 		return sum(s.sdk_bytes for s in self.sections)
 
 	@property
+	def enumerated_bytes(self) -> int:
+		return sum(s.enumerated_bytes for s in self.sections)
+
+	@property
 	def gap_bytes(self) -> int:
 		return sum(s.gap_bytes for s in self.sections)
+
+	@property
+	def todo_code_bytes(self) -> int:
+		"""Enumerated code that's neither matched, partial, nor SDK — functions
+		we've identified but not yet decompiled. The real remaining code work,
+		distinct from data/assets (which live in gap_bytes, carried verbatim)."""
+		return max(
+			0, self.enumerated_bytes - self.matched_bytes - self.partial_bytes - self.sdk_bytes
+		)
 
 	@property
 	def from_source_percent(self) -> float:

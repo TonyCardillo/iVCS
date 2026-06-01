@@ -497,3 +497,53 @@ class TestImageVerifyCache:
 		from src.integrator import image_verify_cache_load
 
 		assert image_verify_cache_load(tmp_path / "project.json") is None
+
+
+class TestImageCoverageBudget:
+	def test_todo_code_separates_unmatched_code_from_data(self):
+		from src.integrator import image_coverage
+
+		# Code section: 0x40 matched, 0x20 partial, 0x10 sdk, rest of enumerated todo.
+		parsed = _parsed(
+			_section(".text", 0x1000, 0x200),
+			_section(".data", 0x9000, 0x100, flags=0),
+		)
+		statuses = [
+			_fstatus(0x1000, 0x40, "matched", name="m"),
+			_fstatus(0x1040, 0x20, "partial", name="p"),
+			_fstatus(0x1060, 0x10, "matched", name="sdk"),  # marked sdk below
+			_fstatus(0x1070, 0x30, "untouched", name="todo"),
+		]
+		cov = image_coverage(statuses, parsed, sdk_vas=frozenset({0x1060}))
+		assert cov.matched_bytes == 0x40
+		assert cov.partial_bytes == 0x20
+		assert cov.sdk_bytes == 0x10
+		assert cov.todo_code_bytes == 0x30  # the untouched enumerated function
+		# Data section + .text padding are gap, NOT todo code.
+		assert cov.gap_bytes == (0x200 - 0xA0) + 0x100
+
+
+class TestImageVerifyProgress:
+	def test_on_result_called_per_matched_function(self, tmp_path):
+		from src.integrator import image_splice_verify
+
+		# Two matched functions; stub compile so no Wine. relink will fail (no real
+		# obj), but on_result must still fire once per matched function.
+		fns = [FunctionEntry("a", 0x1000, 4), FunctionEntry("b", 0x1010, 4)]
+		section = _section(".text", 0x1000, 0x100)
+		parsed = _parsed(section)
+		proj = Project(
+			name="t",
+			xbe_path=Path("/x.xbe"),
+			workspace_root=tmp_path / "ws",
+			functions=tuple(fns),
+			src_root=tmp_path / "src",
+		)
+		for fn in fns:
+			ws = FunctionWorkspace(root=proj.workspace_for(fn), function_name=fn.name)
+			ws.root.mkdir(parents=True)
+			ws.result_json.write_text(json.dumps({"best_match_percent": 100.0, "success": True}))
+
+		seen = []
+		image_splice_verify(proj, parsed, compile_fn=_fail_compile, on_result=seen.append)
+		assert [fv.name for fv in seen] == ["a", "b"]

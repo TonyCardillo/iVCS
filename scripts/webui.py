@@ -31,7 +31,13 @@ if "IVCS_OBJDIFF_CLI" not in os.environ and _BUNDLED_OBJDIFF.is_file():
 	os.environ["IVCS_OBJDIFF_CLI"] = str(_BUNDLED_OBJDIFF)
 
 
-from src.integrator import image_coverage, image_verify_cache_load  # noqa: E402
+from src.integrator import (  # noqa: E402
+	image_coverage,
+	image_real_relink_verify,
+	image_splice_verify,
+	image_verify_cache_load,
+	image_verify_cache_write,
+)
 from src.launcher import JobInfo, ghidra_sweep_attempt_one, launch_decomp_job  # noqa: E402
 from src.libmatch import sdk_manifest_load  # noqa: E402
 from src.notes import notes_load, notes_save  # noqa: E402
@@ -139,6 +145,40 @@ def _active_workspace_paths() -> set[Path]:
 	these so it never races another writer on the same function's files."""
 	with _JOBS_LOCK:
 		return {p for p, j in _JOBS.items() if j.is_active()}
+
+
+# ── Image-verify registry (relink oracle over all matched functions) ────────
+@dataclass
+class VerifyState:
+	"""Live handle for a whole-image relink-verify run. Like the sweep, one
+	worker thread mutates it in place and it dies on a server restart (the cache
+	it writes on completion survives)."""
+
+	project_path: str
+	method: str  # "splice" (own relocator) | "relink" (real Link.Exe)
+	total: int
+	state: str = "running"  # running | done | error
+	done: int = 0
+	current: str | None = None
+	started_at: float = 0.0
+	error: str | None = None
+
+	def is_active(self) -> bool:
+		return self.state == "running"
+
+
+_VERIFIES_LOCK = threading.Lock()
+_VERIFIES: dict[str, VerifyState] = {}  # keyed by project manifest path
+
+
+def _verify_for(project_path_str: str) -> VerifyState | None:
+	with _VERIFIES_LOCK:
+		return _VERIFIES.get(project_path_str)
+
+
+def _register_verify(verify: VerifyState) -> None:
+	with _VERIFIES_LOCK:
+		_VERIFIES[verify.project_path] = verify
 
 
 # ── Styling ─────────────────────────────────────────────────────────────────
@@ -1952,22 +1992,53 @@ def _image_coverage_table(cov) -> str:
 	)
 
 
-def _verify_panel(project_path_str: str) -> str:
-	"""Show the cached relink-verified% (computed by scripts/integrate.py), or a
-	hint to compute it. The oracle recompiles every function, so it can't run on
-	a page render — the UI only displays what the CLI cached."""
+def _verify_buttons(project_path_str: str) -> str:
+	"""Two run buttons: splice (our relocator) and relink (real XDK Link.Exe)."""
+	path_q = quote(project_path_str)
+	return (
+		'<div class="hint-row" style="margin-top:10px;">'
+		f'<form class="hint-form" method="post" action="/verify/launch?path={path_q}&method=splice">'
+		'<button type="submit" class="btn-run">▶ verify (splice)</button></form>'
+		f'<form class="hint-form" method="post" action="/verify/launch?path={path_q}&method=relink">'
+		'<button type="submit" class="btn-run">▶ relink (Link.Exe)</button></form>'
+		'<span class="muted">recompiles every matched function · needs Wine + toolchain</span>'
+		"</div>"
+	)
+
+
+def _verify_panel(project_path_str: str) -> tuple[str, bool]:
+	"""(panel_html, is_active). Live progress while a verify job runs; otherwise
+	the cached result (or a prompt) plus run buttons. The oracle recompiles every
+	matched function, so it's a background job — never computed on a page render."""
+	job = _verify_for(project_path_str)
+	if job is not None and job.is_active():
+		pct = (job.done / job.total * 100.0) if job.total else 100.0
+		current = (
+			f' · <span class="muted">at {html.escape(job.current)}</span>' if job.current else ""
+		)
+		body = (
+			'<div class="run-banner sweeping">'
+			'<span class="badge pending">VERIFYING</span>'
+			f'<span class="sweep-counts">{job.done}/{job.total} matched functions · '
+			f"{html.escape(job.method)}</span>{current}</div>"
+			f'<div class="sweep-bar"><div class="sweep-bar-fill" style="width:{pct:.1f}%"></div></div>'
+		)
+		return panel("Relink-verified", body, meta=f"{pct:.0f}% · recompiling + relinking"), True
+
+	failed_note = ""
+	if job is not None and job.state == "error":
+		failed_note = (
+			f'<p class="muted tight">last verify errored: {html.escape(job.error or "")}</p>'
+		)
+
 	cache = image_verify_cache_load(project_path_str)
 	if cache is None:
 		body = (
-			'<p class="muted">Not yet computed. The relink oracle recompiles every '
-			"matched function (needs Wine + the toolchain), so it runs from the CLI:</p>"
-			'<pre class="code">python scripts/integrate.py verify '
-			f"{html.escape(project_path_str)}</pre>"
-			'<p class="muted tight">'
-			"<code>verify</code> uses our own relocator; <code>relink</code> drives the "
-			"real XDK Link.Exe as an independent cross-check.</p>"
+			'<p class="muted">Not yet computed — recompiles every matched function '
+			"(needs Wine + the toolchain). Run it as a background job:</p>"
+			f"{_verify_buttons(project_path_str)}{failed_note}"
 		)
-		return panel("Relink-verified", body)
+		return panel("Relink-verified", body), False
 
 	pct = cache.get("verified_percent", 0.0)
 	age = ""
@@ -1988,10 +2059,10 @@ def _verify_panel(project_path_str: str) -> str:
 		"</div>"
 		f"{_progress_bar(pct)}"
 		'<p class="muted tight" style="margin-top:8px;">Matched functions recompiled, '
-		"placed at their real VA, and byte-compared against the original image. "
-		"Re-run the CLI to refresh.</p>"
+		"placed at their real VA, and byte-compared against the original image.</p>"
+		f"{_verify_buttons(project_path_str)}{failed_note}"
 	)
-	return panel("Relink-verified", body)
+	return panel("Relink-verified", body), False
 
 
 def view_stats(project_path_str: str) -> str:
@@ -2013,6 +2084,7 @@ def view_stats(project_path_str: str) -> str:
 		f"{cov.matched_bytes:,} / {cov.total_bytes:,} bytes from source "
 		f"({cov.from_source_percent:.1f}% of the whole image)"
 	)
+	verify_html, verify_active = _verify_panel(project_path_str)
 	body = (
 		crumbs(
 			("home", "/"),
@@ -2025,10 +2097,34 @@ def view_stats(project_path_str: str) -> str:
 			_model_attempt_table(attempt_rows),
 			meta=f"{total_attempts:,} attempts across all functions",
 		)
-		+ panel("Whole-image reconstruction", _image_coverage_table(cov), meta=cov_meta)
-		+ _verify_panel(project_path_str)
+		+ panel(
+			"Whole-image reconstruction",
+			_image_budget_summary(cov) + _image_coverage_table(cov),
+			meta=cov_meta,
+		)
+		+ verify_html
 	)
-	return page(f"stats · {project.name}", body, current_path=None)
+	refresh = 4 if verify_active else None
+	return page(f"stats · {project.name}", body, current_path=None, refresh_seconds=refresh)
+
+
+def _image_budget_summary(cov) -> str:
+	"""A one-line byte budget that separates the gap into 'code still to do' vs.
+	'data/assets carried verbatim' — so a tiny from-source % reads as 'barely
+	started decompiling', not 'barely reproduces'."""
+	data_other = cov.gap_bytes
+	cells = [
+		("from source", cov.matched_bytes, "green"),
+		("in progress", cov.partial_bytes, "amber"),
+		("code to do", cov.todo_code_bytes, ""),
+		("SDK (linked)", cov.sdk_bytes, "cyan"),
+		("data / assets", data_other, "muted"),
+	]
+	spans = " · ".join(f'<span class="{cls}">{label}</span> {val:,}' for label, val, cls in cells)
+	return (
+		f'<p class="tight" style="margin-bottom:10px;">{spans}'
+		f" &nbsp;=&nbsp; {cov.total_bytes:,} B total</p>"
+	)
 
 
 def _progress_link(project_path_str: str) -> str:
@@ -2817,6 +2913,48 @@ def autoname_run(project_path_str: str, *, max_size: int = _AUTONAME_MAX_SIZE) -
 	return len(plan)
 
 
+def verify_launch(project_path_str: str, method: str = "splice") -> VerifyState:
+	"""Run the whole-image relink oracle over every matched function in a daemon
+	thread, caching the result on completion.
+
+	`method` is "splice" (our own relocator) or "relink" (the real XDK Link.Exe).
+	Returns immediately; the VerifyState advances done/current as functions are
+	checked. Idempotent while one is already running for this project. The oracle
+	recompiles every matched function, which is exactly why it's a background job
+	and not computed on a page render."""
+	existing = _verify_for(project_path_str)
+	if existing and existing.is_active():
+		return existing
+
+	project = project_load(project_path_str)
+	parsed = xbe_cached_load(str(project.xbe_path))
+	stats = project_aggregate(project, sdk_vas=_sdk_vas_for(project_path_str))
+	total = sum(1 for s in stats.function_statuses if s.state == "matched")
+
+	state = VerifyState(project_path=project_path_str, method=method, total=total)
+	_register_verify(state)
+	verifier = image_real_relink_verify if method == "relink" else image_splice_verify
+
+	def on_result(fv) -> None:
+		state.done += 1
+		state.current = fv.name
+
+	def _run() -> None:
+		state.started_at = time.time()
+		try:
+			result = verifier(project, parsed, on_result=on_result)
+			image_verify_cache_write(project_path_str, result, method=method, when=time.time())
+			state.state = "done"
+		except Exception as e:  # noqa: BLE001 — surface any failure to the UI
+			state.error = f"{type(e).__name__}: {e}"
+			state.state = "error"
+		finally:
+			state.current = None
+
+	threading.Thread(target=_run, daemon=True, name=f"verify-{project.name}").start()
+	return state
+
+
 def view_error(message: str, current_path: str | None = None) -> str:
 	body = (
 		crumbs(("home", "/"), ("error", None))
@@ -2869,6 +3007,12 @@ class Handler(BaseHTTPRequestHandler):
 				path = q.get("path", "") or form.get("path", "")
 				named = autoname_run(path)
 				self._redirect(f"/progress?path={quote(path)}&named={named}")
+				return
+			if route == "/verify/launch":
+				path = q.get("path", "") or form.get("path", "")
+				method = (q.get("method") or form.get("method") or "splice").strip()
+				verify_launch(path, "relink" if method == "relink" else "splice")
+				self._redirect(f"/stats?path={quote(path)}")
 				return
 			self._send(404, view_error(f"unknown POST route: {route}"))
 		except JobsAtCapacity as e:
