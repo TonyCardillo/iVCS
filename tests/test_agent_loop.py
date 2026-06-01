@@ -579,6 +579,56 @@ class TestGhidraOnlyRun:
 		assert best == normalized
 		assert "undefined4" not in best and "FUN_" not in best and "DAT_" not in best
 
+	def test_unavailable_baseline_keeps_prior_model_attribution(self, tmp_path):
+		# The reported bug: a real model already earned the standing best (40% via
+		# haiku across several attempts), then a ghidra-only pass ran where the
+		# warm-start was unavailable. ghidra_only_run must NOT clobber result.json's
+		# model -> "ghidra" / best -> None, or the UI shows "best by ghidra" and
+		# "ghidra_unavailable" for a function a model actually worked.
+		ws = _make_workspace(tmp_path, fn_name="_foo")
+		agent_loop_run(
+			workspace=ws,
+			target_asm="ret",
+			config=_make_config(model="claude-haiku-4-5", max_iterations=1),
+			llm_client=FakeLLMClient(
+				[assistant_tool_call("compile_and_view_assembly", {"c_code": "// haiku 40\n"})]
+			),
+			compile_fn=_compile_ok,
+			diff_fn=_scripted_diff(40.0),
+		)
+		result = ghidra_only_run(
+			workspace=ws, compile_fn=_compile_ok, diff_fn=_scripted_diff()
+		)
+		assert result.termination_reason == "ghidra_unavailable"
+		data = json.loads(ws.result_json.read_text())
+		assert data["model"] == "claude-haiku-4-5"
+		assert data["best_match_percent"] == 40.0
+		assert ws.best_c.read_text() == "// haiku 40\n"
+
+	def test_weaker_baseline_does_not_overwrite_stronger_prior(self, tmp_path):
+		# A ghidra baseline that compiles but scores below the standing best leaves
+		# the stronger model's attribution and best.c intact.
+		ws = _make_workspace(tmp_path, fn_name="_foo")
+		agent_loop_run(
+			workspace=ws,
+			target_asm="ret",
+			config=_make_config(model="alpha", max_iterations=1),
+			llm_client=FakeLLMClient(
+				[assistant_tool_call("compile_and_view_assembly", {"c_code": "// alpha 80\n"})]
+			),
+			compile_fn=_compile_ok,
+			diff_fn=_scripted_diff(80.0),
+		)
+		ws.attempt_paths(0).c.write_text("int foo(int x){return x;}\n")
+		result = ghidra_only_run(
+			workspace=ws, compile_fn=_compile_ok, diff_fn=_scripted_diff(43.7)
+		)
+		assert result.best_match_percent == 80.0
+		data = json.loads(ws.result_json.read_text())
+		assert data["model"] == "alpha"
+		assert data["best_match_percent"] == 80.0
+		assert ws.best_c.read_text() == "// alpha 80\n"
+
 
 class TestToollessResponse:
 	def test_text_only_with_c_block_is_treated_as_tool_call(self, tmp_path):

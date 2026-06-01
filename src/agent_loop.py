@@ -258,12 +258,25 @@ def ghidra_only_run(
 	workspace.validate_inputs()
 	paths = workspace.attempt_paths(0)
 
+	# A ghidra baseline pass must never demote a stronger standing best earned by
+	# a real model on a prior run: it only takes over the recorded best%/model when
+	# it strictly beats the prior. Otherwise an unavailable or weaker baseline would
+	# clobber result.json to model="ghidra"/best=None — the reported bug.
+	prior_best, prior_model = _prior_best(workspace)
+
+	def _standing(baseline_match: float | None) -> tuple[float | None, str]:
+		if prior_best is not None and (baseline_match is None or baseline_match <= prior_best):
+			return prior_best, prior_model or "ghidra"
+		return baseline_match, "ghidra"
+
 	if not paths.c.is_file():
-		return _finalize(workspace, "ghidra_unavailable", None, 0, model="ghidra")
+		best, model = _standing(None)
+		return _finalize(workspace, "ghidra_unavailable", best, 0, model=model)
 
 	_baseline_compile_attempt_zero(workspace, compile_fn=compile_fn)
 	if not paths.obj.is_file():
-		return _finalize(workspace, "compile_failed", None, 0, model="ghidra")
+		best, model = _standing(None)
+		return _finalize(workspace, "compile_failed", best, 0, model=model)
 
 	diff = diff_fn(workspace.target_obj, paths.obj, workspace.function_name)
 	match = function_match_percent(diff, workspace.function_name)
@@ -273,15 +286,17 @@ def ghidra_only_run(
 		# source that actually compiled+matched (attempt 0), NOT the raw Ghidra
 		# draft — the draft has undefined4/DAT_/FUN_ and won't recompile, which
 		# breaks the relink oracle and the source-tree integrator downstream.
+		best, model = _standing(match)
 		return _finalize(
 			workspace,
 			"matched",
-			match,
+			best,
 			0,
 			best_c_code=_baseline_source_body(workspace),
-			model="ghidra",
+			model=model,
 		)
-	return _finalize(workspace, "ghidra_only", match, 0, model="ghidra")
+	best, model = _standing(match)
+	return _finalize(workspace, "ghidra_only", best, 0, model=model)
 
 
 def _baseline_source_body(workspace: FunctionWorkspace) -> str | None:
