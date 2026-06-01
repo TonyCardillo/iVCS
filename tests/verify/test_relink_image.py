@@ -18,7 +18,7 @@ from src.formats.relocs import RelocKind, RelocSite, ResolvedReloc
 from src.formats.xbe import SECTION_FLAG_EXECUTABLE, ParsedXbe, XbeHeader, XbeSection
 from src.verify.link_tool import LinkOutput
 from src.verify.relink_image import function_object_compile, function_real_relink, relink_placement
-from tests.test_pe_read import _make_pe
+from tests.formats.test_pe_read import _make_pe
 
 
 class TestRelinkPlacement:

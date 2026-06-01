@@ -10,7 +10,7 @@ from hypothesis import assume, given
 from hypothesis import strategies as st
 
 # Make scripts/ importable without installing it
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "scripts"))
 
 import webui  # noqa: E402
 from webui import (  # noqa: E402

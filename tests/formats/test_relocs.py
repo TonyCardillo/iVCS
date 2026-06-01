@@ -27,7 +27,7 @@ from src.formats.xbe import (
 	XBE_KT_KEY_RETAIL,
 	xbe_parse,
 )
-from tests.test_xbe import build_minimal_xbe
+from tests.formats.test_xbe import build_minimal_xbe
 
 
 def call_rel32(at_va: int, target_va: int) -> bytes:

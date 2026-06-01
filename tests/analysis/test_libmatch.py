@@ -10,7 +10,7 @@ from src.analysis.libmatch import (
 	signature_index,
 )
 from src.formats.coff import coff_object_build
-from tests.test_archive import _archive
+from tests.formats.test_archive import _archive
 
 # A non-trivial leaf so opcode/equiv hashes are specific (5 instructions).
 LIB_BODY = b"\x55\x8b\xec\xb8\x01\x00\x00\x00\x5d\xc3"  # push ebp;mov ebp,esp;mov eax,1;pop ebp;ret

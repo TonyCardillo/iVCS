@@ -16,7 +16,7 @@ from src.decomp.objdiff import (
 	objdiff_parse,
 )
 
-FIXTURES = Path(__file__).parent / "fixtures"
+FIXTURES = Path(__file__).resolve().parent.parent / "fixtures"
 
 
 @pytest.fixture

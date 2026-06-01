@@ -423,7 +423,7 @@ class TestCoffRelocations:
 class TestCoffEndToEndObjdiff:
 	"""Round-trip the synthesized .obj through real objdiff-cli to prove parseability."""
 
-	OBJDIFF_CLI = Path(__file__).resolve().parent.parent / "recon/objdiff-smoke/objdiff-cli"
+	OBJDIFF_CLI = Path(__file__).resolve().parent.parent.parent / "recon/objdiff-smoke/objdiff-cli"
 
 	def setup_method(self):
 		if not self.OBJDIFF_CLI.is_file():
