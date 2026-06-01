@@ -931,19 +931,32 @@ def _objdiff_cli_path() -> str | None:
 	return None
 
 
+def _diff_json_is_stale(diff_path: Path, *inputs: Path) -> bool:
+	"""True when the cached diff predates an input it was derived from."""
+	diff_mtime = diff_path.stat().st_mtime
+	return any(p.is_file() and p.stat().st_mtime > diff_mtime for p in inputs)
+
+
 def _ensure_diff_json(workspace_root: Path, n: int, function_name: str | None) -> Path | None:
-	"""Lazily derive `NNNN.diff.json` from target.obj + NNNN.obj if it's missing."""
+	"""Lazily derive `NNNN.diff.json` from target.obj + NNNN.obj.
+
+	Regenerates when the cached diff is missing or older than either input. The
+	attempt's object is symbol-canonicalized (`__fn_<va>` -> `_fn_<va>`) after it
+	compiles, so a diff derived from the pre-canonicalization object shows an
+	unpairable `symbol mismatch` even though the attempt matched; treating a diff
+	older than its obj as stale self-heals those.
+	"""
 	history = workspace_root / "history"
 	diff_path = history / f"{n:04d}.diff.json"
-	if diff_path.is_file():
-		return diff_path
 	obj_path = history / f"{n:04d}.obj"
 	target = workspace_root / "target.obj"
 	if not obj_path.is_file() or not target.is_file():
-		return None
+		return diff_path if diff_path.is_file() else None
+	if diff_path.is_file() and not _diff_json_is_stale(diff_path, obj_path, target):
+		return diff_path
 	cli = _objdiff_cli_path()
 	if cli is None:
-		return None
+		return diff_path if diff_path.is_file() else None
 	cmd = [
 		cli,
 		"diff",

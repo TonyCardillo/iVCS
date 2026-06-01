@@ -1,7 +1,9 @@
 """Tests for the few pure helpers in scripts/webui.py."""
 
+import os
 import re
 import sys
+import types
 from pathlib import Path
 
 from hypothesis import assume, given
@@ -10,11 +12,14 @@ from hypothesis import strategies as st
 # Make scripts/ importable without installing it
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
+import webui  # noqa: E402
 from webui import (  # noqa: E402
 	SweepState,
 	_attempt_model_label,
 	_attempt_status_labels,
 	_best_attempt,
+	_diff_json_is_stale,
+	_ensure_diff_json,
 	_handle_notes_save,
 	_handle_symbol_rename,
 	_pager_window,
@@ -47,6 +52,77 @@ class _FakePath:
 
 	def is_file(self) -> bool:
 		return self._exists
+
+
+def _touch(path: Path, mtime: float) -> None:
+	os.utime(path, (mtime, mtime))
+
+
+def _diff_workspace(tmp_path: Path):
+	"""A workspace with target.obj + history/0002.{obj,diff.json}. Returns the paths."""
+	history = tmp_path / "history"
+	history.mkdir()
+	target = tmp_path / "target.obj"
+	target.write_bytes(b"t")
+	obj = history / "0002.obj"
+	obj.write_bytes(b"o")
+	diff = history / "0002.diff.json"
+	diff.write_text("{}")
+	return obj, diff, target
+
+
+def test_diff_json_is_stale_when_an_input_is_newer(tmp_path):
+	obj, diff, _target = _diff_workspace(tmp_path)
+	_touch(diff, 1000)
+	_touch(obj, 2000)  # obj rewritten after the diff was derived
+	assert _diff_json_is_stale(diff, obj) is True
+
+
+def test_diff_json_not_stale_when_newer_than_inputs(tmp_path):
+	obj, diff, _target = _diff_workspace(tmp_path)
+	_touch(obj, 1000)
+	_touch(diff, 2000)
+	assert _diff_json_is_stale(diff, obj) is False
+
+
+def test_ensure_diff_json_regenerates_stale_cache(tmp_path, monkeypatch):
+	"""A diff older than its obj (derived before symbol canonicalization) is
+	regenerated rather than served — the bug behind 'matched 100%' runs whose
+	attempts all showed 'symbol mismatch'."""
+	obj, diff, target = _diff_workspace(tmp_path)
+	_touch(target, 1000)
+	_touch(diff, 1000)
+	_touch(obj, 2000)  # obj newer than diff -> stale
+
+	calls = []
+
+	def fake_run(cmd, **kwargs):
+		calls.append(cmd)
+		diff.write_text('{"regenerated": true}')
+		_touch(diff, 3000)
+		return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+
+	monkeypatch.setattr(webui, "_objdiff_cli_path", lambda: "objdiff-cli")
+	monkeypatch.setattr(webui.subprocess, "run", fake_run)
+
+	assert _ensure_diff_json(tmp_path, 2, "_fn_00430D97") == diff
+	assert calls, "a stale diff should trigger objdiff regeneration"
+
+
+def test_ensure_diff_json_keeps_fresh_cache(tmp_path, monkeypatch):
+	"""A diff newer than both inputs is served from cache without invoking objdiff."""
+	obj, diff, target = _diff_workspace(tmp_path)
+	_touch(target, 1000)
+	_touch(obj, 1000)
+	_touch(diff, 2000)  # diff newer than both inputs -> fresh
+
+	def boom(*args, **kwargs):
+		raise AssertionError("a fresh cache must not invoke objdiff")
+
+	monkeypatch.setattr(webui, "_objdiff_cli_path", lambda: "objdiff-cli")
+	monkeypatch.setattr(webui.subprocess, "run", boom)
+
+	assert _ensure_diff_json(tmp_path, 2, "_fn_00430D97") == diff
 
 
 def test_status_compiling_in_flight():
