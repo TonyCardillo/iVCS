@@ -8,7 +8,7 @@ small leaves, so you wake up to the largest number of verified matches.
 
 Resume is implicit: already-matched functions are skipped, so re-running the
 batch picks up where it left off. This module holds the pure planning logic;
-the real run wiring (prep + agent loop + LM Studio) lives in scripts/batch.py.
+the real run wiring (prep + agent loop + LM Studio) lives in src/cli/batch.py.
 """
 
 import json

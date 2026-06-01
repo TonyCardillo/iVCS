@@ -5,7 +5,8 @@ What naming signal a stripped retail XBE actually carries, so the project-wide
 there instead of what we wish were there.
 
 Status: findings from the Halo 2 retail XBE (`halo2_default.xbe`, build
-2342-era). Drives `src/strings_xref.py`, `src/libmatch.py`, `src/xboxkrnl.py`.
+2342-era). Drives `src/analysis/strings_xref.py`, `src/analysis/libmatch.py`,
+`src/formats/xboxkrnl.py`.
 
 ## The governing principle
 

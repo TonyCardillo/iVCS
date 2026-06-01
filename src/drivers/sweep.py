@@ -6,7 +6,7 @@ scarcest resource is the Ghidra headless decompile per function, so the queue is
 smallest-first — a sweep that's interrupted still banks the most leaves.
 
 This module holds the pure planning, classification, and run-loop logic; the
-threaded wiring (registry + live progress + Ghidra/Wine) lives in scripts/webui.py.
+threaded wiring (registry + live progress + Ghidra/Wine) lives in src/webui/workers.py.
 """
 
 from collections.abc import Callable, Sequence

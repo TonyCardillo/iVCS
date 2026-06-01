@@ -4,7 +4,7 @@ Ghidra is an optional pseudo-C source for the agent's first attempt. The
 LLM "fixes" Ghidra's draft rather than writing from scratch, which
 historically lifts first-attempt match rates significantly.
 
-Status: landed. The integration lives in `src/ghidra_decompile.py`
+Status: landed. The integration lives in `src/decomp/ghidra_decompile.py`
 (headless wrapper) + `ghidra_scripts/DecompileOne.java` (decompile postscript),
 wired into `agent_loop.py` (warm-start prompt + `ghidra_only_run` baseline)
 and the webui launch form. Follow the install below to enable it locally.
@@ -81,9 +81,9 @@ A clean run prints "Analysis succeeded" near the end and leaves a
 
 ## Wrapper
 
-Implemented in `src/ghidra_decompile.py` (`ghidra_project_ensure` +
+Implemented in `src/decomp/ghidra_decompile.py` (`ghidra_project_ensure` +
 `ghidra_decompile_function`) + `ghidra_scripts/DecompileOne.java`, with the
-`use Ghidra warm-start` checkbox in `scripts/webui.py`. Drafts cache to
+`use Ghidra warm-start` checkbox in `src/webui/`. Drafts cache to
 `<workspace>/ghidra_warmstart.c`.
 
 ## Resolved design decisions

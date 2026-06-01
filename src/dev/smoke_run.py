@@ -10,7 +10,7 @@ Prereqs:
   - Wine + XDK 5849 VC7.1 toolchain (default IVCS_MSVC_DIR=<repo>/compilers/xdk5849-vc71)
   - objdiff-cli binary (bundled at recon/objdiff-smoke/objdiff-cli)
   - ANTHROPIC_API_KEY set in env
-  - From the project root: `.venv/bin/python scripts/smoke_run.py`
+  - From the project root: `uv run python -m src.dev.smoke_run`
 
 This script intentionally hardcodes the target disassembly rather than
 dumping it dynamically; that's a deliberate scope choice while the

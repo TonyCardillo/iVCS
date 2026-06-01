@@ -7,13 +7,13 @@ import html
 from pathlib import Path
 from urllib.parse import quote
 
-from src.analysis.libmatch import sdk_manifest_load
 from src.analysis.symbols import symbol_map_load
 from src.core.project import (
 	Project,
 	ProjectStats,
 	project_aggregate,
 	project_load,
+	project_sdk_vas,
 )
 from src.webui.diff import _attempts_listing
 from src.webui.state import (
@@ -57,7 +57,7 @@ def view_progress_index(current_path: str | None) -> str:
 </form>
 <p class="muted" style="margin-top: 12px;">
   Point at a <span style="color: var(--cyan);">project.json</span> manifest.
-  Generate one with <span style="color: var(--cyan);">scripts/enumerate.py</span>.
+  Generate one with <span style="color: var(--cyan);">python -m src enumerate</span>.
 </p>
 """.replace("{autofocus}", " autofocus" if not projects else ""),
 	)
@@ -417,10 +417,10 @@ _SDK_SWATCH = "#5b7da6"  # distinct from the matched/partial/untouched scale
 
 
 def _sdk_vas_for(project_path_str: str) -> frozenset[int]:
-	"""Load the SDK manifest sitting next to project.json (scripts/libmatch.py
-	--save), if present. Empty otherwise → progress is reported over the whole image."""
-	sdk_path = Path(project_path_str).parent / "sdk.json"
-	return frozenset(sdk_manifest_load(sdk_path)) if sdk_path.is_file() else frozenset()
+	"""SDK VAs from the sdk.json beside project.json (see `libmatch --save`), or
+	empty → progress is reported over the whole image. Thin alias for the shared
+	core helper so the web UI, CLI, and batch all read the manifest the same way."""
+	return project_sdk_vas(project_path_str)
 
 
 def _progress_summary(project: Project, stats: ProjectStats) -> str:
