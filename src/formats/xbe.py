@@ -143,7 +143,8 @@ def xbe_function_carve(parsed: ParsedXbe, virtual_address: int, size: int) -> by
 			f"(flags={section.flags:#x})"
 		)
 
-	# virtual_size can exceed raw_size (BSS zero-fill tail); carving past raw bytes reads non-code zeros.
+	# virtual_size can exceed raw_size (BSS zero-fill tail); carving past raw bytes
+	# reads non-code zeros.
 	offset = virtual_address - section.virtual_address
 	if offset + size > section.raw_size:
 		raise XbeFormatError(

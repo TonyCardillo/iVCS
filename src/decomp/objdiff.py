@@ -8,11 +8,11 @@ https://github.com/encounter/objdiff/blob/main/objdiff-core/protos/diff.proto
 import json
 import subprocess
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 
 
-class DiffKind(str, Enum):
+class DiffKind(StrEnum):
 	NONE = "DIFF_NONE"
 	REPLACE = "DIFF_REPLACE"
 	DELETE = "DIFF_DELETE"
