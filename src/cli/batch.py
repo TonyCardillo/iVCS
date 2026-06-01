@@ -1,15 +1,10 @@
-#!/usr/bin/env python3
-"""Overnight batch decompiler; grind the agent loop over a whole project unattended.
+"""`batch` subcommand: grind the agent loop over a whole project unattended.
 
-Built for a free local model (LM Studio). Smallest functions first; byte-identical
-duplicates are solved once and the solution is propagated (verified) to its twins,
-never re-derived. Resume is implicit; already-matched functions are skipped; so
-re-running picks up where it left off.
-
-Usage:
-    python scripts/batch.py path/to/project.json [--dry-run]
-    python scripts/batch.py path/to/project.json [--max-iterations N] [--timeout SEC]
-                                                  [--limit N]
+The run-wiring (LLM client + workspace prep + agent loop) around the pure
+planning logic in src.drivers.batch. Built for a free local model (LM Studio).
+Smallest functions first; byte-identical duplicates are solved once and the
+solution is propagated (verified) to its twins. Resume is implicit; already-
+matched functions are skipped, so re-running picks up where it left off.
 
 Stop it gracefully overnight by creating a STOP file next to project.json
 (`touch <project_dir>/STOP`); it exits after the function in flight. Every
@@ -22,43 +17,44 @@ XDK toolchain.
 
 from __future__ import annotations
 
-import argparse
 import json
 import os
 import sys
 import time
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(REPO_ROOT))
-
-# Prefer bundled objdiff-cli; don't override an explicit env setting.
-_BUNDLED_OBJDIFF = REPO_ROOT / "recon" / "objdiff-smoke" / "objdiff-cli"
-if "IVCS_OBJDIFF_CLI" not in os.environ and _BUNDLED_OBJDIFF.is_file():
-	os.environ["IVCS_OBJDIFF_CLI"] = str(_BUNDLED_OBJDIFF)
-
-from src.analysis.fingerprint import project_fingerprints  # noqa: E402
-from src.analysis.libmatch import sdk_manifest_load  # noqa: E402
-from src.analysis.symbols import symbol_map_load  # noqa: E402
-from src.core.project import FunctionEntry, function_status, project_load  # noqa: E402
-from src.decomp.agent_loop import AgentConfig, agent_loop_run  # noqa: E402
-from src.decomp.compile_tool import default_compile_fn, default_diff_fn  # noqa: E402
-from src.decomp.llm_clients import llm_client_for, llm_recorded_model  # noqa: E402
-from src.drivers.batch import (  # noqa: E402
+from src.analysis.fingerprint import project_fingerprints
+from src.analysis.symbols import symbol_map_load
+from src.core.project import FunctionEntry, function_status, project_load, project_sdk_vas
+from src.decomp.agent_loop import AgentConfig, agent_loop_run
+from src.decomp.compile_tool import default_compile_fn, default_diff_fn
+from src.decomp.llm_clients import llm_client_for, llm_recorded_model
+from src.drivers.batch import (
 	QueueItem,
 	RunOutcome,
 	batch_queue,
 	batch_run,
 	propagate_to_twins,
 )
-from src.drivers.launcher import prepare_decomp_workspace  # noqa: E402
-from src.formats.relocs import relocs_discover  # noqa: E402
-from src.formats.xbe import xbe_function_carve, xbe_load  # noqa: E402
+from src.drivers.launcher import prepare_decomp_workspace
+from src.formats.relocs import relocs_discover
+from src.formats.xbe import xbe_function_carve, xbe_load
+from src.paths import RECON_DIR
+
+# Prefer bundled objdiff-cli; don't override an explicit env setting.
+_BUNDLED_OBJDIFF = RECON_DIR / "objdiff-smoke" / "objdiff-cli"
+if "IVCS_OBJDIFF_CLI" not in os.environ and _BUNDLED_OBJDIFF.is_file():
+	os.environ["IVCS_OBJDIFF_CLI"] = str(_BUNDLED_OBJDIFF)
 
 
-def _sdk_vas_for(project_path: Path) -> frozenset[int]:
-	sdk_path = project_path.parent / "sdk.json"
-	return frozenset(sdk_manifest_load(sdk_path)) if sdk_path.is_file() else frozenset()
+def add_parser(subparsers) -> None:
+	parser = subparsers.add_parser("batch", help="Overnight batch harness over a whole project")
+	parser.add_argument("project", type=Path)
+	parser.add_argument("--max-iterations", type=int, default=12)
+	parser.add_argument("--timeout", type=float, default=300.0, help="per-fn hard timeout (s)")
+	parser.add_argument("--limit", type=int, default=0, help="process at most N items (0 = all)")
+	parser.add_argument("--dry-run", action="store_true", help="print the queue and exit")
+	parser.set_defaults(func=_run)
 
 
 def _matched_vas(project) -> set[int]:
@@ -98,7 +94,7 @@ def _make_run_one(project, parsed, symbols, *, max_iterations: int, timeout: flo
 				reason=result.termination_reason,
 				source="model",
 			)
-		except Exception as e:  # noqa: BLE001; keep the batch alive
+		except Exception as e:  # noqa: BLE001 keep the batch alive
 			return RunOutcome(
 				va=fn.va,
 				name=fn.name,
@@ -138,7 +134,7 @@ def _make_propagate(project, parsed, symbols):
 				compile_fn=default_compile_fn,
 				diff_fn=default_diff_fn,
 			)
-		except Exception as e:  # noqa: BLE001; a twin failure shouldn't abort the night
+		except Exception as e:  # noqa: BLE001 a twin failure shouldn't abort the night
 			return [
 				RunOutcome(
 					va=t.va,
@@ -191,18 +187,10 @@ def _print_queue(queue: list[QueueItem]) -> None:
 		sys.stderr.write(f"  {i + 1:>4}. {item.fn.name}  {item.fn.size:>5}B{twins}{tag}\n")
 
 
-def main() -> int:
-	parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-	parser.add_argument("project", type=Path)
-	parser.add_argument("--max-iterations", type=int, default=12)
-	parser.add_argument("--timeout", type=float, default=300.0, help="per-fn hard timeout (s)")
-	parser.add_argument("--limit", type=int, default=0, help="process at most N items (0 = all)")
-	parser.add_argument("--dry-run", action="store_true", help="print the queue and exit")
-	args = parser.parse_args()
-
+def _run(args) -> int:
 	project = project_load(args.project)
 	parsed = xbe_load(project.xbe_path)
-	sdk_vas = _sdk_vas_for(args.project)
+	sdk_vas = project_sdk_vas(args.project)
 
 	sys.stderr.write("Fingerprinting + planning queue…\n")
 	fingerprints = project_fingerprints(project, parsed)
@@ -250,7 +238,3 @@ def main() -> int:
 	if stop_file.exists():
 		sys.stderr.write(f"  (remove {stop_file} before the next run)\n")
 	return 0
-
-
-if __name__ == "__main__":
-	raise SystemExit(main())

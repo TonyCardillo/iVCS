@@ -1,38 +1,30 @@
-#!/usr/bin/env python3
-"""Identify a project's SDK functions by matching them against the XDK libraries.
-
-Usage:
-    python scripts/libmatch.py path/to/project.json LIB.lib [LIB2.lib ...]
-                                                            [--min-size N] [--show N]
+"""`libmatch` subcommand: identify SDK functions by matching XDK libraries.
 
 Fingerprints every function in the given XDK static libraries and matches the
-project's functions against them (on relocation-invariant opcode/operand-shape
-hashes, so the linker's address patching doesn't matter). Reports how much of the
-image is recognized SDK code — named, and excludable from the real decomp target.
+project's functions against them on relocation-invariant hashes, so the linker's
+address patching doesn't matter. Reports how much of the image is recognized SDK
+code — named, and excludable from the real decomp target. `--save` writes the
+confident matches to sdk.json (consumed by the coverage report and web UI).
 """
 
 from __future__ import annotations
 
-import argparse
 import sys
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(REPO_ROOT))
-
-from src.analysis.fingerprint import project_fingerprints  # noqa: E402
-from src.analysis.libmatch import (  # noqa: E402
+from src.analysis.fingerprint import project_fingerprints
+from src.analysis.libmatch import (
 	library_signatures,
 	match_fingerprints,
 	sdk_manifest_write,
 	signature_index,
 )
-from src.core.project import project_load  # noqa: E402
-from src.formats.xbe import xbe_load  # noqa: E402
+from src.core.project import project_load
+from src.formats.xbe import xbe_load
 
 
-def main() -> int:
-	parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+def add_parser(subparsers) -> None:
+	parser = subparsers.add_parser("libmatch", help="Name SDK functions via XDK library signatures")
 	parser.add_argument("project", type=Path, help="Path to project.json")
 	parser.add_argument("libs", type=Path, nargs="+", help="XDK .lib archives to match against")
 	parser.add_argument("--min-size", type=int, default=16, help="Skip functions below N bytes")
@@ -43,8 +35,10 @@ def main() -> int:
 		help="Write confident matches to sdk.json next to project.json "
 		"(consumed by the coverage report and web UI)",
 	)
-	args = parser.parse_args()
+	parser.set_defaults(func=_run)
 
+
+def _run(args) -> int:
 	if not args.project.is_file():
 		print(f"ERROR: {args.project} not found", file=sys.stderr)
 		return 1
@@ -83,7 +77,3 @@ def main() -> int:
 		written = sdk_manifest_write(sdk_path, matches)
 		print(f"wrote {written:,} confident SDK identifications to {sdk_path}", file=sys.stderr)
 	return 0
-
-
-if __name__ == "__main__":
-	raise SystemExit(main())

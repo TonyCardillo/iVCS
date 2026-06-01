@@ -10,16 +10,12 @@ through objdiff-cli.
 
 import json
 import subprocess
-import sys
 import tempfile
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(REPO_ROOT))
-
-from src.formats.coff import coff_object_build  # noqa: E402
-from src.formats.relocs import relocs_resolve  # noqa: E402
-from src.formats.xbe import (  # noqa: E402
+from src.formats.coff import coff_object_build
+from src.formats.relocs import relocs_resolve
+from src.formats.xbe import (
 	xbe_build_flavor_detect,
 	xbe_entry_point_get,
 	xbe_function_carve,
@@ -27,8 +23,9 @@ from src.formats.xbe import (  # noqa: E402
 	xbe_load,
 	xbe_section_containing_va,
 )
+from src.paths import RECON_DIR
 
-OBJDIFF_CLI = REPO_ROOT / "recon/objdiff-smoke/objdiff-cli"
+OBJDIFF_CLI = RECON_DIR / "objdiff-smoke/objdiff-cli"
 
 XBE_PATH = Path("/tmp/halo2_default.xbe")
 THUNK_PEEK_COUNT = 12

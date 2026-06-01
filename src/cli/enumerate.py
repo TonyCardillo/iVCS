@@ -1,15 +1,8 @@
-#!/usr/bin/env python3
-"""Enumerate functions in an XBE and emit a project.json manifest.
+"""`enumerate` subcommand: XBE → project.json manifest.
 
-Usage:
-    python scripts/enumerate.py path/to/default.xbe [options]
-    python scripts/enumerate.py /tmp/halo2_default.xbe \\
-        --name halo2-retail \\
-        --workspace-root ./functions \\
-        --output halo2.project.json
-
-Prints a one-line summary (function count, total bytes, section breakdown)
-to stderr; writes the manifest JSON to --output (default: stdout).
+Prints a one-line summary (function count, total bytes, section breakdown) to
+stderr; writes the manifest JSON to --output (default: stdout). The manifest
+shape is built by `project_manifest_build`; everything here is presentation.
 """
 
 from __future__ import annotations
@@ -20,23 +13,21 @@ import sys
 from collections import Counter
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(REPO_ROOT))
-
-from src.formats.xbe import (  # noqa: E402
+from src.core.project import project_manifest_build
+from src.formats.xbe import (
 	xbe_functions_enumerate,
 	xbe_load,
 	xbe_section_containing_va,
 )
 
 
-def main() -> int:
-	parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+def add_parser(subparsers) -> argparse.ArgumentParser:
+	parser = subparsers.add_parser(
+		"enumerate", help="Enumerate an XBE's functions into a project.json manifest"
+	)
 	parser.add_argument("xbe_path", type=Path, help="Path to the .xbe file")
 	parser.add_argument(
-		"--name",
-		default=None,
-		help="Project name (default: xbe basename without extension)",
+		"--name", default=None, help="Project name (default: xbe basename without extension)"
 	)
 	parser.add_argument(
 		"--workspace-root",
@@ -44,25 +35,19 @@ def main() -> int:
 		help="workspace_root entry for the manifest (default: ./functions)",
 	)
 	parser.add_argument(
-		"--output",
-		type=Path,
-		default=None,
-		help="Write manifest to this path instead of stdout",
+		"--output", "-o", type=Path, default=None, help="Write manifest here instead of stdout"
 	)
 	parser.add_argument(
-		"--limit",
-		type=int,
-		default=None,
-		help="Only emit the first N functions (useful for sampling)",
+		"--limit", type=int, default=None, help="Only emit the first N functions (for sampling)"
 	)
 	parser.add_argument(
-		"--min-size",
-		type=int,
-		default=1,
-		help="Skip functions smaller than this many bytes (default: 1)",
+		"--min-size", type=int, default=1, help="Skip functions smaller than N bytes (default: 1)"
 	)
-	args = parser.parse_args()
+	parser.set_defaults(func=_run)
+	return parser
 
+
+def _run(args) -> int:
 	if not args.xbe_path.is_file():
 		print(f"ERROR: {args.xbe_path} not found", file=sys.stderr)
 		return 1
@@ -101,15 +86,13 @@ def main() -> int:
 		functions = functions[: args.limit]
 		print(f"  (limited to first {args.limit})", file=sys.stderr)
 
-	project_name = args.name or args.xbe_path.stem
-	manifest = {
-		"name": project_name,
-		"xbe_path": str(args.xbe_path.resolve()),
-		"workspace_root": args.workspace_root,
-		"functions": [
-			{"name": fn.name, "va": f"0x{fn.va:08X}", "size": fn.size} for fn in functions
-		],
-	}
+	manifest = project_manifest_build(
+		parsed,
+		name=args.name or args.xbe_path.stem,
+		xbe_path=args.xbe_path,
+		workspace_root=args.workspace_root,
+		functions=functions,
+	)
 	serialized = json.dumps(manifest, indent=2) + "\n"
 
 	if args.output is None:
@@ -119,7 +102,3 @@ def main() -> int:
 		print(f"wrote {args.output}", file=sys.stderr)
 
 	return 0
-
-
-if __name__ == "__main__":
-	raise SystemExit(main())

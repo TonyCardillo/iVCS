@@ -29,17 +29,14 @@ import sys
 import tempfile
 from pathlib import Path
 
-# Make `import src.*` work when run directly.
-sys.path.insert(0, str(Path(__file__).parent.parent))
+from src.core.workspace import FunctionWorkspace
+from src.decomp.agent_loop import AgentConfig, agent_loop_run
+from src.decomp.compile_tool import default_compile_fn, default_diff_fn
+from src.decomp.llm_clients import LiteLLMClient
+from src.paths import COMPILERS_DIR, RECON_DIR
 
-from src.core.workspace import FunctionWorkspace  # noqa: E402
-from src.decomp.agent_loop import AgentConfig, agent_loop_run  # noqa: E402
-from src.decomp.compile_tool import default_compile_fn, default_diff_fn  # noqa: E402
-from src.decomp.llm_clients import LiteLLMClient  # noqa: E402
-
-REPO_ROOT = Path(__file__).parent.parent
-TARGET_OBJ = REPO_ROOT / "recon" / "objdiff-smoke" / "target.obj"
-OBJDIFF_CLI = REPO_ROOT / "recon" / "objdiff-smoke" / "objdiff-cli"
+TARGET_OBJ = RECON_DIR / "objdiff-smoke" / "target.obj"
+OBJDIFF_CLI = RECON_DIR / "objdiff-smoke" / "objdiff-cli"
 
 # Disassembly of _classify captured during recon/objdiff-smoke/; src was `int classify(int x)`.
 CLASSIFY_ASM = """\
@@ -68,7 +65,7 @@ def check_prereqs() -> None:
 	if not OBJDIFF_CLI.is_file():
 		missing.append(f"objdiff-cli missing at {OBJDIFF_CLI}")
 
-	msvc_dir = Path(os.environ.get("IVCS_MSVC_DIR", str(REPO_ROOT / "compilers" / "xdk5849-vc71")))
+	msvc_dir = Path(os.environ.get("IVCS_MSVC_DIR", str(COMPILERS_DIR / "xdk5849-vc71")))
 	if not (msvc_dir / "bin" / "cl.exe").is_file():
 		missing.append(f"cl.exe not at {msvc_dir}/bin/cl.exe")
 

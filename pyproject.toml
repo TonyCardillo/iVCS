@@ -49,7 +49,7 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S101"]  # asserts in tests
-"scripts/*" = ["S101", "S108"]  # demo/sanity scripts: assert + /tmp paths are intentional
+"src/dev/*" = ["S101", "S108"]  # demo/sanity diagnostics: assert + /tmp paths are intentional
 "scripts/webui.py" = ["S101", "S108", "E501"]  # HTML/CSS template lines don't split well
 
 [tool.ruff.format]

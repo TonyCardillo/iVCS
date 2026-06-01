@@ -12,6 +12,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from src.formats.xbe import ParsedXbe, XbeFunction, xbe_functions_enumerate
+
 
 @dataclass(frozen=True)
 class FunctionEntry:
@@ -118,6 +120,47 @@ def project_load(path: Path | str) -> Project:
 		functions=tuple(functions),
 		src_root=src_root,
 	)
+
+
+def project_manifest_build(
+	parsed: ParsedXbe,
+	*,
+	name: str,
+	xbe_path: Path,
+	workspace_root: str = "./functions",
+	functions: Sequence[XbeFunction] | None = None,
+) -> dict:
+	"""Build the project.json manifest dict for an enumerated XBE.
+
+	The inverse of `project_load`: emits the on-disk schema it consumes, with
+	`va` as an `"0xXXXXXXXX"` string. When `functions` is None the whole image is
+	enumerated via `xbe_functions_enumerate`; pass a pre-filtered/limited sequence
+	to scope the manifest. Pure: writing the dict is the caller's job.
+	"""
+	if functions is None:
+		functions = xbe_functions_enumerate(parsed)
+	return {
+		"name": name,
+		"xbe_path": str(xbe_path.resolve()),
+		"workspace_root": workspace_root,
+		"functions": [
+			{"name": fn.name, "va": f"0x{fn.va:08X}", "size": fn.size} for fn in functions
+		],
+	}
+
+
+def project_sdk_vas(project_path: Path | str) -> frozenset[int]:
+	"""VAs identified as XDK library code, from `sdk.json` next to project.json.
+
+	Written by the `libmatch --save` pass; consumed by the coverage report, the
+	batch queue, and the web UI to exclude SDK functions from the decomp target.
+	Empty when the manifest is absent. The libmatch import is deferred to call
+	time so `core` carries no import-time dependency on `analysis`.
+	"""
+	from src.analysis.libmatch import sdk_manifest_load
+
+	sdk_path = Path(project_path).parent / "sdk.json"
+	return frozenset(sdk_manifest_load(sdk_path)) if sdk_path.is_file() else frozenset()
 
 
 def function_status(project: Project, fn: FunctionEntry) -> FunctionStatus:
