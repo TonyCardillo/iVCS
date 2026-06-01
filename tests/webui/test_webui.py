@@ -1,19 +1,18 @@
-"""Tests for the few pure helpers in scripts/webui.py."""
+"""Tests for the few pure helpers in src/webui/."""
 
 import os
 import re
-import sys
 import types
 from pathlib import Path
 
 from hypothesis import assume, given
 from hypothesis import strategies as st
 
-# Make scripts/ importable without installing it
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "scripts"))
-
-import webui  # noqa: E402
-from webui import (  # noqa: E402
+import src.webui as webui
+from src.analysis.notes import notes_load  # noqa: E402
+from src.analysis.symbols import symbol_map_load  # noqa: E402
+from src.core.project import ProjectStats  # noqa: E402
+from src.webui import (
 	SweepState,
 	_attempt_model_label,
 	_attempt_status_labels,
@@ -32,10 +31,6 @@ from webui import (  # noqa: E402
 	_sweep_section,
 	_va_from_workspace,
 )
-
-from src.analysis.notes import notes_load  # noqa: E402
-from src.analysis.symbols import symbol_map_load  # noqa: E402
-from src.core.project import ProjectStats  # noqa: E402
 
 
 def _attempt(*, compiled: bool, diff_exists: bool, match_percent: float | None):
@@ -102,8 +97,8 @@ def test_ensure_diff_json_regenerates_stale_cache(tmp_path, monkeypatch):
 		_touch(diff, 3000)
 		return types.SimpleNamespace(returncode=0, stdout="", stderr="")
 
-	monkeypatch.setattr(webui, "_objdiff_cli_path", lambda: "objdiff-cli")
-	monkeypatch.setattr(webui.subprocess, "run", fake_run)
+	monkeypatch.setattr(webui.diff, "_objdiff_cli_path", lambda: "objdiff-cli")
+	monkeypatch.setattr(webui.diff.subprocess, "run", fake_run)
 
 	assert _ensure_diff_json(tmp_path, 2, "_fn_00430D97") == diff
 	assert calls, "a stale diff should trigger objdiff regeneration"
@@ -119,8 +114,8 @@ def test_ensure_diff_json_keeps_fresh_cache(tmp_path, monkeypatch):
 	def boom(*args, **kwargs):
 		raise AssertionError("a fresh cache must not invoke objdiff")
 
-	monkeypatch.setattr(webui, "_objdiff_cli_path", lambda: "objdiff-cli")
-	monkeypatch.setattr(webui.subprocess, "run", boom)
+	monkeypatch.setattr(webui.diff, "_objdiff_cli_path", lambda: "objdiff-cli")
+	monkeypatch.setattr(webui.diff.subprocess, "run", boom)
 
 	assert _ensure_diff_json(tmp_path, 2, "_fn_00430D97") == diff
 

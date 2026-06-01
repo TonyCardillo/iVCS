@@ -50,7 +50,7 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S101"]  # asserts in tests
 "src/dev/*" = ["S101", "S108"]  # demo/sanity diagnostics: assert + /tmp paths are intentional
-"scripts/webui.py" = ["S101", "S108", "E501"]  # HTML/CSS template lines don't split well
+"src/webui/*" = ["S101", "S108", "E501"]  # HTML/CSS template lines don't split well
 
 [tool.ruff.format]
 indent-style = "tab"
