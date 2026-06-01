@@ -4,52 +4,53 @@ iVCS is a matching-decompilation platform for the original Xbox. It combines rev
 
 ## Pipeline
 
-TODO: put a much higher-level pipeline here
+For each function enumerated from an XBE:
 
-Old way too verbose pipeline to remove:
-
-```text
-default.xbe (4.6 MB)
-   │
-   ├─ xbe_load + xbe_function_carve(va, size)        ← src/xbe.py
-   ├─ relocs_resolve                                  ← src/relocs.py
-   │     ├─ REL32  call rel32/jmp rel32/jcc rel32  →  _fn_*@N (conv-inferred)  or  _data_*
-   │     └─ DIR32  call/jmp [imm32]                →  __imp__<mangled>  for kernel-thunk slots
-   ├─ coff_object_build → target.obj                  ← src/coff.py
-   │     (one .text section + IMAGE_REL_I386_{REL32,DIR32} relocs +
-   │      static .text section symbol + external per unique reloc target)
-   │
-   ▼
-FunctionWorkspace                                     ← src/workspace.py
-   target.obj          (ground truth)
-   ctx.h               (typedefs + __declspec(dllimport) externs)
-   history/NNNN.{c,obj,diff.json}
-   best.c, result.json
-   │
-   ▼
-agent_loop_run                                        ← src/agent_loop.py
-   ↻ LLM proposes C → compile_and_view_assembly
-                       │
-                       ├─ cl.exe                       ← src/compile_tool.py
-                       └─ objdiff-cli diff JSON        ← src/objdiff.py
-   exit on 100% match, budget exhausted, or LLM gives up
-```
+1. **Carve & target** — carve the function's bytes and synthesize a ground-truth
+   `.obj`, the byte-exact target the decomp is matched against.
+2. **Warm-start** — seed the first attempt with normalized Ghidra pseudo-C.
+3. **Agent loop** — the LLM proposes C; we compile it (XDK `cl.exe`) and diff it
+   against the target (`objdiff`). The per-instruction diff feeds the next
+   attempt, hill-climbing until the function matches or the budget runs out.
+4. **Verify** — relink the compiled bytes to the function's real address and
+   byte-compare against the original image.
+5. **Integrate** — commit matched functions into a segment-organized source tree
+   and report coverage.
 
 ## Features
 
 - Project workspaces in `projects/`
-- Parses XBE format and enumerators every function into `project.json` manifest
+- Parses XBE format and enumerates every function into a `project.json` manifest
 - Synthesizes `ctx.h` with inferred typedefs, struct layouts, and calling conventions
 - Deterministic first decomp attempt with normalized Ghidra output
 - A decomp agent loop (Claude or local)
 - Byte-splice verification against the original image
 - Similar-function match propagation
-- Identify funciton names from static libraries and discoverable strings
+- Identify function names from static libraries and discoverable strings
 - Coverage reports
 
 ## Quickstart
 
-TODO: quick start for the webui (the main frontend)
+The web UI (`scripts/webui.py`) is the main frontend: explore an XBE, launch and
+monitor decomp runs, drive the batch/sweep harnesses, and read coverage.
+
+```bash
+# 1. Install (creates .venv from pyproject.toml + uv.lock)
+uv sync
+
+# 2. Enumerate an XBE into a project manifest the UI can load
+mkdir -p projects/halo2-retail
+uv run python scripts/enumerate.py path/to/default.xbe --name halo2-retail \
+    --output projects/halo2-retail/project.json
+
+# 3. Launch the UI (cloud runs need a key; a local LM Studio model works without one)
+export ANTHROPIC_API_KEY=sk-ant-...   # optional
+uv run python scripts/webui.py        # serves http://127.0.0.1:8765/ (--port to change)
+```
+
+Then open <http://127.0.0.1:8765/> and point it at
+`projects/halo2-retail/project.json`. (`objdiff-cli` is auto-detected from the
+bundled copy, so `IVCS_OBJDIFF_CLI` is optional.)
 
 Environment:
 

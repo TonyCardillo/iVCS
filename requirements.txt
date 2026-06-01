@@ -1,5 +1,0 @@
-capstone
-pytest
-hypothesis
-ruff
-litellm
