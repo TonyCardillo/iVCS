@@ -556,7 +556,7 @@ class TestLocalRunWarmstartE2E:
 						argv, 0, stdout="REPORT: Analysis succeeded", stderr=""
 					)
 				rep.mkdir(parents=True, exist_ok=True)
-				gpr.write_text("")
+				gpr.write_text("<gpr/>")  # real Ghidra writes a non-empty .gpr
 				ok = "REPORT: Import succeeded\nREPORT: Analysis succeeded"
 				return subprocess.CompletedProcess(argv, 0, stdout=ok, stderr="")
 			out_path = Path(argv[-1])
@@ -612,3 +612,22 @@ class TestLocalRunWarmstartE2E:
 		assert "fn_00430D9B" in workspace.ghidra_warmstart.read_text()
 		assert "FOO" in struct_names
 		assert (project_dir / "halo2_default.gpr").is_file()
+
+	def test_recovers_from_empty_gpr_beside_rep(self, monkeypatch, tmp_path):
+		# The actually-observed on-disk state: a 0-byte `.gpr` left beside its
+		# `.rep` by an import killed mid-write. is_file() passes, so before the
+		# fix ensure() skipped the rebuild and every sweep function failed with
+		# "decompile produced no output". ensure() must rebuild from the empty .gpr.
+		project, fn, workspace, project_dir = self._setup(monkeypatch, tmp_path)
+		rep = project_dir / "halo2_default.rep"
+		(rep / "versioned").mkdir(parents=True)
+		gpr = project_dir / "halo2_default.gpr"
+		gpr.write_text("")  # truncated/corrupt
+		assert gpr.stat().st_size == 0
+
+		struct_decls, struct_names = _prepare_ghidra_warmstart(workspace, project, fn)
+
+		assert workspace.ghidra_warmstart.is_file()
+		assert "fn_00430D9B" in workspace.ghidra_warmstart.read_text()
+		assert "FOO" in struct_names
+		assert gpr.stat().st_size > 0  # rebuilt into a real project

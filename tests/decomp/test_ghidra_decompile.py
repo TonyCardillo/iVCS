@@ -119,7 +119,7 @@ class TestStructsDump:
 	def _bootstrapped(self, tmp_path):
 		cfg = _make_config(tmp_path)
 		cfg.project_dir.mkdir(parents=True)
-		cfg.project_gpr.write_text("")  # marker
+		cfg.project_gpr.write_text("<gpr/>")  # non-empty marker: a valid project
 		return cfg
 
 	def test_raises_when_project_missing_and_no_cache(self, tmp_path):
@@ -187,7 +187,7 @@ class TestProjectEnsure:
 	def test_noop_when_gpr_already_exists(self, tmp_path):
 		cfg = _make_config(tmp_path)
 		cfg.project_dir.mkdir(parents=True)
-		cfg.project_gpr.write_text("")  # marker file
+		cfg.project_gpr.write_text("<gpr/>")  # non-empty: a valid bootstrapped project
 
 		called = {"n": 0}
 
@@ -198,13 +198,66 @@ class TestProjectEnsure:
 		ghidra_project_ensure(cfg, analyze_headless_fn=fake)
 		assert called["n"] == 0
 
+	def test_rebuilds_when_gpr_is_empty(self, tmp_path):
+		# A 0-byte `.gpr` is the residue of an import killed mid-write (or a
+		# /tmp eviction). It passes is_file(), but Ghidra treats it as corrupt
+		# and every decompile against it yields no output. ensure() must treat
+		# it as not-bootstrapped and re-import rather than trusting is_file().
+		cfg = _make_config(tmp_path)
+		cfg.project_dir.mkdir(parents=True)
+		cfg.project_gpr.write_text("")  # truncated/corrupt project file
+
+		called = {"n": 0}
+
+		def fake(argv):
+			called["n"] += 1
+			cfg.project_gpr.write_text("<gpr/>")  # a real, non-empty .gpr
+			return _completed(0, "REPORT: Analysis succeeded")
+
+		ghidra_project_ensure(cfg, analyze_headless_fn=fake)
+		assert called["n"] == 1
+
+	def test_clears_empty_gpr_before_import(self, tmp_path):
+		# Ghidra won't import over a `.rep` whose `.gpr` still sits beside it,
+		# even a truncated one — so the stale empty `.gpr` (and its `.rep`)
+		# must be gone by the time the import runs.
+		cfg = _make_config(tmp_path)
+		cfg.project_dir.mkdir(parents=True)
+		cfg.project_gpr.write_text("")  # corrupt
+		(cfg.project_rep / "versioned").mkdir(parents=True)
+		state = {}
+
+		def fake(argv):
+			state["gpr_existed"] = cfg.project_gpr.exists()
+			state["rep_existed"] = cfg.project_rep.exists()
+			cfg.project_gpr.write_text("<gpr/>")
+			return _completed(0, "REPORT: Analysis succeeded")
+
+		ghidra_project_ensure(cfg, analyze_headless_fn=fake)
+		assert state["gpr_existed"] is False
+		assert state["rep_existed"] is False
+
+	def test_raises_when_import_leaves_empty_gpr(self, tmp_path):
+		# An import that exits 0 with the success marker but leaves a 0-byte
+		# `.gpr` has not actually bootstrapped anything; surface it now rather
+		# than as a cryptic decompile failure later.
+		cfg = _make_config(tmp_path)
+
+		def fake(argv):
+			cfg.project_gpr.parent.mkdir(parents=True, exist_ok=True)
+			cfg.project_gpr.write_text("")  # exists but empty
+			return _completed(0, "REPORT: Analysis succeeded")
+
+		with pytest.raises(GhidraError, match="not created"):
+			ghidra_project_ensure(cfg, analyze_headless_fn=fake)
+
 	def test_invokes_when_gpr_missing(self, tmp_path):
 		cfg = _make_config(tmp_path)
 		captured = {}
 
 		def fake(argv):
 			captured["argv"] = argv
-			cfg.project_gpr.write_text("")  # real Ghidra writes the .gpr on success
+			cfg.project_gpr.write_text("<gpr/>")  # real Ghidra writes the .gpr on success
 			return _completed(0, "stuff\nREPORT: Analysis succeeded\nmore")
 
 		ghidra_project_ensure(cfg, analyze_headless_fn=fake)
@@ -237,7 +290,7 @@ class TestProjectEnsure:
 
 		def fake(argv):
 			rep_present_at_import["existed"] = cfg.project_rep.exists()
-			cfg.project_gpr.write_text("")
+			cfg.project_gpr.write_text("<gpr/>")
 			return _completed(0, "REPORT: Analysis succeeded")
 
 		ghidra_project_ensure(cfg, analyze_headless_fn=fake)
@@ -546,10 +599,19 @@ class TestDecompileFunction:
 		with pytest.raises(GhidraError, match="not bootstrapped"):
 			ghidra_decompile_function(0x1000, cfg, analyze_headless_fn=lambda a: _completed(0))
 
-	def test_returns_c_source_on_success(self, tmp_path):
+	def test_raises_when_gpr_is_empty(self, tmp_path):
+		# A 0-byte `.gpr` is corrupt residue, not a usable project; decompiling
+		# against it would silently produce no output. Reject it up front.
 		cfg = _make_config(tmp_path)
 		cfg.project_dir.mkdir(parents=True)
 		cfg.project_gpr.write_text("")
+		with pytest.raises(GhidraError, match="not bootstrapped"):
+			ghidra_decompile_function(0x1000, cfg, analyze_headless_fn=lambda a: _completed(0))
+
+	def test_returns_c_source_on_success(self, tmp_path):
+		cfg = _make_config(tmp_path)
+		cfg.project_dir.mkdir(parents=True)
+		cfg.project_gpr.write_text("<gpr/>")  # non-empty: a valid bootstrapped project
 
 		def fake(argv):
 			# Last argv entry is the out_path; the real script writes to it.
@@ -564,7 +626,7 @@ class TestDecompileFunction:
 	def test_raises_when_output_file_empty(self, tmp_path):
 		cfg = _make_config(tmp_path)
 		cfg.project_dir.mkdir(parents=True)
-		cfg.project_gpr.write_text("")
+		cfg.project_gpr.write_text("<gpr/>")  # non-empty: a valid bootstrapped project
 
 		def fake(argv):
 			Path(argv[-1]).write_text("")  # empty output
@@ -576,7 +638,7 @@ class TestDecompileFunction:
 	def test_raises_on_nonzero_return(self, tmp_path):
 		cfg = _make_config(tmp_path)
 		cfg.project_dir.mkdir(parents=True)
-		cfg.project_gpr.write_text("")
+		cfg.project_gpr.write_text("<gpr/>")  # non-empty: a valid bootstrapped project
 
 		def fake(argv):
 			return _completed(1, stderr="no function at 0x00012000")
@@ -587,7 +649,7 @@ class TestDecompileFunction:
 	def test_temp_file_cleaned_up_on_success(self, tmp_path):
 		cfg = _make_config(tmp_path)
 		cfg.project_dir.mkdir(parents=True)
-		cfg.project_gpr.write_text("")
+		cfg.project_gpr.write_text("<gpr/>")  # non-empty: a valid bootstrapped project
 
 		captured = {}
 
@@ -603,7 +665,7 @@ class TestDecompileFunction:
 	def test_temp_file_cleaned_up_on_failure(self, tmp_path):
 		cfg = _make_config(tmp_path)
 		cfg.project_dir.mkdir(parents=True)
-		cfg.project_gpr.write_text("")
+		cfg.project_gpr.write_text("<gpr/>")  # non-empty: a valid bootstrapped project
 
 		captured = {}
 
@@ -625,7 +687,7 @@ class TestDefaultRunTimeout:
 		def fake_run(argv, **kwargs):
 			captured.update(kwargs)
 			if gpr is not None:
-				gpr.write_text("")  # model Ghidra writing the .gpr on success
+				gpr.write_text("<gpr/>")  # model Ghidra writing the .gpr on success
 			return _completed(0, stdout=stdout)
 
 		monkeypatch.setattr(ghidra_decompile.subprocess, "run", fake_run)
@@ -654,7 +716,7 @@ class TestDefaultRunTimeout:
 	def test_decompile_threads_timeout_into_default_run_example(self, monkeypatch, tmp_path):
 		cfg = _make_config(tmp_path)
 		cfg.project_dir.mkdir(parents=True)
-		cfg.project_gpr.write_text("")
+		cfg.project_gpr.write_text("<gpr/>")  # non-empty: a valid bootstrapped project
 		captured = {}
 
 		def fake_run(argv, **kwargs):
