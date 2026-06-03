@@ -35,8 +35,18 @@ public class DecompileOne extends GhidraScript {
             .getAddress(va);
         Function func = getFunctionContaining(addr);
         if (func == null) {
-            throw new RuntimeException(
-                String.format("no function at 0x%08x", va));
+            // Ghidra's auto-analysis misses functions reached only by indirect
+            // calls, and small thunks/stubs (the project's function list, by
+            // contrast, is authoritative). Materialize one at the asserted
+            // entry: disassemble, then define the function so it can decompile.
+            disassemble(addr);
+            func = createFunction(addr, null);
+            if (func == null) {
+                throw new RuntimeException(String.format(
+                    "no function at 0x%08x, and one could not be created "
+                        + "(address may not be valid code)",
+                    va));
+            }
         }
 
         DecompInterface iface = new DecompInterface();

@@ -104,17 +104,25 @@ def ghidra_config_from_env(xbe_path: Path) -> GhidraConfig:
 
 
 def _is_bootstrapped(config: GhidraConfig) -> bool:
-	"""True only if the project `.gpr` exists and is non-empty.
+	"""True only if the marker `.gpr` exists AND the `.rep` holds a committed
+	program database.
 
-	A real Ghidra `.gpr` is a small XML metadata file. A 0-byte `.gpr` is the
-	residue of an import killed mid-write (or a /tmp eviction that truncated it
-	while the `.rep` survived): Ghidra treats it as corrupt, yet plain
-	`is_file()` still passes. Without this size check a stale empty `.gpr`
-	masquerades as a bootstrapped project, so the bootstrap is skipped and every
-	decompile against it silently produces no output — failing identically for
-	every function in a sweep.
+	Ghidra's `.gpr` is merely a marker file — legitimately 0 bytes; the program
+	lives under `.rep/idata/`, bucketed into numbered subdirectories (`idata/00/
+	<id>.prp` + `<id>.db/`). An import killed mid-write (a cancelled sweep, a
+	/tmp eviction) leaves the marker and an `idata/` holding only its `~index`
+	stubs but no program bucket. Such a partial project passes a naive
+	`.gpr` is_file() check, yet every decompile against it produces no output —
+	failing identically for every function in a sweep. Requiring a real program
+	bucket (any subdirectory under `idata/`) rebuilds the partial import instead
+	of trusting it.
 	"""
-	return config.project_gpr.is_file() and config.project_gpr.stat().st_size > 0
+	if not config.project_gpr.is_file():
+		return False
+	idata = config.project_rep / "idata"
+	if not idata.is_dir():
+		return False
+	return any(child.is_dir() for child in idata.iterdir())
 
 
 def ghidra_project_ensure(
@@ -123,16 +131,16 @@ def ghidra_project_ensure(
 	analyze_headless_fn: AnalyzeHeadlessFn | None = None,
 	timeout_seconds: float = 600.0,
 ) -> None:
-	"""No-op if `<project_dir>/<project_name>.gpr` already exists and is non-empty.
+	"""No-op if the project is already bootstrapped (see `_is_bootstrapped`).
 
-	A `.gpr` is how Ghidra identifies a project. A leftover `.rep` data
-	directory without a usable `.gpr` — gone entirely, or truncated to 0 bytes
-	by a crashed run or a /tmp eviction — is a partial state Ghidra refuses to
-	import over (it will not recreate an existing `.rep`). Clear that stale data
-	first so the bootstrap starts clean, and verify the `.gpr` actually lands
-	afterward rather than trusting Ghidra's exit code and log marker alone —
-	otherwise the failure surfaces much later, and far more cryptically, as a
-	"project not bootstrapped" error from ghidra_decompile_function.
+	A `.gpr` marker by itself is not enough: a leftover `.rep` from an import
+	killed mid-write holds the marker but no committed program, and Ghidra
+	refuses to import over an existing `.rep` (it will not recreate one). Clear
+	any such partial state first so the bootstrap starts clean, and verify a
+	real program actually lands afterward rather than trusting Ghidra's exit
+	code and log marker alone — otherwise the failure surfaces much later, and
+	far more cryptically, as a "project not bootstrapped" error from
+	ghidra_decompile_function.
 	"""
 	if _is_bootstrapped(config):
 		return
@@ -153,8 +161,8 @@ def ghidra_project_ensure(
 
 	if not _is_bootstrapped(config):
 		raise GhidraError(
-			f"bootstrap reported success but {config.project_gpr} was not "
-			"created (stale or locked Ghidra project state?)\n"
+			f"bootstrap reported success but no committed program landed under "
+			f"{config.project_rep} (stale or locked Ghidra project state?)\n"
 			f"--- argv ---\n{argv}\n"
 			f"--- stdout (tail) ---\n{_tail(result.stdout)}"
 		)
@@ -170,7 +178,7 @@ def ghidra_decompile_function(
 	"""Returns the pseudo-C for the function at `va`. Project must exist."""
 	if not _is_bootstrapped(config):
 		raise GhidraError(
-			f"project not bootstrapped: {config.project_gpr} is missing or empty. "
+			f"project not bootstrapped: {config.project_dir} has no committed program. "
 			"Call ghidra_project_ensure first."
 		)
 
@@ -216,7 +224,7 @@ def ghidra_structs_dump(
 		return config.structs_h.read_text()
 	if not _is_bootstrapped(config):
 		raise GhidraError(
-			f"project not bootstrapped: {config.project_gpr} is missing or empty. "
+			f"project not bootstrapped: {config.project_dir} has no committed program. "
 			"Call ghidra_project_ensure first."
 		)
 
@@ -271,12 +279,12 @@ def _run_with_lock_retry(
 
 
 def _clear_partial_project(config: GhidraConfig) -> None:
-	"""Remove a stale/empty `.gpr`, its `.rep` data dir, and any stray `.lock`,
-	so a fresh import can recreate the project from scratch. A no-op for the
-	parts that are absent. Only reached once `_is_bootstrapped` is false (the
-	`.gpr` is gone or 0 bytes), so nothing usable is discarded. The empty `.gpr`
-	must go too — Ghidra will not import over a `.rep` whose `.gpr` still sits
-	beside it, even a truncated one."""
+	"""Remove the marker `.gpr`, the `.rep` data dir, and any stray `.lock`, so a
+	fresh import can recreate the project from scratch. A no-op for the parts
+	that are absent. Only reached once `_is_bootstrapped` is false (no committed
+	program), so nothing usable is discarded. The `.rep` must go because Ghidra
+	will not import over an existing one — that partial dir is exactly what
+	stalls the re-import — and the marker goes with it to keep the pair clean."""
 	config.project_gpr.unlink(missing_ok=True)
 	if config.project_rep.is_dir():
 		shutil.rmtree(config.project_rep, ignore_errors=True)

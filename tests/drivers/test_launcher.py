@@ -530,18 +530,20 @@ class TestLocalRunWarmstartE2E:
 	drives, stubbing only the analyzeHeadless subprocess boundary so the real
 	ghidra_project_ensure -> decompile -> structs_dump path runs.
 
-	Regression guard for the orphaned-`.rep`-without-`.gpr` bug: a crashed run
-	(or a /tmp eviction of the small `.gpr`) leaves a `.rep` data dir behind.
-	Ghidra identifies a project by its `.gpr` and refuses to import over an
-	existing `.rep`, so the bootstrap silently no-ops and the decompile then
-	dies with "project not bootstrapped". ensure() must clear the stale data
-	and verify the `.gpr` actually lands.
+	Regression guard for the partial-import bug: a crashed run (or a cancelled
+	sweep) leaves a `.rep` data dir holding no committed program, beside a
+	marker `.gpr` (which is legitimately 0 bytes). Ghidra refuses to import over
+	an existing `.rep`, so a naive `.gpr` is_file() check trusts the partial
+	project, the bootstrap silently no-ops, and every decompile then dies with
+	"project not bootstrapped" / "produced no output". ensure() must detect the
+	missing program, clear the stale data, and verify a real program lands.
 	"""
 
 	def _fake_ghidra(self):
-		"""A fake analyzeHeadless modeling the real binary's behavior:
-		import writes `<name>.gpr` + `<name>.rep` but REFUSES when a `.rep`
-		already exists; the post-scripts write their out-file (last argv)."""
+		"""A fake analyzeHeadless modeling the real binary's behavior: a
+		successful import writes an empty marker `.gpr` and commits a program
+		under `.rep/idata/`, but REFUSES (commits nothing) when a `.rep` already
+		exists; the post-scripts write their out-file (last argv)."""
 
 		def fake_run(argv, **_kwargs):
 			project_dir = Path(argv[1])
@@ -551,12 +553,14 @@ class TestLocalRunWarmstartE2E:
 			if "-import" in argv:
 				if rep.exists():
 					# Ghidra won't recreate an existing .rep: marker prints,
-					# but no .gpr is written — the exact failure mode.
+					# but no program is committed — the exact failure mode.
 					return subprocess.CompletedProcess(
 						argv, 0, stdout="REPORT: Analysis succeeded", stderr=""
 					)
-				rep.mkdir(parents=True, exist_ok=True)
-				gpr.write_text("<gpr/>")  # real Ghidra writes a non-empty .gpr
+				gpr.write_text("")  # marker file is legitimately empty
+				bucket = rep / "idata" / "00"
+				bucket.mkdir(parents=True, exist_ok=True)
+				(bucket / "00000000.prp").write_text("program")  # committed program
 				ok = "REPORT: Import succeeded\nREPORT: Analysis succeeded"
 				return subprocess.CompletedProcess(argv, 0, stdout=ok, stderr="")
 			out_path = Path(argv[-1])
@@ -597,7 +601,7 @@ class TestLocalRunWarmstartE2E:
 		assert "FOO" in struct_decls
 
 	def test_recovers_from_orphaned_rep_without_gpr(self, monkeypatch, tmp_path):
-		# This is the reported bug: a .rep survives but the .gpr is gone.
+		# A .rep survives (no committed program) but the .gpr marker is gone.
 		project, fn, workspace, project_dir = self._setup(monkeypatch, tmp_path)
 		orphan_rep = project_dir / "halo2_default.rep"
 		(orphan_rep / "versioned").mkdir(parents=True)
@@ -611,23 +615,24 @@ class TestLocalRunWarmstartE2E:
 		assert workspace.ghidra_warmstart.is_file()
 		assert "fn_00430D9B" in workspace.ghidra_warmstart.read_text()
 		assert "FOO" in struct_names
-		assert (project_dir / "halo2_default.gpr").is_file()
+		assert (project_dir / "halo2_default.rep" / "idata" / "00").is_dir()
 
-	def test_recovers_from_empty_gpr_beside_rep(self, monkeypatch, tmp_path):
-		# The actually-observed on-disk state: a 0-byte `.gpr` left beside its
-		# `.rep` by an import killed mid-write. is_file() passes, so before the
-		# fix ensure() skipped the rebuild and every sweep function failed with
-		# "decompile produced no output". ensure() must rebuild from the empty .gpr.
+	def test_recovers_from_partial_rep_with_marker(self, monkeypatch, tmp_path):
+		# The actually-observed on-disk state: an empty marker `.gpr` left beside
+		# a `.rep` that holds no committed program (import killed mid-write).
+		# is_file() on the marker passes, so before the fix ensure() skipped the
+		# rebuild and every sweep function failed with "decompile produced no
+		# output". ensure() must notice the missing program and rebuild.
 		project, fn, workspace, project_dir = self._setup(monkeypatch, tmp_path)
 		rep = project_dir / "halo2_default.rep"
-		(rep / "versioned").mkdir(parents=True)
+		(rep / "idata").mkdir(parents=True)
+		(rep / "idata" / "~index.dat").write_text("")  # stub only, no program bucket
 		gpr = project_dir / "halo2_default.gpr"
-		gpr.write_text("")  # truncated/corrupt
-		assert gpr.stat().st_size == 0
+		gpr.write_text("")  # marker, legitimately empty
 
 		struct_decls, struct_names = _prepare_ghidra_warmstart(workspace, project, fn)
 
 		assert workspace.ghidra_warmstart.is_file()
 		assert "fn_00430D9B" in workspace.ghidra_warmstart.read_text()
 		assert "FOO" in struct_names
-		assert gpr.stat().st_size > 0  # rebuilt into a real project
+		assert (rep / "idata" / "00").is_dir()  # rebuilt into a real project
