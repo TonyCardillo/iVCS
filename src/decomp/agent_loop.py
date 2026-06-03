@@ -22,6 +22,7 @@ from src.decomp.compile_tool import (
 )
 from src.decomp.ghidra_decompile import ghidra_pseudo_c_normalize_for_prompt
 from src.decomp.history import history_best_read
+from src.decomp.inline_asm import AsmBudget
 from src.decomp.objdiff import function_match_percent
 
 COMPILE_TOOL_NAME = "compile_and_view_assembly"
@@ -51,7 +52,9 @@ _TOOL_SCHEMA: dict = {
 
 _SOFT_TIMEOUT_PROMPT = (
 	"You are running out of time. Submit your best C code now via the "
-	"compile_and_view_assembly tool. Do not explain, just submit."
+	"compile_and_view_assembly tool. Do not explain, just submit. Do NOT fall "
+	"back to inline `__asm` to transcribe the target — over-budget asm is "
+	"rejected and wastes the attempt."
 )
 
 
@@ -63,6 +66,9 @@ class AgentConfig:
 	max_iterations: int = 15
 	hard_timeout_seconds: float = 300.0
 	soft_timeout_fraction: float = 0.7
+	# Caps inline asm so the agent can't transcribe the target into `__asm` to
+	# fake a match. Loosen per-project if a title leaned on inline asm heavily.
+	asm_budget: AsmBudget = AsmBudget()
 
 
 @dataclass(frozen=True)
@@ -90,8 +96,13 @@ def agent_loop_run(
 	workspace.validate_inputs()
 	_baseline_compile_attempt_zero(workspace, compile_fn=compile_fn)
 
+	target_instruction_count = _listing_instruction_count(target_asm)
+
 	messages: list[dict] = [
-		{"role": "system", "content": _system_prompt_build(workspace, target_asm)},
+		{
+			"role": "system",
+			"content": _system_prompt_build(workspace, target_asm, config.asm_budget),
+		},
 		{
 			"role": "user",
 			"content": "Begin. Use the compile_and_view_assembly tool with your first attempt.",
@@ -132,6 +143,8 @@ def agent_loop_run(
 			c_code=c_code,
 			compile_fn=compile_fn,
 			diff_fn=diff_fn,
+			asm_budget=config.asm_budget,
+			target_instruction_count=target_instruction_count,
 		)
 		workspace.attempt_model_path(result.attempt_number).write_text(config.model)
 
@@ -189,7 +202,7 @@ def _prior_best(workspace: FunctionWorkspace) -> tuple[float | None, str | None]
 			best = raw_best if isinstance(raw_best, (int, float)) else None
 			raw_model = data.get("model")
 			model = raw_model if isinstance(raw_model, str) else None
-		except (json.JSONDecodeError, OSError):
+		except json.JSONDecodeError, OSError:
 			pass
 
 	recovered = history_best_read(workspace.history_dir, workspace.function_name)
@@ -290,9 +303,13 @@ def _baseline_source_body(workspace: FunctionWorkspace) -> str | None:
 	return full
 
 
-def _system_prompt_build(workspace: FunctionWorkspace, target_asm: str) -> str:
+def _system_prompt_build(
+	workspace: FunctionWorkspace, target_asm: str, asm_budget: AsmBudget
+) -> str:
 	ctx_h = workspace.ctx_h.read_text()
 	warmstart = _warmstart_section(workspace)
+	asm_max = asm_budget.max_instructions
+	asm_ratio = asm_budget.max_ratio
 	return f"""You are an automated matching-decompilation system targeting the original Xbox \
 (x86, MSVC 7.1 / cl 13.10, /O2). You receive an assembly listing and write C code that, \
 when compiled, produces byte-identical machine code.
@@ -306,8 +323,18 @@ when compiled, produces byte-identical machine code.
 - Do not include `#include` directives — ctx.h is prepended automatically.
 - MSVC 7.1 is C89: declare all locals at the top of the function. No `for (int i = ...)`.
 
+# Inline assembly
+- Decompile, do not transcribe. Recover the C that compiles to the target — do
+  not paste the listing into an `__asm` block to force a match.
+- Inline `__asm` is budgeted: over-budget submissions are REJECTED before they
+  compile and do not score. The cap is {asm_max} instructions and at most \
+{asm_ratio:.0%} of the function.
+- Use the small allowance only for instructions the original source genuinely
+  needed and the compiler won't emit from C (e.g. rdtsc, cpuid, int 3).
+
 # Success criteria
 - Match score must reach 100.0%. Functional equivalence is insufficient.
+- A match achieved by transcribing the target into inline asm does not count.
 
 # Diff vocabulary
 The tool returns per-instruction diff rows with these kinds:
@@ -355,6 +382,13 @@ identified callees (kernel imports, helper functions) are reliable.
 """
 
 
+def _listing_instruction_count(target_asm: str) -> int:
+	"""The number of instructions in the target disassembly listing — one per
+	non-blank line (see `_disassemble_listing`). The denominator for the inline-
+	asm ratio budget."""
+	return sum(1 for line in target_asm.splitlines() if line.strip())
+
+
 def _extract_c_code(response: dict) -> str | None:
 	"""Falls back to ```c fence in text content when a model skips the tool call."""
 	for tool_call in response.get("tool_calls") or []:
@@ -362,7 +396,7 @@ def _extract_c_code(response: dict) -> str | None:
 			continue
 		try:
 			args = json.loads(tool_call["function"]["arguments"])
-		except (KeyError, json.JSONDecodeError):
+		except KeyError, json.JSONDecodeError:
 			continue
 		if isinstance(args.get("c_code"), str):
 			return args["c_code"]
@@ -390,6 +424,8 @@ def _tool_call_id(response: dict) -> str | None:
 
 
 def _render_tool_result(result: CompileAndViewResult, function_name: str) -> str:
+	if result.asm_rejected:
+		return result.error or "REJECTED: inline assembly over budget."
 	if not result.success:
 		return f"COMPILE FAILED:\n{result.error or '(no output)'}"
 

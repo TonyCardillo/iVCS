@@ -13,6 +13,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from src.core.workspace import FunctionWorkspace
+from src.decomp.inline_asm import (
+	AsmBudget,
+	asm_rejection_message,
+	inline_asm_scan,
+	is_asm_within_budget,
+)
 from src.decomp.objdiff import DiffResult, function_match_percent, objdiff_run
 from src.formats.coff import coff_defined_function_rename
 from src.paths import COMPILERS_DIR
@@ -32,6 +38,9 @@ class CompileAndViewResult:
 	error: str | None = None
 	match_percent: float | None = None
 	diff_result: DiffResult | None = None
+	# True when the attempt was refused for over-budget inline asm (the error
+	# holds the explanation). The compiler was never invoked.
+	asm_rejected: bool = False
 
 
 CompileFn = Callable[[Path, Path, Path], CompileOutput]
@@ -47,13 +56,31 @@ def compile_and_view_assembly(
 	*,
 	compile_fn: CompileFn,
 	diff_fn: DiffFn,
+	asm_budget: AsmBudget,
+	target_instruction_count: int,
 ) -> CompileAndViewResult:
-	"""Persists per-attempt artifacts under workspace.history_dir."""
+	"""Persists per-attempt artifacts under workspace.history_dir.
+
+	Submissions whose inline assembly exceeds `asm_budget` (judged against
+	`target_instruction_count`) are refused before compiling: transcribing the
+	target listing into `__asm` is re-assembly, not decompilation, so it must
+	not be allowed to score. The rejected source is still written to history for
+	inspection, and the attempt counts against the iteration budget.
+	"""
 	attempt_n = workspace.next_attempt_number()
 	paths = workspace.attempt_paths(attempt_n)
 
 	combined_source = workspace.ctx_h.read_text() + "\n" + c_code
 	paths.c.write_text(combined_source)
+
+	scan = inline_asm_scan(c_code)
+	if not is_asm_within_budget(scan, target_instruction_count, asm_budget):
+		return CompileAndViewResult(
+			success=False,
+			attempt_number=attempt_n,
+			error=asm_rejection_message(scan, target_instruction_count, asm_budget),
+			asm_rejected=True,
+		)
 
 	compile_out = compile_fn(paths.c, paths.obj, workspace.root)
 	if not compile_out.success:

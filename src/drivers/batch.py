@@ -20,6 +20,7 @@ from src.analysis.fingerprint import Fingerprint, fingerprint_clusters
 from src.core.project import FunctionEntry
 from src.core.workspace import FunctionWorkspace
 from src.decomp.compile_tool import CompileFn, DiffFn, compile_and_view_assembly
+from src.decomp.inline_asm import ASM_BUDGET_DISABLED
 
 
 @dataclass(frozen=True)
@@ -230,8 +231,16 @@ def propagate_to_twins(
 
 		workspace = prepare(twin)
 		twin_source = _rename_to_twin(rep_source, rep.va, twin.va)
+		# Propagation carries an already-gated, 100%-verified solution to a
+		# byte-identical twin — not a model attempt — so the inline-asm
+		# anti-cheat gate does not apply here.
 		result = compile_and_view_assembly(
-			workspace=workspace, c_code=twin_source, compile_fn=compile_fn, diff_fn=diff_fn
+			workspace=workspace,
+			c_code=twin_source,
+			compile_fn=compile_fn,
+			diff_fn=diff_fn,
+			asm_budget=ASM_BUDGET_DISABLED,
+			target_instruction_count=0,
 		)
 		workspace.attempt_model_path(result.attempt_number).write_text("propagated")
 		pct = result.match_percent

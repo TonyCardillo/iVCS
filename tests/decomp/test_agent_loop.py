@@ -23,6 +23,7 @@ from src.decomp.agent_loop import (
 	ghidra_only_run,
 )
 from src.decomp.compile_tool import CompileOutput
+from src.decomp.inline_asm import AsmBudget
 from src.decomp.objdiff import (
 	SYMBOL_KIND_FUNCTION,
 	DiffInstruction,
@@ -461,7 +462,7 @@ class TestGhidraWarmstartInSystemPrompt:
 		from src.decomp.agent_loop import _system_prompt_build
 
 		ws = _make_workspace(tmp_path)
-		prompt = _system_prompt_build(ws, "ret")
+		prompt = _system_prompt_build(ws, "ret", AsmBudget())
 		assert "Ghidra warm-start" not in prompt
 
 	def test_section_included_when_warmstart_present(self, tmp_path):
@@ -469,7 +470,7 @@ class TestGhidraWarmstartInSystemPrompt:
 
 		ws = _make_workspace(tmp_path)
 		ws.ghidra_warmstart.write_text("void FUN_002d0cf5(int param_1) { return; }\n")
-		prompt = _system_prompt_build(ws, "ret")
+		prompt = _system_prompt_build(ws, "ret", AsmBudget())
 		assert "Ghidra warm-start draft" in prompt
 		# FUN_ renamed to fn_ in the prompt copy so callee names match ctx.h.
 		assert "fn_002D0CF5" in prompt
@@ -483,7 +484,7 @@ class TestGhidraWarmstartInSystemPrompt:
 		ws = _make_workspace(tmp_path)
 		ws.ctx_h.write_text("// CTX_MARKER\n")
 		ws.ghidra_warmstart.write_text("// WARMSTART_MARKER\n")
-		prompt = _system_prompt_build(ws, "ret")
+		prompt = _system_prompt_build(ws, "ret", AsmBudget())
 		# ctx.h before warm-start: model sees types before the draft that uses them.
 		assert prompt.index("CTX_MARKER") < prompt.index("WARMSTART_MARKER")
 
@@ -491,7 +492,7 @@ class TestGhidraWarmstartInSystemPrompt:
 		from src.decomp.agent_loop import _system_prompt_build
 
 		ws = _make_workspace(tmp_path)
-		prompt = _system_prompt_build(ws, "0x00012080  c3  ret")
+		prompt = _system_prompt_build(ws, "0x00012080  c3  ret", AsmBudget())
 		# asm should appear inside a ```asm fence so the model treats it
 		# as code and so markdown-aware viewers don't reinterpret it.
 		assert "```asm" in prompt
@@ -505,7 +506,7 @@ class TestGhidraWarmstartInSystemPrompt:
 
 		ws = _make_workspace(tmp_path)
 		ws.ctx_h.write_text("typedef int MARKER;\n")
-		prompt = _system_prompt_build(ws, "ret")
+		prompt = _system_prompt_build(ws, "ret", AsmBudget())
 		# ctx.h section gets a ```c fence.
 		ctx_idx = prompt.index("Context header")
 		fence_idx = prompt.index("```c", ctx_idx)

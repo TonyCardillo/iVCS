@@ -6,6 +6,7 @@ Defaults live in default_compile_fn / default_diff_fn and are
 exercised in the recon scripts, not here.
 """
 
+from functools import partial
 from pathlib import Path
 
 from src.core.workspace import FunctionWorkspace
@@ -14,6 +15,7 @@ from src.decomp.compile_tool import (
 	compile_and_view_assembly,
 	compile_error_format,
 )
+from src.decomp.inline_asm import AsmBudget
 from src.decomp.objdiff import (
 	SYMBOL_KIND_FUNCTION,
 	DiffInstruction,
@@ -22,6 +24,15 @@ from src.decomp.objdiff import (
 	DiffResult,
 	DiffSide,
 	DiffSymbol,
+)
+
+# Every test below feeds asm-free C, so bind a generous budget and denominator
+# once. The asm gate is exercised directly in test_inline_asm.py and in
+# TestAsmBudgetGate, which overrides these at call time.
+compile_and_view_assembly = partial(
+	compile_and_view_assembly,
+	asm_budget=AsmBudget(),
+	target_instruction_count=100,
 )
 
 
@@ -240,6 +251,86 @@ class TestSymbolNotInDiff:
 		)
 		assert result.success is True  # compile succeeded
 		assert result.match_percent is None  # but our target symbol isn't there
+
+
+class TestAsmBudgetGate:
+	"""Over-budget inline asm is refused before the compiler runs, so a
+	transcribed listing can never score a match."""
+
+	_TRANSCRIBED = (
+		"int classify(int x) {\n"
+		"  __asm {\n"
+		"    push ebp\n    mov ebp, esp\n    mov eax, [ebp+8]\n"
+		"    add eax, 1\n    pop ebp\n    ret\n"
+		"  }\n"
+		"}\n"
+	)
+
+	def test_over_budget_asm_is_rejected_without_compiling(self, tmp_path):
+		ws = _make_workspace(tmp_path)
+		compiled = {"n": 0}
+
+		def counting_compile(c_path, obj_path, root):
+			compiled["n"] += 1
+			return _fake_compile_ok(c_path, obj_path, root)
+
+		result = compile_and_view_assembly(
+			workspace=ws,
+			c_code=self._TRANSCRIBED,
+			compile_fn=counting_compile,
+			diff_fn=_fake_diff_match,
+			asm_budget=AsmBudget(max_instructions=4, max_ratio=0.10),
+			target_instruction_count=6,
+		)
+		assert result.success is False
+		assert result.asm_rejected is True
+		assert result.match_percent is None
+		assert compiled["n"] == 0  # never reached the compiler
+
+	def test_rejected_source_is_still_persisted_for_inspection(self, tmp_path):
+		ws = _make_workspace(tmp_path)
+		result = compile_and_view_assembly(
+			workspace=ws,
+			c_code=self._TRANSCRIBED,
+			compile_fn=_fake_compile_ok,
+			diff_fn=_fake_diff_match,
+			asm_budget=AsmBudget(max_instructions=4, max_ratio=0.10),
+			target_instruction_count=6,
+		)
+		assert ws.attempt_paths(result.attempt_number).c.is_file()
+
+	def test_rejection_consumes_an_attempt_number(self, tmp_path):
+		ws = _make_workspace(tmp_path)
+		first = compile_and_view_assembly(
+			workspace=ws,
+			c_code=self._TRANSCRIBED,
+			compile_fn=_fake_compile_ok,
+			diff_fn=_fake_diff_match,
+			asm_budget=AsmBudget(max_instructions=4, max_ratio=0.10),
+			target_instruction_count=6,
+		)
+		second = compile_and_view_assembly(
+			workspace=ws,
+			c_code="int classify(int x) { return x; }\n",
+			compile_fn=_fake_compile_ok,
+			diff_fn=_fake_diff_match,
+		)
+		assert (first.attempt_number, second.attempt_number) == (1, 2)
+
+	def test_sparse_asm_within_budget_compiles_normally(self, tmp_path):
+		ws = _make_workspace(tmp_path)
+		code = "int now(void) { int lo; __asm rdtsc\n __asm mov lo, eax\n return lo; }\n"
+		result = compile_and_view_assembly(
+			workspace=ws,
+			c_code=code,
+			compile_fn=_fake_compile_ok,
+			diff_fn=_fake_diff_match,
+			asm_budget=AsmBudget(max_instructions=8, max_ratio=0.10),
+			target_instruction_count=40,
+		)
+		assert result.success is True
+		assert result.asm_rejected is False
+		assert result.match_percent == 100.0
 
 
 class TestCompileErrorFormat:
