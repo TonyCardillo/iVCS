@@ -146,6 +146,7 @@ def coff_defined_function_rename(data: bytes, new_name: str) -> bytes:
 	if not sym_ptr or sym_count == 0:
 		return data
 	string_table_start = sym_ptr + sym_count * COFF_SYMBOL_SIZE
+	string_table = data[string_table_start:]
 
 	candidates: list[int] = []
 	already_named = False
@@ -162,7 +163,7 @@ def coff_defined_function_rename(data: bytes, new_name: str) -> bytes:
 			and section_number > 0
 			and sym_type == IMAGE_SYM_TYPE_FUNCTION
 		):
-			if _coff_symbol_name_read(data[base : base + 8], data, string_table_start) == new_name:
+			if coff_name_field_decode(data[base : base + 8], string_table) == new_name:
 				already_named = True
 			candidates.append(base)
 		slot += 1 + aux
@@ -172,14 +173,14 @@ def coff_defined_function_rename(data: bytes, new_name: str) -> bytes:
 	return _coff_symbol_name_repoint(data, candidates[0], string_table_start, new_name)
 
 
-def _coff_symbol_name_read(name_field: bytes, data: bytes, string_table_start: int) -> str:
-	"""Decode a symbol's 8-byte name field: inline short name, or long-name
-	string-table offset (the offset is measured from the table's start)."""
+def coff_name_field_decode(name_field: bytes, string_table: bytes) -> str:
+	"""Decode a COFF 8-byte name field: an inline short name, or `\\0\\0\\0\\0`
+	followed by an offset into `string_table` for a long name. Shared by the
+	writer's rename scan and the reader (coff_read)."""
 	if name_field[:4] == b"\x00\x00\x00\x00":
 		offset = struct.unpack_from("<I", name_field, 4)[0]
-		abs_off = string_table_start + offset
-		end = data.find(b"\x00", abs_off)
-		return data[abs_off:end].decode("ascii", "replace")
+		end = string_table.find(b"\x00", offset)
+		return string_table[offset:end].decode("ascii", "replace")
 	return name_field.rstrip(b"\x00").decode("ascii", "replace")
 
 

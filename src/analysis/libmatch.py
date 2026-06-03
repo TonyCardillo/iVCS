@@ -138,9 +138,7 @@ def match_fingerprints(
 			names = index.by_opcode.get(fp.opcode_hash)
 			confidence = "skeleton"
 		if names:
-			matches.append(
-				LibMatch(fp.name, fp.va, fp.size, tuple(sorted(names)), confidence)
-			)
+			matches.append(LibMatch(fp.name, fp.va, fp.size, tuple(sorted(names)), confidence))
 	return matches
 
 

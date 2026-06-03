@@ -13,6 +13,7 @@ from src.formats.coff import (
 	COFF_RELOC_SIZE,
 	COFF_SECTION_SIZE,
 	COFF_SYMBOL_SIZE,
+	coff_name_field_decode,
 )
 
 
@@ -85,7 +86,7 @@ def coff_object_read(data: bytes) -> CoffObject:
 
 
 def _section_read(data: bytes, entry_offset: int, string_table: bytes) -> CoffSection:
-	name = _short_or_long_name(data[entry_offset : entry_offset + 8], string_table)
+	name = coff_name_field_decode(data[entry_offset : entry_offset + 8], string_table)
 	(raw_size, raw_ptr, reloc_ptr, _line_ptr, reloc_count) = struct.unpack_from(
 		"<IIIIH", data, entry_offset + 16
 	)
@@ -106,7 +107,7 @@ def _symbols_read(
 	slot = 0
 	while slot < symbol_count:
 		base = symbol_table_ptr + slot * COFF_SYMBOL_SIZE
-		name = _short_or_long_name(data[base : base + 8], string_table)
+		name = coff_name_field_decode(data[base : base + 8], string_table)
 		value, section_number, sym_type, storage_class, aux_count = struct.unpack_from(
 			"<IhHBB", data, base + 8
 		)
@@ -130,13 +131,3 @@ def _string_table_read(data: bytes, symbol_table_ptr: int, symbol_count: int) ->
 	if string_table_start + 4 > len(data):
 		return b""
 	return data[string_table_start:]
-
-
-def _short_or_long_name(name_field: bytes, string_table: bytes) -> str:
-	"""Decode an 8-byte COFF name field: inline short name, or `\\0\\0\\0\\0`
-	+ string-table offset for a long name."""
-	if name_field[:4] == b"\x00\x00\x00\x00":
-		offset = struct.unpack_from("<I", name_field, 4)[0]
-		end = string_table.find(b"\x00", offset)
-		return string_table[offset:end].decode("ascii")
-	return name_field.rstrip(b"\x00").decode("ascii")

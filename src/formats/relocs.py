@@ -19,6 +19,7 @@ Out of MVP scope: absolute-address operands on mov/push/lea
 
 import re
 import struct
+import threading
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
@@ -29,11 +30,27 @@ import capstone.x86
 from src.formats.xbe import (
 	ParsedXbe,
 	XbeFormatError,
+	XbeSection,
 	xbe_function_carve,
 	xbe_kernel_thunk_address_get,
 	xbe_section_containing_va,
 )
 from src.formats.xboxkrnl import xboxkrnl_mangled_get, xboxkrnl_name_get
+
+# A capstone Cs handle isn't safe to share across threads (the webui drives
+# carving from worker threads), so keep one engine per thread and reuse it
+# rather than rebuilding on every disassembly call.
+_engines = threading.local()
+
+
+def _x86_32_engine(*, detail: bool) -> capstone.Cs:
+	attr = "detail_md" if detail else "lite_md"
+	md = getattr(_engines, attr, None)
+	if md is None:
+		md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
+		md.detail = detail
+		setattr(_engines, attr, md)
+	return md
 
 
 class RelocKind(Enum):
@@ -58,8 +75,7 @@ def relocs_discover(function_bytes: bytes, function_va: int) -> list[RelocSite]:
 	if not function_bytes:
 		return []
 
-	md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
-	md.detail = True
+	md = _x86_32_engine(detail=True)
 
 	function_end = function_va + len(function_bytes)
 	sites: list[RelocSite] = []
@@ -87,8 +103,7 @@ def convention_from_bytes(body: bytes) -> tuple[str, int]:
 	the scanned bytes → ('cdecl', 0). The byte_count is the callee's stack
 	cleanup, which is also the MSVC @N decoration.
 	"""
-	md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
-	md.detail = False
+	md = _x86_32_engine(detail=False)
 	for _addr, _size, mnem, op in md.disasm_lite(body, 0):
 		if mnem == "ret":
 			if op:
@@ -168,6 +183,28 @@ def _site_from_branch(instr, function_va: int, function_end: int) -> RelocSite |
 _IMAGE_ORDINAL_FLAG32 = 0x80000000
 
 
+def _thunk_slot_raw_at(parsed: ParsedXbe, section: XbeSection, slot_va: int) -> int | None:
+	"""The raw 32-bit thunk-table entry at `slot_va`, or None if it lies past the
+	image's raw bytes."""
+	file_offset = section.raw_address + (slot_va - section.virtual_address)
+	if file_offset + 4 > len(parsed.data):
+		return None
+	return struct.unpack_from("<I", parsed.data, file_offset)[0]
+
+
+def _ordinal_from_thunk_entry(raw: int) -> int | None:
+	"""The export ordinal a thunk entry encodes, or None when it isn't an ordinal
+	import (IMAGE_ORDINAL_FLAG32 unset — i.e. stray data or a by-name import)."""
+	if not (raw & _IMAGE_ORDINAL_FLAG32):
+		return None
+	return raw & 0x7FFFFFFF
+
+
+def _kernel_export_name(ordinal: int) -> str | None:
+	"""Decorated mangled name for a kernel export ordinal, else its plain name."""
+	return xboxkrnl_mangled_get(ordinal) or xboxkrnl_name_get(ordinal)
+
+
 def relocs_kernel_ordinal_at(target_va: int, parsed: ParsedXbe) -> int | None:
 	"""Return the kernel export ordinal at this VA, or None if the VA
 	isn't a thunk-table slot. Public so callers (e.g., the launcher's
@@ -185,21 +222,17 @@ def relocs_kernel_ordinal_at(target_va: int, parsed: ParsedXbe) -> int | None:
 	if target_va < thunk_va or (target_va - thunk_va) % 4 != 0:
 		return None
 
-	file_offset = section.raw_address + (target_va - section.virtual_address)
-	if file_offset + 4 > len(parsed.data):
+	raw = _thunk_slot_raw_at(parsed, section, target_va)
+	if raw is None:
 		return None
-
-	raw = struct.unpack_from("<I", parsed.data, file_offset)[0]
-	if not (raw & _IMAGE_ORDINAL_FLAG32):
-		return None
-	return raw & 0x7FFFFFFF
+	return _ordinal_from_thunk_entry(raw)
 
 
 def _kernel_import_name_at(target_va: int, parsed: ParsedXbe) -> str | None:
 	ordinal = relocs_kernel_ordinal_at(target_va, parsed)
 	if ordinal is None:
 		return None
-	return xboxkrnl_mangled_get(ordinal) or xboxkrnl_name_get(ordinal)
+	return _kernel_export_name(ordinal)
 
 
 _THUNK_SLOT_LIMIT = 4096  # null-terminated table; a bound against runaway scans
@@ -224,16 +257,13 @@ def relocs_kernel_import_va_map(parsed: ParsedXbe) -> dict[str, int]:
 	out: dict[str, int] = {}
 	for i in range(_THUNK_SLOT_LIMIT):
 		slot_va = thunk_va + i * 4
-		file_offset = section.raw_address + (slot_va - section.virtual_address)
-		if file_offset + 4 > len(parsed.data):
+		raw = _thunk_slot_raw_at(parsed, section, slot_va)
+		if raw is None or raw == 0:  # past raw bytes, or the table's null terminator
 			break
-		raw = struct.unpack_from("<I", parsed.data, file_offset)[0]
-		if raw == 0:
-			break
-		if not (raw & _IMAGE_ORDINAL_FLAG32):
+		ordinal = _ordinal_from_thunk_entry(raw)
+		if ordinal is None:
 			continue
-		ordinal = raw & 0x7FFFFFFF
-		name = xboxkrnl_mangled_get(ordinal) or xboxkrnl_name_get(ordinal)
+		name = _kernel_export_name(ordinal)
 		if name:
 			out[name] = slot_va
 	return out

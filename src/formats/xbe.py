@@ -9,6 +9,7 @@ Reference: Cxbx-Reloaded's src/common/xbe/Xbe.h.
 
 import struct
 from dataclasses import dataclass, field
+from functools import lru_cache
 from pathlib import Path
 
 import capstone
@@ -156,16 +157,24 @@ def xbe_function_carve(parsed: ParsedXbe, virtual_address: int, size: int) -> by
 	return parsed.data[file_start : file_start + size]
 
 
-def xbe_build_flavor_detect(parsed: ParsedXbe) -> XbeBuildFlavor:
-	base = parsed.header.base_address
-	end = base + parsed.header.size_of_image
-	encoded = parsed.header.entry_point_xor
+@lru_cache(maxsize=128)
+def _build_flavor_detect(base: int, end: int, encoded: int) -> XbeBuildFlavor:
+	"""Keyed on the three header ints the flavor depends on (not the multi-MB
+	image) so detection is memoized across the entry-point and kernel-thunk
+	getters rather than rescanning the flavor table for each."""
 	for flavor in XBE_BUILD_FLAVORS:
 		if base <= encoded ^ flavor.ep_key < end:
 			return flavor
 	raise XbeFormatError(
 		f"entry point {encoded:#x} does not decode to a VA inside "
 		f"[{base:#x}..{end:#x}) with any known build flavor"
+	)
+
+
+def xbe_build_flavor_detect(parsed: ParsedXbe) -> XbeBuildFlavor:
+	header = parsed.header
+	return _build_flavor_detect(
+		header.base_address, header.base_address + header.size_of_image, header.entry_point_xor
 	)
 
 
@@ -244,8 +253,10 @@ def xbe_functions_enumerate(parsed: ParsedXbe) -> tuple[XbeFunction, ...]:
 				fn_start_off = offset
 
 			# int3 run closes functions whose body ended in a tail-jmp/noreturn, not a `ret`.
-			if mnem == "int3" and offset > fn_start_off and _int3_run_is_boundary(
-				instrs, i, call_targets
+			if (
+				mnem == "int3"
+				and offset > fn_start_off
+				and _int3_run_is_boundary(instrs, i, call_targets)
 			):
 				_maybe_emit(found, section_va, fn_start_off, offset)
 				fn_start_off = None
@@ -266,9 +277,7 @@ def xbe_functions_enumerate(parsed: ParsedXbe) -> tuple[XbeFunction, ...]:
 	return tuple(found)
 
 
-def _maybe_emit(
-	found: list[XbeFunction], section_va: int, start_off: int, end_off: int
-) -> None:
+def _maybe_emit(found: list[XbeFunction], section_va: int, start_off: int, end_off: int) -> None:
 	fn_size = end_off - start_off
 	if 1 <= fn_size <= MAX_FUNCTION_SIZE:
 		fn_va = section_va + start_off

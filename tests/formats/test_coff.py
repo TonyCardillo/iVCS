@@ -16,8 +16,6 @@ from hypothesis import strategies as st
 
 from src.formats.coff import (
 	COFF_HEADER_SIZE,
-	COFF_RELOC_SIZE,
-	COFF_SECTION_SIZE,
 	COFF_SYMBOL_SIZE,
 	IMAGE_FILE_MACHINE_I386,
 	IMAGE_REL_I386_DIR32,
@@ -31,7 +29,7 @@ from src.formats.coff import (
 	coff_defined_function_rename,
 	coff_object_build,
 )
-from src.formats.coff_read import coff_object_read
+from src.formats.coff_read import CoffObject, CoffReloc, coff_object_read
 from src.formats.relocs import RelocKind, RelocSite, ResolvedReloc
 
 
@@ -147,131 +145,80 @@ class TestDefinedFunctionRenameProperties:
 		assert coff_defined_function_rename(once, new_name) == once
 
 
-def _coff_header_parse(blob: bytes) -> dict:
-	machine, nsec, _ts, sym_ptr, nsym, optsz, chars = struct.unpack_from("<HHIIIHH", blob, 0)
-	return dict(
-		machine=machine,
-		section_count=nsec,
-		symbol_table_ptr=sym_ptr,
-		symbol_count=nsym,
-		optional_header_size=optsz,
-		characteristics=chars,
-	)
+# The reader (coff_object_read) is the inverse of the builder and is itself
+# round-trip-tested in test_coff_read.py, so assertions about symbols, relocs,
+# and raw bytes go through it rather than reparsing the layout here. Only what
+# the reader deliberately doesn't model needs a raw probe: a section's
+# characteristic flags and the on-disk short-vs-string-table name encoding.
 
 
-def _section_entry_parse(blob: bytes, index: int) -> dict:
-	off = COFF_HEADER_SIZE + index * COFF_SECTION_SIZE
-	name = blob[off : off + 8]
-	_vs, _va, raw_sz, raw_ptr, rel_ptr, _ln_ptr, nrel, _nln, sc = struct.unpack_from(
-		"<IIIIIIHHI", blob, off + 8
-	)
-	return dict(
-		name=name.rstrip(b"\x00").decode("ascii", "replace"),
-		raw_size=raw_sz,
-		raw_ptr=raw_ptr,
-		reloc_ptr=rel_ptr,
-		reloc_count=nrel,
-		characteristics=sc,
-	)
+def _symbol_slot(obj: CoffObject, name: str) -> int:
+	"""The symbol-table slot of a named symbol, for on-disk encoding probes."""
+	return next(slot for slot, sym in obj.symbol_by_slot.items() if sym.name == name)
 
 
-def _symbol_name_at(blob: bytes, sym_index: int) -> str:
-	hdr = _coff_header_parse(blob)
-	off = hdr["symbol_table_ptr"] + sym_index * COFF_SYMBOL_SIZE
-	name_field = blob[off : off + 8]
-	if name_field[:4] == b"\x00\x00\x00\x00":
-		str_off = struct.unpack_from("<I", name_field, 4)[0]
-		strtab_off = hdr["symbol_table_ptr"] + hdr["symbol_count"] * COFF_SYMBOL_SIZE
-		end = blob.find(b"\x00", strtab_off + str_off)
-		return blob[strtab_off + str_off : end].decode("ascii", "replace")
-	return name_field.rstrip(b"\x00").decode("ascii", "replace")
+def _name_field(blob: bytes, slot: int) -> bytes:
+	"""The raw 8-byte name field of the symbol at `slot` (inline short name vs
+	`\\0\\0\\0\\0` + string-table offset for a long name)."""
+	symbol_table_ptr = struct.unpack_from("<I", blob, 8)[0]
+	off = symbol_table_ptr + slot * COFF_SYMBOL_SIZE
+	return blob[off : off + 8]
 
 
-def _symbol_record_at(blob: bytes, sym_index: int) -> dict:
-	hdr = _coff_header_parse(blob)
-	off = hdr["symbol_table_ptr"] + sym_index * COFF_SYMBOL_SIZE
-	val, sec, ty, cls, naux = struct.unpack_from("<IhHBB", blob, off + 8)
-	return dict(
-		name=_symbol_name_at(blob, sym_index),
-		value=val,
-		section=sec,
-		type=ty,
-		storage_class=cls,
-		aux_count=naux,
-	)
-
-
-def _function_symbol_index(blob: bytes, name: str) -> int:
-	hdr = _coff_header_parse(blob)
-	for i in range(hdr["symbol_count"]):
-		if _symbol_name_at(blob, i) == name:
-			return i
-	raise AssertionError(f"symbol {name!r} not present")
-
-
-def _reloc_records(blob: bytes, section_index: int) -> list[dict]:
-	sec = _section_entry_parse(blob, section_index)
-	records = []
-	for i in range(sec["reloc_count"]):
-		off = sec["reloc_ptr"] + i * COFF_RELOC_SIZE
-		va, sym_idx, ty = struct.unpack_from("<IIH", blob, off)
-		records.append(dict(virtual_address=va, symbol_index=sym_idx, type=ty))
-	return records
-
-
-def _raw_section_bytes(blob: bytes, section_index: int) -> bytes:
-	sec = _section_entry_parse(blob, section_index)
-	return blob[sec["raw_ptr"] : sec["raw_ptr"] + sec["raw_size"]]
+def _text_characteristics(blob: bytes) -> int:
+	"""Section 0's characteristics flags — CoffSection models name/raw/relocs only."""
+	return struct.unpack_from("<I", blob, COFF_HEADER_SIZE + 36)[0]
 
 
 class TestCoffHeaderAndSections:
 	def test_emits_valid_coff_header_for_minimal_function(self):
 		blob = coff_object_build(b"\xc3", "_ret_only", relocations=[])
-		hdr = _coff_header_parse(blob)
-		assert hdr["machine"] == IMAGE_FILE_MACHINE_I386
-		assert hdr["section_count"] == 1
-		assert hdr["optional_header_size"] == 0
-		assert hdr["symbol_count"] >= 3  # .text static + aux + function
+		obj = coff_object_read(blob)
+		assert obj.machine == IMAGE_FILE_MACHINE_I386
+		assert len(obj.sections) == 1
+		# The static section symbol and the function symbol are both present.
+		assert {".text", "_ret_only"} <= {s.name for s in obj.symbols}
 
 	def test_emits_single_text_section_with_raw_bytes(self):
 		body = b"\xb8\x01\x00\x00\x00\xc3"  # mov eax, 1; ret
 		blob = coff_object_build(body, "_one", relocations=[])
-		sec = _section_entry_parse(blob, 0)
-		assert sec["name"] == ".text"
-		assert sec["raw_size"] == len(body)
-		assert _raw_section_bytes(blob, 0) == body
+		sec = coff_object_read(blob).text_section()
+		assert sec is not None
+		assert sec.name == ".text"
+		assert sec.raw == body
 
 	def test_text_section_has_code_and_execute_characteristics(self):
 		blob = coff_object_build(b"\xc3", "_fn", relocations=[])
-		sec = _section_entry_parse(blob, 0)
-		assert sec["characteristics"] & IMAGE_SCN_CNT_CODE
-		assert sec["characteristics"] & IMAGE_SCN_MEM_EXECUTE
-		assert sec["characteristics"] & IMAGE_SCN_MEM_READ
+		chars = _text_characteristics(blob)
+		assert chars & IMAGE_SCN_CNT_CODE
+		assert chars & IMAGE_SCN_MEM_EXECUTE
+		assert chars & IMAGE_SCN_MEM_READ
 
-	def test_section_with_no_relocs_has_zero_reloc_count_and_ptr(self):
+	def test_section_with_no_relocs_has_empty_relocations(self):
 		blob = coff_object_build(b"\xc3", "_fn", relocations=[])
-		sec = _section_entry_parse(blob, 0)
-		assert sec["reloc_count"] == 0
-		assert sec["reloc_ptr"] == 0
+		sec = coff_object_read(blob).text_section()
+		assert sec is not None
+		assert sec.relocations == ()
 
 
 class TestCoffSymbolTable:
 	def test_function_symbol_present_with_external_class_and_function_type(self):
 		blob = coff_object_build(b"\xc3", "_my_func", relocations=[])
-		idx = _function_symbol_index(blob, "_my_func")
-		sym = _symbol_record_at(blob, idx)
-		assert sym["storage_class"] == IMAGE_SYM_CLASS_EXTERNAL
-		assert sym["type"] == IMAGE_SYM_TYPE_FUNCTION
-		assert sym["section"] == 1
-		assert sym["value"] == 0
+		sym = next(s for s in coff_object_read(blob).symbols if s.name == "_my_func")
+		assert sym.storage_class == IMAGE_SYM_CLASS_EXTERNAL
+		assert sym.type == IMAGE_SYM_TYPE_FUNCTION
+		assert sym.section_number == 1
+		assert sym.value == 0
 
 	def test_text_section_symbol_present_as_static_with_aux(self):
 		blob = coff_object_build(b"\xc3", "_fn", relocations=[])
-		idx = _function_symbol_index(blob, ".text")
-		sym = _symbol_record_at(blob, idx)
-		assert sym["storage_class"] == IMAGE_SYM_CLASS_STATIC
-		assert sym["aux_count"] == 1
-		assert sym["section"] == 1
+		obj = coff_object_read(blob)
+		text_slot = _symbol_slot(obj, ".text")
+		text_sym = obj.symbol_by_slot[text_slot]
+		assert text_sym.storage_class == IMAGE_SYM_CLASS_STATIC
+		assert text_sym.section_number == 1
+		# The reader skips aux records, so an absent next slot proves the one aux.
+		assert (text_slot + 1) not in obj.symbol_by_slot
 
 	def test_one_external_symbol_per_unique_reloc_target(self):
 		body = b"\xe8\x00\x00\x00\x00" * 3 + b"\xc3"
@@ -290,10 +237,11 @@ class TestCoffSymbolTable:
 			),
 		]
 		blob = coff_object_build(body, "_caller", relocations=relocs)
+		obj = coff_object_read(blob)
 		for name in ("_alpha", "_beta", "_gamma"):
-			sym = _symbol_record_at(blob, _function_symbol_index(blob, name))
-			assert sym["section"] == 0  # external/undefined
-			assert sym["storage_class"] == IMAGE_SYM_CLASS_EXTERNAL
+			sym = next(s for s in obj.symbols if s.name == name)
+			assert sym.section_number == 0  # external/undefined
+			assert sym.storage_class == IMAGE_SYM_CLASS_EXTERNAL
 
 	def test_dedupes_externals_with_repeated_symbol_name(self):
 		body = b"\xe8\x00\x00\x00\x00\xe8\x00\x00\x00\x00\xc3"
@@ -308,27 +256,22 @@ class TestCoffSymbolTable:
 			),
 		]
 		blob = coff_object_build(body, "_caller", relocations=relocs)
-		# Count occurrences of "_same" in symbol table
-		hdr = _coff_header_parse(blob)
-		count = sum(1 for i in range(hdr["symbol_count"]) if _symbol_name_at(blob, i) == "_same")
+		count = sum(1 for s in coff_object_read(blob).symbols if s.name == "_same")
 		assert count == 1
 
 	def test_long_symbol_name_uses_string_table(self):
 		long_name = "_very_long_function_name_exceeding_eight_chars"
 		assert len(long_name) > 8
 		blob = coff_object_build(b"\xc3", long_name, relocations=[])
-		idx = _function_symbol_index(blob, long_name)
-		# Confirm the on-disk name field starts with four zero bytes
-		hdr = _coff_header_parse(blob)
-		off = hdr["symbol_table_ptr"] + idx * COFF_SYMBOL_SIZE
-		assert blob[off : off + 4] == b"\x00\x00\x00\x00"
+		# The reader recovers the name (so the string-table round-trips); the raw
+		# probe confirms it was actually encoded out-of-line (four leading zeros).
+		slot = _symbol_slot(coff_object_read(blob), long_name)
+		assert _name_field(blob, slot)[:4] == b"\x00\x00\x00\x00"
 
 	def test_short_symbol_name_inlined_in_eight_byte_field(self):
 		blob = coff_object_build(b"\xc3", "_short", relocations=[])
-		idx = _function_symbol_index(blob, "_short")
-		hdr = _coff_header_parse(blob)
-		off = hdr["symbol_table_ptr"] + idx * COFF_SYMBOL_SIZE
-		assert blob[off : off + 4] != b"\x00\x00\x00\x00"
+		slot = _symbol_slot(coff_object_read(blob), "_short")
+		assert _name_field(blob, slot)[:4] != b"\x00\x00\x00\x00"
 
 
 class TestCoffRelocations:
@@ -345,10 +288,11 @@ class TestCoffRelocations:
 			),
 		]
 		blob = coff_object_build(body, "_caller", relocations=relocs)
-		records = _reloc_records(blob, 0)
-		assert len(records) == 2
+		sec = coff_object_read(blob).text_section()
+		assert sec is not None
+		assert len(sec.relocations) == 2
 
-	def test_rel32_reloc_type_and_virtual_address(self):
+	def test_rel32_reloc_type_and_offset(self):
 		body = b"\xe8\x00\x00\x00\x00\xc3"
 		relocs = [
 			ResolvedReloc(
@@ -357,14 +301,14 @@ class TestCoffRelocations:
 			)
 		]
 		blob = coff_object_build(body, "_caller", relocations=relocs)
-		records = _reloc_records(blob, 0)
-		assert records == [
-			dict(
-				virtual_address=1,
-				symbol_index=_function_symbol_index(blob, "_target"),
-				type=IMAGE_REL_I386_REL32,
-			)
-		]
+		obj = coff_object_read(blob)
+		sec = obj.text_section()
+		assert sec is not None
+		assert sec.relocations == (
+			CoffReloc(
+				offset=1, symbol_index=_symbol_slot(obj, "_target"), type=IMAGE_REL_I386_REL32
+			),
+		)
 
 	def test_imm32_at_each_reloc_site_is_zeroed(self):
 		# Pre-fill imm32 with non-zero garbage to prove zeroing happens
@@ -376,10 +320,11 @@ class TestCoffRelocations:
 			)
 		]
 		blob = coff_object_build(body, "_caller", relocations=relocs)
-		raw = _raw_section_bytes(blob, 0)
-		assert raw[1:5] == b"\x00\x00\x00\x00"
-		assert raw[0] == 0xE8
-		assert raw[5] == 0xC3
+		sec = coff_object_read(blob).text_section()
+		assert sec is not None
+		assert sec.raw[1:5] == b"\x00\x00\x00\x00"
+		assert sec.raw[0] == 0xE8
+		assert sec.raw[5] == 0xC3
 
 	def test_dir32_reloc_emits_image_rel_i386_dir32_type(self):
 		# FF 15 imm32 = call dword ptr [imm32]
@@ -391,14 +336,14 @@ class TestCoffRelocations:
 			)
 		]
 		blob = coff_object_build(body, "_caller", relocations=relocs)
-		records = _reloc_records(blob, 0)
-		assert len(records) == 1
-		assert records[0]["type"] == IMAGE_REL_I386_DIR32
-		assert records[0]["virtual_address"] == 2
-		raw = _raw_section_bytes(blob, 0)
-		assert raw[2:6] == b"\x00\x00\x00\x00"  # imm32 zeroed
-		assert raw[0:2] == b"\xff\x15"  # opcode preserved
-		assert raw[6] == 0xC3
+		sec = coff_object_read(blob).text_section()
+		assert sec is not None
+		assert len(sec.relocations) == 1
+		assert sec.relocations[0].type == IMAGE_REL_I386_DIR32
+		assert sec.relocations[0].offset == 2
+		assert sec.raw[2:6] == b"\x00\x00\x00\x00"  # imm32 zeroed
+		assert sec.raw[0:2] == b"\xff\x15"  # opcode preserved
+		assert sec.raw[6] == 0xC3
 
 	def test_reloc_symbol_index_points_to_matching_external(self):
 		body = b"\xe8\x00\x00\x00\x00\xe8\x00\x00\x00\x00\xc3"
@@ -413,11 +358,11 @@ class TestCoffRelocations:
 			),
 		]
 		blob = coff_object_build(body, "_caller", relocations=relocs)
-		records = _reloc_records(blob, 0)
-		first_idx = _function_symbol_index(blob, "_first")
-		second_idx = _function_symbol_index(blob, "_second")
-		assert records[0]["symbol_index"] == first_idx
-		assert records[1]["symbol_index"] == second_idx
+		obj = coff_object_read(blob)
+		sec = obj.text_section()
+		assert sec is not None
+		assert sec.relocations[0].symbol_index == _symbol_slot(obj, "_first")
+		assert sec.relocations[1].symbol_index == _symbol_slot(obj, "_second")
 
 
 class TestCoffEndToEndObjdiff:
