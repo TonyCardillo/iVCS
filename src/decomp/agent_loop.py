@@ -18,11 +18,11 @@ from src.decomp.compile_tool import (
 	DiffFn,
 	compile_and_view_assembly,
 	compile_error_format,
-	function_match_percent,
 	obj_function_symbol_canonicalize,
 )
 from src.decomp.ghidra_decompile import ghidra_pseudo_c_normalize_for_prompt
 from src.decomp.history import history_best_read
+from src.decomp.objdiff import function_match_percent
 
 COMPILE_TOOL_NAME = "compile_and_view_assembly"
 
@@ -78,44 +78,6 @@ class LLMClient(Protocol):
 		"""Returns an assistant message dict in OpenAI tool-call shape."""
 
 
-@dataclass
-class FakeLLMClient:
-	"""Test double: returns scripted responses in order, raises when exhausted."""
-
-	scripted: list[dict]
-	_index: int = 0
-
-	def complete(self, messages: list[dict], tools: list[dict]) -> dict:
-		if self._index >= len(self.scripted):
-			raise RuntimeError(
-				f"FakeLLMClient exhausted after {self._index} calls (no more scripted responses)"
-			)
-		response = self.scripted[self._index]
-		self._index += 1
-		return response
-
-
-def assistant_tool_call(tool_name: str, arguments: dict, tool_call_id: str = "call_1") -> dict:
-	return {
-		"role": "assistant",
-		"content": None,
-		"tool_calls": [
-			{
-				"id": tool_call_id,
-				"type": "function",
-				"function": {
-					"name": tool_name,
-					"arguments": json.dumps(arguments),
-				},
-			}
-		],
-	}
-
-
-def assistant_text(text: str) -> dict:
-	return {"role": "assistant", "content": text}
-
-
 def agent_loop_run(
 	workspace: FunctionWorkspace,
 	target_asm: str,
@@ -138,7 +100,10 @@ def agent_loop_run(
 	tools = [_TOOL_SCHEMA]
 
 	# Inherit prior best so a weaker second run can't clobber a stronger best.c.
-	best_match, best_model = _prior_best(workspace)
+	# Floor the model to the one actually running, so a run where nothing compiles
+	# still attributes to a model rather than recording "model": null.
+	best_match, prior_model = _prior_best(workspace)
+	best_model = prior_model or config.model
 	best_c_code: str | None = None
 	start_time = time.monotonic()
 	soft_timeout_injected = False
@@ -224,10 +189,10 @@ def _prior_best(workspace: FunctionWorkspace) -> tuple[float | None, str | None]
 			best = raw_best if isinstance(raw_best, (int, float)) else None
 			raw_model = data.get("model")
 			model = raw_model if isinstance(raw_model, str) else None
-		except json.JSONDecodeError, OSError:
+		except (json.JSONDecodeError, OSError):
 			pass
 
-	recovered = history_best_read(workspace.history_dir)
+	recovered = history_best_read(workspace.history_dir, workspace.function_name)
 	if recovered.match_percent is not None and (best is None or recovered.match_percent > best):
 		best = recovered.match_percent
 		model = recovered.model or model
@@ -397,7 +362,7 @@ def _extract_c_code(response: dict) -> str | None:
 			continue
 		try:
 			args = json.loads(tool_call["function"]["arguments"])
-		except KeyError, json.JSONDecodeError:
+		except (KeyError, json.JSONDecodeError):
 			continue
 		if isinstance(args.get("c_code"), str):
 			return args["c_code"]
@@ -415,8 +380,12 @@ def _extract_c_code(response: dict) -> str | None:
 
 
 def _tool_call_id(response: dict) -> str | None:
+	"""The id of the compile tool call, to pair its tool reply. None when the
+	code was fence-sourced — matching _extract_c_code, so we never pair a reply
+	to a foreign tool_use the assistant didn't make for the compile tool."""
 	for tool_call in response.get("tool_calls") or []:
-		return tool_call.get("id", "call_unknown")
+		if tool_call.get("function", {}).get("name") == COMPILE_TOOL_NAME:
+			return tool_call.get("id", "call_unknown")
 	return None
 
 
@@ -489,10 +458,7 @@ def _finalize(
 __all__ = [
 	"AgentConfig",
 	"AgentResult",
-	"FakeLLMClient",
 	"LLMClient",
 	"agent_loop_run",
-	"assistant_text",
-	"assistant_tool_call",
 	"ghidra_only_run",
 ]

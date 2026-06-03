@@ -16,12 +16,10 @@ from src.core.workspace import FunctionWorkspace
 from src.decomp.agent_loop import (
 	COMPILE_TOOL_NAME,
 	AgentConfig,
-	FakeLLMClient,
 	_extract_c_code,
 	_prior_best,
+	_tool_call_id,
 	agent_loop_run,
-	assistant_text,
-	assistant_tool_call,
 	ghidra_only_run,
 )
 from src.decomp.compile_tool import CompileOutput
@@ -33,6 +31,11 @@ from src.decomp.objdiff import (
 	DiffResult,
 	DiffSide,
 	DiffSymbol,
+)
+from tests.decomp._fakes import (
+	FakeLLMClient,
+	assistant_text,
+	assistant_tool_call,
 )
 
 
@@ -315,6 +318,26 @@ class TestModelByAttempt:
 		)
 		data = json.loads(ws.result_json.read_text())
 		assert data["best_match_percent"] == 70.0
+		assert data["model"] == "local"
+
+	def test_all_attempts_fail_attributes_running_model_not_null(self, tmp_path):
+		# A run where nothing compiles still records the model that ran — never
+		# "model": null, which would lose attribution the whole design promises.
+		ws = _make_workspace(tmp_path, fn_name="_foo")
+		llm = FakeLLMClient(
+			[assistant_tool_call("compile_and_view_assembly", {"c_code": "broken("})]
+		)
+		result = agent_loop_run(
+			workspace=ws,
+			target_asm="ret",
+			config=_make_config(model="local", max_iterations=1),
+			llm_client=llm,
+			compile_fn=_compile_fail,
+			diff_fn=_scripted_diff(),
+		)
+		assert result.success is False
+		assert result.best_match_percent is None
+		data = json.loads(ws.result_json.read_text())
 		assert data["model"] == "local"
 
 	def test_weaker_rerun_keeps_stronger_model_and_best_c(self, tmp_path):
@@ -683,6 +706,34 @@ class TestExtractCCode:
 	@given(prose=st.text(alphabet=st.characters(blacklist_characters="`"), max_size=200))
 	def test_returns_none_without_tool_call_or_fence_invariant(self, prose):
 		assert _extract_c_code(assistant_text(prose)) is None
+
+
+class TestToolCallIdAgreesWithExtractedCode:
+	# _tool_call_id and _extract_c_code must agree on what "the tool call" is:
+	# the compile tool. Otherwise a role:"tool" reply gets paired to a tool_use
+	# the assistant never made for the compile tool — a malformed transcript.
+	def test_foreign_tool_call_with_fence_has_no_compile_call_id(self):
+		response = {
+			"role": "assistant",
+			"content": "```c\nint f(void){return 0;}\n```",
+			"tool_calls": [
+				{
+					"id": "call_foreign",
+					"type": "function",
+					"function": {"name": "some_other_tool", "arguments": "{}"},
+				}
+			],
+		}
+		# Code is fence-sourced (the foreign call isn't the compile tool)...
+		assert _extract_c_code(response) == "int f(void){return 0;}"
+		# ...so there is no compile tool_call to pair a tool reply to.
+		assert _tool_call_id(response) is None
+
+	def test_compile_tool_call_id_returned_when_present(self):
+		response = assistant_tool_call(
+			COMPILE_TOOL_NAME, {"c_code": "int x;\n"}, tool_call_id="call_42"
+		)
+		assert _tool_call_id(response) == "call_42"
 
 
 class TestPriorBestReconcile:

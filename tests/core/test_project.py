@@ -410,6 +410,9 @@ def _clobbered_workspace(
 	if best_c:
 		(root / "best.c").write_text("// winning solution\n")
 	if result is not None:
+		# Real runs record the canonical symbol the diffs are keyed by; the
+		# reconciler reads it to score the right function.
+		result = {"function_name": "_fn", **result}
 		(root / "result.json").write_text(json.dumps(result))
 
 

@@ -196,7 +196,11 @@ def function_status(project: Project, fn: FunctionEntry) -> FunctionStatus:
 	if not success and (best is None or best <= 0.0):
 		from src.decomp.history import history_best_read
 
-		recovered = history_best_read(ws_path / "history")
+		# result.json records the canonical symbol the diffs are keyed by (the
+		# mangled `_fn_<va>@N`); fall back to fn.name for pre-this-field runs.
+		recovered_name = result.get("function_name")
+		recovered_name = recovered_name if isinstance(recovered_name, str) else fn.name
+		recovered = history_best_read(ws_path / "history", recovered_name)
 		if recovered.match_percent is not None and recovered.match_percent > 0.0:
 			best = recovered.match_percent
 			model = model or recovered.model
@@ -379,5 +383,5 @@ def json_load_or_none(path: Path) -> dict | None:
 		return None
 	try:
 		return json.loads(path.read_text())
-	except json.JSONDecodeError, OSError:
+	except (json.JSONDecodeError, OSError):
 		return None

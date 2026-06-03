@@ -19,7 +19,7 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-from src.decomp.objdiff import objdiff_parse
+from src.decomp.objdiff import function_match_percent, objdiff_parse
 
 
 @dataclass(frozen=True)
@@ -29,32 +29,31 @@ class HistoryBest:
 	attempts: int  # number of LLM attempts on disk (excludes the #0 baseline)
 
 
-def _attempt_match_read(diff_path: Path) -> float | None:
-	"""Match% for one attempt: the function symbol's score from its cached diff.
+def _attempt_match_read(diff_path: Path, function_name: str) -> float | None:
+	"""Match% for one attempt: the target function's score from its cached diff.
 
-	Reads the target (left) side first, then the base (right) side, mirroring the
-	webui attempt reader. Returns None when the diff is absent, unparseable, or
-	holds no scored function symbol (e.g. a symbol-mismatch attempt)."""
+	Name-matched via the shared objdiff reader (target/left side first), so a
+	best.c defining helper functions still scores the verification target rather
+	than whichever function symbol happens to come first. Returns None when the
+	diff is absent, unparseable, or doesn't score that function (a symbol
+	mismatch)."""
 	if not diff_path.is_file():
 		return None
 	try:
 		diff = objdiff_parse(json.loads(diff_path.read_text()))
-	except json.JSONDecodeError, OSError:
+	except (json.JSONDecodeError, OSError):
 		return None
-	for side in ("left", "right"):
-		for symbol in diff.function_symbols(side):
-			if symbol.match_percent is not None:
-				return symbol.match_percent
-	return None
+	return function_match_percent(diff, function_name)
 
 
-def history_best_read(history_dir: Path) -> HistoryBest:
+def history_best_read(history_dir: Path, function_name: str) -> HistoryBest:
 	"""Strongest attempt recorded under `history_dir`, read from cached diffs.
 
-	Walks `NNNN.c` to enumerate attempts, reads each `NNNN.diff.json`'s match%,
-	and returns the highest — ties broken by the earliest attempt, matching the
-	best.c ownership convention. The baseline attempt #0 (Ghidra warm-start)
-	counts toward the best score but not the LLM attempt total."""
+	Walks `NNNN.c` to enumerate attempts, reads each `NNNN.diff.json`'s match%
+	for `function_name`, and returns the highest — ties broken by the earliest
+	attempt, matching the best.c ownership convention. The baseline attempt #0
+	(Ghidra warm-start) counts toward the best score but not the LLM attempt
+	total."""
 	if not history_dir.is_dir():
 		return HistoryBest(match_percent=None, model=None, attempts=0)
 
@@ -70,7 +69,7 @@ def history_best_read(history_dir: Path) -> HistoryBest:
 	best_pct: float | None = None
 	best_n: int | None = None
 	for n in sorted(numbers):
-		pct = _attempt_match_read(history_dir / f"{n:04d}.diff.json")
+		pct = _attempt_match_read(history_dir / f"{n:04d}.diff.json", function_name)
 		if pct is not None and (best_pct is None or pct > best_pct):
 			best_pct = pct
 			best_n = n

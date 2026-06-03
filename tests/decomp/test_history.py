@@ -36,9 +36,33 @@ def _write_attempt(history: Path, n: int, match_percent: float | None, model: st
 		(history / f"{stem}.model").write_text(model)
 
 
+def _write_two_symbol_attempt(history: Path, n: int, helper_pct: float, target_pct: float) -> None:
+	"""An attempt whose best.c defined a helper function too: the diff carries the
+	helper symbol first, then the verification target `_fn_00012000`."""
+	history.mkdir(parents=True, exist_ok=True)
+	stem = f"{n:04d}"
+	(history / f"{stem}.c").write_text(f"// attempt {n}\n")
+	(history / f"{stem}.diff.json").write_text(
+		json.dumps(
+			{
+				"left": {
+					"symbols": [
+						{"name": "_helper", "kind": "SYMBOL_FUNCTION", "match_percent": helper_pct},
+						{
+							"name": "_fn_00012000",
+							"kind": "SYMBOL_FUNCTION",
+							"match_percent": target_pct,
+						},
+					]
+				}
+			}
+		)
+	)
+
+
 class TestHistoryBestRead:
 	def test_missing_history_is_empty_example(self, tmp_path: Path):
-		assert history_best_read(tmp_path / "nope") == HistoryBest(
+		assert history_best_read(tmp_path / "nope", "_fn_00012000") == HistoryBest(
 			match_percent=None, model=None, attempts=0
 		)
 
@@ -48,7 +72,7 @@ class TestHistoryBestRead:
 		_write_attempt(history, 2, 79.8, "beta")
 		_write_attempt(history, 3, 70.0, "gamma")
 
-		best = history_best_read(history)
+		best = history_best_read(history, "_fn_00012000")
 		assert best.match_percent == 79.8
 		assert best.model == "beta"
 		assert best.attempts == 3
@@ -60,7 +84,7 @@ class TestHistoryBestRead:
 		for n, pct in ((2, 79.8), (5, 50.0), (1, 67.9), (4, 79.8), (3, 12.0)):
 			_write_attempt(history, n, pct, f"m{n}")
 
-		best = history_best_read(history)
+		best = history_best_read(history, "_fn_00012000")
 		assert best.match_percent == 79.8
 		# Ties broken by earliest attempt — best.c ownership convention.
 		assert best.model == "m2"
@@ -74,7 +98,7 @@ class TestHistoryBestRead:
 		_write_attempt(history, 8, 79.8, "haiku")
 		_write_attempt(history, 9, None, "haiku")  # failed attempt, no score
 
-		best = history_best_read(history)
+		best = history_best_read(history, "_fn_00012000")
 		assert best.match_percent == 79.8
 		assert best.attempts == 3
 
@@ -83,7 +107,7 @@ class TestHistoryBestRead:
 		_write_attempt(history, 1, None, "haiku")
 		_write_attempt(history, 2, None, "haiku")
 
-		best = history_best_read(history)
+		best = history_best_read(history, "_fn_00012000")
 		assert best.match_percent is None
 		assert best.attempts == 2
 
@@ -94,6 +118,16 @@ class TestHistoryBestRead:
 		_write_attempt(history, 0, 30.0, "ghidra")
 		_write_attempt(history, 1, 55.0, "alpha")
 
-		best = history_best_read(history)
+		best = history_best_read(history, "_fn_00012000")
 		assert best.match_percent == 55.0
 		assert best.attempts == 1
+
+	def test_scores_target_not_a_higher_scoring_helper_symbol_example(self, tmp_path: Path):
+		# best.c defined a helper that diffs at 99% while the target sits at 40%.
+		# The standing best is the target's score — name-matched, not the max
+		# function symbol in the attempt.
+		history = tmp_path / "history"
+		_write_two_symbol_attempt(history, 1, helper_pct=99.0, target_pct=40.0)
+
+		best = history_best_read(history, "_fn_00012000")
+		assert best.match_percent == 40.0

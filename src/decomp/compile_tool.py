@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from src.core.workspace import FunctionWorkspace
-from src.decomp.objdiff import DiffResult, objdiff_run
+from src.decomp.objdiff import DiffResult, function_match_percent, objdiff_run
 from src.formats.coff import coff_defined_function_rename
 from src.paths import COMPILERS_DIR
 
@@ -87,16 +87,6 @@ def obj_function_symbol_canonicalize(obj_path: Path, function_name: str) -> None
 	fixed = coff_defined_function_rename(obj, function_name)
 	if fixed != obj:
 		obj_path.write_bytes(fixed)
-
-
-def function_match_percent(diff: DiffResult, function_name: str) -> float | None:
-	for symbol in diff.function_symbols("left"):
-		if symbol.name == function_name:
-			return symbol.match_percent
-	for symbol in diff.function_symbols("right"):
-		if symbol.name == function_name:
-			return symbol.match_percent
-	return None
 
 
 def default_compile_fn(c_source: Path, out_obj: Path, workspace_root: Path) -> CompileOutput:

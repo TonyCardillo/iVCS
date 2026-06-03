@@ -9,10 +9,16 @@ import json
 from pathlib import Path
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
 from src.decomp.objdiff import (
+	SYMBOL_KIND_FUNCTION,
 	DiffKind,
 	DiffResult,
+	DiffSide,
+	DiffSymbol,
+	function_match_percent,
 	objdiff_parse,
 )
 
@@ -77,11 +83,14 @@ class TestVariantDiff:
 			assert row.instruction.formatted, "DELETE row instruction must have formatted text"
 
 	def test_insert_rows_may_lack_instruction(self, variant_diff: DiffResult):
-		"""INSERT rows on the left side describe content present only on the right."""
+		"""INSERT rows on the left side describe content present only on the right;
+		the schema permits instruction=None there, and a present instruction must
+		still carry formatted text."""
 		sum_to_n = next(s for s in variant_diff.function_symbols() if s.name == "_sum_to_n")
 		inserts = [r for r in sum_to_n.instructions if r.diff_kind == DiffKind.INSERT]
 		assert len(inserts) > 0
-		# The schema permits instruction=None on one side for INSERT/DELETE rows; tolerate either.
+		for row in inserts:
+			assert row.instruction is None or row.instruction.formatted
 
 
 class TestParseEdgeCases:
@@ -137,3 +146,49 @@ class TestParseEdgeCases:
 		assert row.instruction is not None
 		assert row.instruction.mnemonic == "mov"
 		assert row.instruction.formatted == "mov eax, ebx"
+
+
+def _function_symbol(name: str, percent: float | None) -> DiffSymbol:
+	return DiffSymbol(name=name, kind=SYMBOL_KIND_FUNCTION, match_percent=percent)
+
+
+class TestFunctionMatchPercent:
+	"""function_match_percent (shared by the agent loop, ghidra_only_run, and the
+	history reader): the target symbol is the diff's left side; the base is the
+	right. Name-matched so a helper function in best.c doesn't shadow the target."""
+
+	_PCT = st.floats(min_value=0.0, max_value=100.0)
+
+	@given(left=_PCT, right=_PCT)
+	def test_left_side_wins_when_symbol_on_both_oracle(self, left, right):
+		# When the same symbol appears on both sides, left (the target) decides.
+		diff = DiffResult(
+			left=DiffSide(symbols=(_function_symbol("fn_x", left),)),
+			right=DiffSide(symbols=(_function_symbol("fn_x", right),)),
+		)
+		assert function_match_percent(diff, "fn_x") == left
+
+	@given(right=_PCT)
+	def test_falls_back_to_right_when_absent_from_left_oracle(self, right):
+		diff = DiffResult(
+			left=DiffSide(symbols=()),
+			right=DiffSide(symbols=(_function_symbol("fn_x", right),)),
+		)
+		assert function_match_percent(diff, "fn_x") == right
+
+	def test_none_when_symbol_on_neither_side_example(self):
+		diff = DiffResult(left=DiffSide(symbols=()), right=DiffSide(symbols=()))
+		assert function_match_percent(diff, "fn_x") is None
+
+	def test_scores_named_target_not_a_higher_scoring_helper_example(self):
+		# Two function symbols on the left; name-match returns the target's score,
+		# not the helper's higher one.
+		diff = DiffResult(
+			left=DiffSide(
+				symbols=(
+					_function_symbol("_helper", 99.0),
+					_function_symbol("fn_x", 40.0),
+				)
+			)
+		)
+		assert function_match_percent(diff, "fn_x") == 40.0

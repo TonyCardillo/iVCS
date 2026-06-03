@@ -75,6 +75,19 @@ def objdiff_parse(raw: dict) -> DiffResult:
 	)
 
 
+def function_match_percent(diff: DiffResult, function_name: str) -> float | None:
+	"""The match% of the function symbol named `function_name`, target (left)
+	side first then base (right). None when neither side scores that symbol.
+
+	Name-matched on purpose: a best.c that defines helper functions yields
+	several function symbols, but only the verification target's score counts."""
+	for side in ("left", "right"):
+		for symbol in diff.function_symbols(side):
+			if symbol.name == function_name:
+				return symbol.match_percent
+	return None
+
+
 def objdiff_run(
 	target_obj: Path | str,
 	base_obj: Path | str,

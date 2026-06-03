@@ -242,6 +242,8 @@ def _run_with_lock_retry(
 	sleep_fn: Callable[[float], None] = time.sleep,
 ) -> subprocess.CompletedProcess[str]:
 	"""Retry when Ghidra reports `Unable to lock project` (transient JVM-shutdown race)."""
+	if attempts < 1:
+		raise ValueError(f"attempts must be >= 1, got {attempts}")
 	for attempt in range(attempts):
 		result = run(argv)
 		stdout = result.stdout or ""
@@ -251,7 +253,7 @@ def _run_with_lock_retry(
 		if attempt == attempts - 1:
 			return result
 		sleep_fn(backoff_seconds * (2**attempt))
-	return result
+	raise AssertionError("unreachable: loop returns on the final attempt")
 
 
 def _clear_partial_project(config: GhidraConfig) -> None:
