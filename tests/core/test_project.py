@@ -135,7 +135,7 @@ def _setup_workspaces(tmp_path: Path) -> None:
 		)
 	)
 
-	# untouched with directory but no successful attempt (best=None)
+	# untouched with directory but no iteration ever ran (0 iterations, best=None)
 	untouched_dir = fns_root / "fn_untouched_dir"
 	untouched_dir.mkdir()
 	(untouched_dir / "result.json").write_text(
@@ -143,7 +143,7 @@ def _setup_workspaces(tmp_path: Path) -> None:
 			{
 				"success": False,
 				"best_match_percent": None,
-				"iterations": 1,
+				"iterations": 0,
 				"termination_reason": "llm_no_progress",
 				"function_name": "_fn_untouched_dir",
 			}
@@ -384,3 +384,144 @@ class TestModelAttemptStats:
 
 	def test_empty(self):
 		assert model_attempt_stats([]) == []
+
+
+def _clobbered_workspace(
+	root: Path, *, diffs: dict[int, float | None], best_c: bool, result: dict | None
+) -> None:
+	"""A function whose result.json lost its score to a weak re-run, but whose
+	history/ diffs and best.c still hold the real solution (the reported bug)."""
+	history = root / "history"
+	history.mkdir(parents=True, exist_ok=True)
+	for n, pct in diffs.items():
+		(history / f"{n:04d}.c").write_text(f"// {n}\n")
+		if pct is not None:
+			(history / f"{n:04d}.diff.json").write_text(
+				json.dumps(
+					{
+						"left": {
+							"symbols": [
+								{"name": "_fn", "kind": "SYMBOL_FUNCTION", "match_percent": pct}
+							]
+						}
+					}
+				)
+			)
+	if best_c:
+		(root / "best.c").write_text("// winning solution\n")
+	if result is not None:
+		(root / "result.json").write_text(json.dumps(result))
+
+
+class TestFunctionStatusReconcile:
+	"""function_status must not trust a clobbered result.json over the attempt
+	history + best.c on disk (the fn_00012000 'untouched' regression)."""
+
+	def _status(self, tmp_path: Path, fn: FunctionEntry):
+		from src.core.project import Project, function_status
+
+		project = Project(
+			name="x",
+			xbe_path=tmp_path / "x.xbe",
+			workspace_root=tmp_path,
+			functions=(fn,),
+		)
+		return function_status(project, fn)
+
+	def test_clobbered_null_best_recovered_as_partial_example(self, tmp_path: Path):
+		fn = FunctionEntry("fn", 0x12000, 125)
+		_clobbered_workspace(
+			tmp_path / "fn",
+			diffs={1: 67.9, 8: 79.8, 9: None},
+			best_c=True,
+			result={
+				"success": False,
+				"best_match_percent": None,
+				"iterations": 1,
+				"termination_reason": "llm_no_progress",
+				"model": "claude-haiku-4-5",
+			},
+		)
+		st = self._status(tmp_path, fn)
+		assert st.state == "partial"
+		assert st.best_match_percent == 79.8
+		assert st.iterations == 3  # the real attempt count on disk, not the clobbering run's 1
+
+	def test_genuinely_untouched_stays_untouched_example(self, tmp_path: Path):
+		# Zero iterations and no score on disk → genuinely untouched.
+		fn = FunctionEntry("fn", 0x12000, 125)
+		_clobbered_workspace(
+			tmp_path / "fn",
+			diffs={},
+			best_c=False,
+			result={"success": False, "best_match_percent": None, "iterations": 0},
+		)
+		st = self._status(tmp_path, fn)
+		assert st.state == "untouched"
+		assert st.best_match_percent is None
+
+	def test_iterated_function_is_never_untouched_invariant(self, tmp_path: Path):
+		# Invariant: iterations > 0 ⇒ not untouched. fn_00012200's shape — three
+		# attempts that all failed to compile (no diffs), a null-best timed-out
+		# summary, no best.c — must still read as touched.
+		fn = FunctionEntry("fn", 0x12200, 121)
+		_clobbered_workspace(
+			tmp_path / "fn",
+			diffs={1: None, 2: None, 3: None},
+			best_c=False,
+			result={
+				"success": False,
+				"best_match_percent": None,
+				"iterations": 3,
+				"termination_reason": "hard_timeout",
+			},
+		)
+		st = self._status(tmp_path, fn)
+		assert st.state != "untouched"
+		assert st.iterations == 3
+
+	def test_iterated_recovers_baseline_match_as_partial_example(self, tmp_path: Path):
+		# Same shape but the Ghidra warm-start baseline (#0) compiled at 32% — the
+		# progress table should surface that real score, matching the detail page.
+		fn = FunctionEntry("fn", 0x12200, 121)
+		_clobbered_workspace(
+			tmp_path / "fn",
+			diffs={0: 32.4, 1: None, 2: None, 3: None},
+			best_c=False,
+			result={
+				"success": False,
+				"best_match_percent": None,
+				"iterations": 3,
+				"termination_reason": "hard_timeout",
+			},
+		)
+		st = self._status(tmp_path, fn)
+		assert st.state == "partial"
+		assert st.best_match_percent == 32.4
+		assert st.iterations == 3
+
+	def test_healthy_partial_result_unchanged_example(self, tmp_path: Path):
+		# A result.json that already reports a positive best is trusted as-is —
+		# no history parse, no surprise reclassification.
+		fn = FunctionEntry("fn", 0x12000, 125)
+		_clobbered_workspace(
+			tmp_path / "fn",
+			diffs={1: 42.5},
+			best_c=True,
+			result={"success": False, "best_match_percent": 42.5, "iterations": 3},
+		)
+		st = self._status(tmp_path, fn)
+		assert st.state == "partial"
+		assert st.best_match_percent == 42.5
+		assert st.iterations == 3
+
+	def test_matched_result_unchanged_example(self, tmp_path: Path):
+		fn = FunctionEntry("fn", 0x12000, 125)
+		_clobbered_workspace(
+			tmp_path / "fn",
+			diffs={1: 100.0},
+			best_c=True,
+			result={"success": True, "best_match_percent": 100.0, "iterations": 2},
+		)
+		st = self._status(tmp_path, fn)
+		assert st.state == "matched"

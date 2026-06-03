@@ -18,6 +18,7 @@ from src.decomp.agent_loop import (
 	AgentConfig,
 	FakeLLMClient,
 	_extract_c_code,
+	_prior_best,
 	agent_loop_run,
 	assistant_text,
 	assistant_tool_call,
@@ -596,9 +597,7 @@ class TestGhidraOnlyRun:
 			compile_fn=_compile_ok,
 			diff_fn=_scripted_diff(40.0),
 		)
-		result = ghidra_only_run(
-			workspace=ws, compile_fn=_compile_ok, diff_fn=_scripted_diff()
-		)
+		result = ghidra_only_run(workspace=ws, compile_fn=_compile_ok, diff_fn=_scripted_diff())
 		assert result.termination_reason == "ghidra_unavailable"
 		data = json.loads(ws.result_json.read_text())
 		assert data["model"] == "claude-haiku-4-5"
@@ -620,9 +619,7 @@ class TestGhidraOnlyRun:
 			diff_fn=_scripted_diff(80.0),
 		)
 		ws.attempt_paths(0).c.write_text("int foo(int x){return x;}\n")
-		result = ghidra_only_run(
-			workspace=ws, compile_fn=_compile_ok, diff_fn=_scripted_diff(43.7)
-		)
+		result = ghidra_only_run(workspace=ws, compile_fn=_compile_ok, diff_fn=_scripted_diff(43.7))
 		assert result.best_match_percent == 80.0
 		data = json.loads(ws.result_json.read_text())
 		assert data["model"] == "alpha"
@@ -686,3 +683,44 @@ class TestExtractCCode:
 	@given(prose=st.text(alphabet=st.characters(blacklist_characters="`"), max_size=200))
 	def test_returns_none_without_tool_call_or_fence_invariant(self, prose):
 		assert _extract_c_code(assistant_text(prose)) is None
+
+
+class TestPriorBestReconcile:
+	"""_prior_best must recover from a clobbered result.json so a re-run inherits
+	the true standing best (and never re-writes a weaker summary)."""
+
+	def _write_diff(self, history: Path, n: int, pct: float, model: str) -> None:
+		history.mkdir(parents=True, exist_ok=True)
+		(history / f"{n:04d}.c").write_text(f"// {n}\n")
+		(history / f"{n:04d}.diff.json").write_text(
+			json.dumps(
+				{
+					"left": {
+						"symbols": [
+							{"name": "_foo", "kind": "SYMBOL_FUNCTION", "match_percent": pct}
+						]
+					}
+				}
+			)
+		)
+		(history / f"{n:04d}.model").write_text(model)
+
+	def test_recovers_best_when_result_json_clobbered_to_null_example(self, tmp_path):
+		ws = _make_workspace(tmp_path, fn_name="_foo")
+		self._write_diff(ws.history_dir, 1, 79.8, "alpha")
+		ws.result_json.write_text(
+			json.dumps({"success": False, "best_match_percent": None, "model": "beta"})
+		)
+		best, model = _prior_best(ws)
+		assert best == 79.8
+		assert model == "alpha"
+
+	def test_result_json_wins_when_stronger_than_history_example(self, tmp_path):
+		ws = _make_workspace(tmp_path, fn_name="_foo")
+		self._write_diff(ws.history_dir, 1, 40.0, "alpha")
+		ws.result_json.write_text(
+			json.dumps({"success": False, "best_match_percent": 90.0, "model": "beta"})
+		)
+		best, model = _prior_best(ws)
+		assert best == 90.0
+		assert model == "beta"

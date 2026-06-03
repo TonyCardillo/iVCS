@@ -164,47 +164,61 @@ def project_sdk_vas(project_path: Path | str) -> frozenset[int]:
 
 
 def function_status(project: Project, fn: FunctionEntry) -> FunctionStatus:
-	"""Classify one function from its workspace `result.json`.
+	"""Classify one function from its workspace `result.json`, reconciled against
+	the attempt history when the summary looks clobbered.
 
 	matched   = success flag set, or best_match_percent >= 100
-	partial   = some positive match but not complete
-	untouched = no result, or zero/None match
+	partial   = some positive match, or any function that has been iterated on
+	untouched = never iterated and no recorded match
+
+	result.json is a clobberable summary: a weak re-run can overwrite it with
+	`best_match_percent: null` even though `history/` (including the Ghidra
+	warm-start baseline) and `best.c` still hold a real match. When it records no
+	positive best, recover the true best and attempt count from the on-disk diffs
+	(`history_best_read`).
+
+	Invariant: a function with iterations > 0 has been worked on, so it is never
+	reported as untouched — even when every attempt failed to produce a match.
 	"""
 	ws_path = project.workspace_for(fn)
-	result = json_load_or_none(ws_path / "result.json")
-	if result is None:
-		return FunctionStatus(
-			name=fn.name,
-			va=fn.va,
-			size=fn.size,
-			state="untouched",
-			best_match_percent=None,
-			iterations=0,
-			workspace_path=ws_path,
-			termination_reason=None,
-		)
+	result = json_load_or_none(ws_path / "result.json") or {}
 
-	best = result.get("best_match_percent")
+	raw_best = result.get("best_match_percent")
+	best = float(raw_best) if isinstance(raw_best, (int, float)) else None
 	success = bool(result.get("success"))
-	if success or (isinstance(best, (int, float)) and best >= 100.0):
+	iterations = int(result.get("iterations") or 0)
+	reason = result.get("termination_reason")
+	model = result.get("model")
+	model = model if isinstance(model, str) else None
+
+	# A None/zero summary best may just mean the summary was clobbered or the
+	# baseline's score was never folded in — trust the history diffs instead.
+	if not success and (best is None or best <= 0.0):
+		from src.decomp.history import history_best_read
+
+		recovered = history_best_read(ws_path / "history")
+		if recovered.match_percent is not None and recovered.match_percent > 0.0:
+			best = recovered.match_percent
+			model = model or recovered.model
+		iterations = max(iterations, recovered.attempts)
+
+	if success or (best is not None and best >= 100.0):
 		state = "matched"
-	elif isinstance(best, (int, float)) and best > 0.0:
+	elif (best is not None and best > 0.0) or iterations > 0:
 		state = "partial"
 	else:
 		state = "untouched"
 
-	reason = result.get("termination_reason")
-	model = result.get("model")
 	return FunctionStatus(
 		name=fn.name,
 		va=fn.va,
 		size=fn.size,
 		state=state,
-		best_match_percent=float(best) if isinstance(best, (int, float)) else None,
-		iterations=int(result.get("iterations") or 0),
+		best_match_percent=best,
+		iterations=iterations,
 		workspace_path=ws_path,
 		termination_reason=reason if isinstance(reason, str) else None,
-		model=model if isinstance(model, str) else None,
+		model=model,
 	)
 
 
@@ -365,5 +379,5 @@ def json_load_or_none(path: Path) -> dict | None:
 		return None
 	try:
 		return json.loads(path.read_text())
-	except (json.JSONDecodeError, OSError):
+	except json.JSONDecodeError, OSError:
 		return None

@@ -1,11 +1,18 @@
 """Tests for src.drivers.launcher.
 
-We only exercise the pure helpers here. The end-to-end launch flow
-spawns a real LLM client + Wine + objdiff and is covered by manual
-smoke-testing through the web UI, not the test suite.
+We exercise the pure helpers here, plus one end-to-end test of the Ghidra
+warm-start preparation (TestLocalRunWarmstartE2E) — the model-independent
+front half every "local" run drives. The full launch flow's back half
+(a real LLM client + Wine + objdiff) is still covered by manual smoke-testing
+through the web UI, not the test suite.
 """
 
+import subprocess
+from pathlib import Path
+
+from src.core.project import FunctionEntry, Project
 from src.core.workspace import FunctionWorkspace
+from src.decomp import ghidra_decompile
 from src.drivers.launcher import (
 	_callee_alias_line,
 	_compose_ctx_h,
@@ -14,6 +21,7 @@ from src.drivers.launcher import (
 	_format_target_forward_decl,
 	_infer_mangled_name,
 	_mirror_warmstart_as_attempt_zero,
+	_prepare_ghidra_warmstart,
 	_rel32_callee_vas_from_sites,
 	_select_referenced_structs,
 	_wipe_workspace_history,
@@ -495,3 +503,92 @@ class TestKernelImportsInCtxH:
 			"SIZE_T",
 		):
 			assert f" {t};" in out or f"{t} " in out, f"missing typedef {t}"
+
+
+class TestLocalRunWarmstartE2E:
+	"""End-to-end coverage of the Ghidra warm-start prep a local-model run
+	drives, stubbing only the analyzeHeadless subprocess boundary so the real
+	ghidra_project_ensure -> decompile -> structs_dump path runs.
+
+	Regression guard for the orphaned-`.rep`-without-`.gpr` bug: a crashed run
+	(or a /tmp eviction of the small `.gpr`) leaves a `.rep` data dir behind.
+	Ghidra identifies a project by its `.gpr` and refuses to import over an
+	existing `.rep`, so the bootstrap silently no-ops and the decompile then
+	dies with "project not bootstrapped". ensure() must clear the stale data
+	and verify the `.gpr` actually lands.
+	"""
+
+	def _fake_ghidra(self):
+		"""A fake analyzeHeadless modeling the real binary's behavior:
+		import writes `<name>.gpr` + `<name>.rep` but REFUSES when a `.rep`
+		already exists; the post-scripts write their out-file (last argv)."""
+
+		def fake_run(argv, **_kwargs):
+			project_dir = Path(argv[1])
+			name = argv[2]
+			gpr = project_dir / f"{name}.gpr"
+			rep = project_dir / f"{name}.rep"
+			if "-import" in argv:
+				if rep.exists():
+					# Ghidra won't recreate an existing .rep: marker prints,
+					# but no .gpr is written — the exact failure mode.
+					return subprocess.CompletedProcess(
+						argv, 0, stdout="REPORT: Analysis succeeded", stderr=""
+					)
+				rep.mkdir(parents=True, exist_ok=True)
+				gpr.write_text("")
+				ok = "REPORT: Import succeeded\nREPORT: Analysis succeeded"
+				return subprocess.CompletedProcess(argv, 0, stdout=ok, stderr="")
+			out_path = Path(argv[-1])
+			if ghidra_decompile._DUMP_STRUCTS_SCRIPT in argv:
+				out_path.write_text("typedef struct { int x; } FOO;\n")
+			else:  # decompile post-script
+				out_path.write_text("int fn_00430D9B(void) { FOO_00485000.x = 1; return 0; }\n")
+			return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+
+		return fake_run
+
+	def _setup(self, monkeypatch, tmp_path):
+		monkeypatch.setattr(ghidra_decompile, "_default_run", self._fake_ghidra())
+		project_dir = tmp_path / "ghidra-projects"
+		monkeypatch.setenv("IVCS_GHIDRA_PROJECT_DIR", str(project_dir))
+		monkeypatch.setenv("IVCS_GHIDRA_HOME", str(tmp_path / "ghidra"))
+		xbe_path = tmp_path / "halo2_default.xbe"  # stem -> project name
+		project = Project(
+			name="halo2",
+			xbe_path=xbe_path,
+			workspace_root=tmp_path / "functions",
+			functions=(),
+		)
+		fn = FunctionEntry(name="fn_00430D9B", va=0x430D9B, size=64)
+		workspace = FunctionWorkspace(root=project.workspace_for(fn), function_name="fn_00430D9B")
+		workspace.initialize()
+		return project, fn, workspace, project_dir
+
+	def test_clean_slate_produces_warmstart_draft_and_structs(self, monkeypatch, tmp_path):
+		project, fn, workspace, _ = self._setup(monkeypatch, tmp_path)
+
+		struct_decls, struct_names = _prepare_ghidra_warmstart(workspace, project, fn)
+
+		assert workspace.ghidra_warmstart.is_file()
+		assert "fn_00430D9B" in workspace.ghidra_warmstart.read_text()
+		# The draft references FOO_00485000, so its layout is harvested into ctx.h.
+		assert "FOO" in struct_names
+		assert "FOO" in struct_decls
+
+	def test_recovers_from_orphaned_rep_without_gpr(self, monkeypatch, tmp_path):
+		# This is the reported bug: a .rep survives but the .gpr is gone.
+		project, fn, workspace, project_dir = self._setup(monkeypatch, tmp_path)
+		orphan_rep = project_dir / "halo2_default.rep"
+		(orphan_rep / "versioned").mkdir(parents=True)
+		(orphan_rep / "project.prp").write_text("stale")
+		assert not (project_dir / "halo2_default.gpr").exists()
+
+		struct_decls, struct_names = _prepare_ghidra_warmstart(workspace, project, fn)
+
+		# Before the fix this returned ("", ()) with no draft written, because
+		# ensure() trusted the success marker and decompile hit "not bootstrapped".
+		assert workspace.ghidra_warmstart.is_file()
+		assert "fn_00430D9B" in workspace.ghidra_warmstart.read_text()
+		assert "FOO" in struct_names
+		assert (project_dir / "halo2_default.gpr").is_file()

@@ -22,6 +22,7 @@ from src.decomp.compile_tool import (
 	obj_function_symbol_canonicalize,
 )
 from src.decomp.ghidra_decompile import ghidra_pseudo_c_normalize_for_prompt
+from src.decomp.history import history_best_read
 
 COMPILE_TOOL_NAME = "compile_and_view_assembly"
 
@@ -208,19 +209,29 @@ def _prior_best(workspace: FunctionWorkspace) -> tuple[float | None, str | None]
 	weaker second model can't overwrite a stronger best.c and we keep attributing
 	the solution to the model that earned it. Returns (None, None) for a fresh
 	workspace.
+
+	result.json is a clobberable summary: a prior weak run may have already
+	overwritten it with `best_match_percent: null`. The attempt history is the
+	ground truth, so reconcile against it and keep whichever best is stronger —
+	otherwise the inheritance guard can't recover a lost best.
 	"""
-	if not workspace.result_json.is_file():
-		return None, None
-	try:
-		data = json.loads(workspace.result_json.read_text())
-	except (json.JSONDecodeError, OSError):
-		return None, None
-	best = data.get("best_match_percent")
-	model = data.get("model")
-	return (
-		best if isinstance(best, (int, float)) else None,
-		model if isinstance(model, str) else None,
-	)
+	best: float | None = None
+	model: str | None = None
+	if workspace.result_json.is_file():
+		try:
+			data = json.loads(workspace.result_json.read_text())
+			raw_best = data.get("best_match_percent")
+			best = raw_best if isinstance(raw_best, (int, float)) else None
+			raw_model = data.get("model")
+			model = raw_model if isinstance(raw_model, str) else None
+		except json.JSONDecodeError, OSError:
+			pass
+
+	recovered = history_best_read(workspace.history_dir)
+	if recovered.match_percent is not None and (best is None or recovered.match_percent > best):
+		best = recovered.match_percent
+		model = recovered.model or model
+	return best, model
 
 
 def _baseline_compile_attempt_zero(workspace: FunctionWorkspace, *, compile_fn: CompileFn) -> None:
@@ -386,7 +397,7 @@ def _extract_c_code(response: dict) -> str | None:
 			continue
 		try:
 			args = json.loads(tool_call["function"]["arguments"])
-		except (KeyError, json.JSONDecodeError):
+		except KeyError, json.JSONDecodeError:
 			continue
 		if isinstance(args.get("c_code"), str):
 			return args["c_code"]

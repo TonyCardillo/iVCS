@@ -10,6 +10,7 @@ Two operations:
 
 import os
 import re
+import shutil
 import subprocess
 import tempfile
 import time
@@ -56,6 +57,16 @@ class GhidraConfig:
 		return self.project_dir / f"{self.project_name}.gpr"
 
 	@property
+	def project_rep(self) -> Path:
+		"""The project's data directory. Ghidra identifies a project by its
+		`.gpr`; a `.rep` left behind without one is a partial/corrupt state."""
+		return self.project_dir / f"{self.project_name}.rep"
+
+	@property
+	def project_lock(self) -> Path:
+		return self.project_dir / f"{self.project_name}.lock"
+
+	@property
 	def structs_h(self) -> Path:
 		"""Cache path for the harvested struct-layout header (one per project)."""
 		return self.project_dir / f"{self.project_name}.structs.h"
@@ -98,11 +109,22 @@ def ghidra_project_ensure(
 	analyze_headless_fn: AnalyzeHeadlessFn | None = None,
 	timeout_seconds: float = 600.0,
 ) -> None:
-	"""No-op if `<project_dir>/<project_name>.gpr` already exists."""
+	"""No-op if `<project_dir>/<project_name>.gpr` already exists.
+
+	A `.gpr` is how Ghidra identifies a project. A leftover `.rep` data
+	directory without its `.gpr` (a crashed run, or a /tmp eviction that took
+	the small `.gpr` while the dir survived) is a partial state Ghidra refuses
+	to import over — it will not recreate an existing `.rep`. Clear that stale
+	data first so the bootstrap starts clean, and verify the `.gpr` actually
+	lands afterward rather than trusting Ghidra's exit code and log marker
+	alone — otherwise the failure surfaces much later, and far more cryptically,
+	as a "project not bootstrapped" error from ghidra_decompile_function.
+	"""
 	if config.project_gpr.is_file():
 		return
 
 	config.project_dir.mkdir(parents=True, exist_ok=True)
+	_clear_partial_project(config)
 	argv = _import_argv(config)
 	run = analyze_headless_fn or partial(_default_run, timeout_seconds=timeout_seconds)
 	result = run(argv)
@@ -113,6 +135,14 @@ def ghidra_project_ensure(
 			f"--- argv ---\n{argv}\n"
 			f"--- stdout (tail) ---\n{_tail(result.stdout)}\n"
 			f"--- stderr (tail) ---\n{_tail(result.stderr)}"
+		)
+
+	if not config.project_gpr.is_file():
+		raise GhidraError(
+			f"bootstrap reported success but {config.project_gpr} was not "
+			"created (stale or locked Ghidra project state?)\n"
+			f"--- argv ---\n{argv}\n"
+			f"--- stdout (tail) ---\n{_tail(result.stdout)}"
 		)
 
 
@@ -222,6 +252,16 @@ def _run_with_lock_retry(
 			return result
 		sleep_fn(backoff_seconds * (2**attempt))
 	return result
+
+
+def _clear_partial_project(config: GhidraConfig) -> None:
+	"""Remove a `.rep` data dir (and stray `.lock`) orphaned by a missing
+	`.gpr`, so a fresh import can recreate the project from scratch. A no-op
+	when the directory is absent. Only reached once we've already established
+	the `.gpr` is gone, so nothing usable is discarded."""
+	if config.project_rep.is_dir():
+		shutil.rmtree(config.project_rep, ignore_errors=True)
+	config.project_lock.unlink(missing_ok=True)
 
 
 def _import_argv(config: GhidraConfig) -> list[str]:

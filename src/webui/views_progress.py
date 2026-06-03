@@ -396,17 +396,27 @@ def _progress_filter_bar(
 		+ "</span>"
 	)
 
+	# Auto-apply: selects/number inputs submit on change; the text box debounces
+	# so it filters as you type. Handlers are inline so they survive the live
+	# poller's <main> innerHTML swap (which would drop addEventListener bindings).
+	# requestSubmit() is guarded against a form detached by a mid-debounce swap.
+	# The <noscript> apply button keeps the form usable with JS off.
+	on_change = 'onchange="this.form.requestSubmit()"'
+	on_type = (
+		'oninput="clearTimeout(window._fbq);var f=this.form;'
+		'window._fbq=setTimeout(function(){if(f.isConnected)f.requestSubmit();},400)"'
+	)
 	return f"""
 <form class="filter-bar" method="get" action="/progress">
   <input type="hidden" name="path"      value="{html.escape(project_path_str)}">
   <input type="hidden" name="page_size" value="{page_size}">
-  <label>state <select name="state">{state_options}</select></label>
-  <label>name contains <input type="text" name="q" value="{html.escape(f.get("q", ""))}" placeholder="fn_002D"></label>
-  <label>size <input type="number" name="min_size" value="{html.escape(f.get("min_size", ""))}" placeholder="min" min="0">
+  <label>state <select name="state" {on_change}>{state_options}</select></label>
+  <label>name contains <input type="text" name="q" value="{html.escape(f.get("q", ""))}" placeholder="fn_002D" {on_type}></label>
+  <label>size <input type="number" name="min_size" value="{html.escape(f.get("min_size", ""))}" placeholder="min" min="0" {on_change}>
     <span class="muted">–</span>
-    <input type="number" name="max_size" value="{html.escape(f.get("max_size", ""))}" placeholder="max" min="0"></label>
-  <label>sort <select name="sort">{sort_options}</select> <select name="order">{order_options}</select></label>
-  <button type="submit">apply</button>
+    <input type="number" name="max_size" value="{html.escape(f.get("max_size", ""))}" placeholder="max" min="0" {on_change}></label>
+  <label>sort <select name="sort" {on_change}>{sort_options}</select> <select name="order" {on_change}>{order_options}</select></label>
+  <noscript><button type="submit">apply</button></noscript>
   <a href="/progress?path={quote(project_path_str)}" class="clear-filters">clear</a>
   {count_chip}
 </form>

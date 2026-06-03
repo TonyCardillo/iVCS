@@ -204,11 +204,45 @@ class TestProjectEnsure:
 
 		def fake(argv):
 			captured["argv"] = argv
+			cfg.project_gpr.write_text("")  # real Ghidra writes the .gpr on success
 			return _completed(0, "stuff\nREPORT: Analysis succeeded\nmore")
 
 		ghidra_project_ensure(cfg, analyze_headless_fn=fake)
 		assert "argv" in captured
 		assert "-import" in captured["argv"]
+
+	def test_raises_when_gpr_not_created_despite_success_markers(self, tmp_path):
+		# Ghidra can exit 0 with the analysis marker yet leave no .gpr behind
+		# (e.g. a partial/locked project state). ensure() must not silently
+		# "succeed" — otherwise the deferred failure surfaces later in
+		# ghidra_decompile_function as a confusing "project not bootstrapped".
+		cfg = _make_config(tmp_path)
+
+		def fake(argv):
+			return _completed(0, "REPORT: Analysis succeeded")  # but no .gpr written
+
+		with pytest.raises(GhidraError, match="not created"):
+			ghidra_project_ensure(cfg, analyze_headless_fn=fake)
+
+	def test_clears_stale_rep_without_gpr_before_import(self, tmp_path):
+		# A leftover `.rep` data dir whose `.gpr` is gone (crashed run, /tmp
+		# eviction) is a partial state Ghidra refuses to import over. ensure()
+		# must clear it before re-bootstrapping.
+		cfg = _make_config(tmp_path)
+		cfg.project_dir.mkdir(parents=True)
+		(cfg.project_rep / "versioned").mkdir(parents=True)
+		(cfg.project_rep / "project.prp").write_text("stale")
+		(cfg.project_dir / f"{cfg.project_name}.lock").write_text("")
+		rep_present_at_import = {}
+
+		def fake(argv):
+			rep_present_at_import["existed"] = cfg.project_rep.exists()
+			cfg.project_gpr.write_text("")
+			return _completed(0, "REPORT: Analysis succeeded")
+
+		ghidra_project_ensure(cfg, analyze_headless_fn=fake)
+		assert rep_present_at_import["existed"] is False
+		assert not (cfg.project_dir / f"{cfg.project_name}.lock").exists()
 
 	def test_raises_on_nonzero_return(self, tmp_path):
 		cfg = _make_config(tmp_path)
@@ -587,9 +621,11 @@ class TestDecompileFunction:
 class TestDefaultRunTimeout:
 	"""The public functions accept timeout_seconds; it must reach subprocess.run."""
 
-	def _patch_subprocess_run(self, monkeypatch, captured, stdout=""):
+	def _patch_subprocess_run(self, monkeypatch, captured, stdout="", gpr=None):
 		def fake_run(argv, **kwargs):
 			captured.update(kwargs)
+			if gpr is not None:
+				gpr.write_text("")  # model Ghidra writing the .gpr on success
 			return _completed(0, stdout=stdout)
 
 		monkeypatch.setattr(ghidra_decompile.subprocess, "run", fake_run)
@@ -609,7 +645,9 @@ class TestDefaultRunTimeout:
 	def test_project_ensure_threads_timeout_into_default_run_example(self, monkeypatch, tmp_path):
 		cfg = _make_config(tmp_path)
 		captured = {}
-		self._patch_subprocess_run(monkeypatch, captured, stdout="REPORT: Analysis succeeded")
+		self._patch_subprocess_run(
+			monkeypatch, captured, stdout="REPORT: Analysis succeeded", gpr=cfg.project_gpr
+		)
 		ghidra_project_ensure(cfg, timeout_seconds=123.0)
 		assert captured["timeout"] == 123.0
 
