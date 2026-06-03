@@ -116,8 +116,9 @@ class TestClustering:
 			_fp("e", 0x5000, PUSH_MOV_POP_RET),
 		]
 		clusters = fingerprint_clusters(fps, by="opcode", min_size=2)
-		assert clusters[0].size >= clusters[-1].size
-		assert clusters[0].size == 3  # the three mov;ret skeletons
+		# clusters[0] is the largest (the general sort law is pinned by
+		# test_clusters_partition_input_invariant); here that's the 3 mov;ret skeletons.
+		assert clusters[0].size == 3
 
 
 class TestSimilarTo:

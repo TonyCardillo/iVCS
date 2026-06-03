@@ -117,6 +117,12 @@ class TestFunctionStringRefs:
 		parsed = _parsed(b"\xc3", b"unused\x00")
 		assert function_string_refs(parsed, TEXT_VA, 1) == ()
 
+	def test_uncarvable_va_returns_empty_rather_than_raising(self):
+		# A VA outside any section can't be carved; refs are unrecoverable but
+		# must not abort an autoname pass — mirror project_fingerprints' skip.
+		parsed = _parsed(b"\xc3", b"unused\x00")
+		assert function_string_refs(parsed, 0x00990000, 4) == ()
+
 
 class TestStringLabelSanitize:
 	def test_haloscript_hyphen_to_underscore(self):

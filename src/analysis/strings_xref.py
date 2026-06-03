@@ -22,6 +22,7 @@ from capstone import x86
 
 from src.formats.xbe import (
 	ParsedXbe,
+	XbeFormatError,
 	xbe_function_carve,
 	xbe_section_containing_va,
 	xbe_section_read,
@@ -78,9 +79,14 @@ def function_string_refs(
 	Scans immediate operands and absolute-memory displacements (base/index 0)
 	of every instruction in the function body; keeps those that resolve to a
 	decodable string in read-only data.
+
+	A function that can't be carved (outside a section, past raw bytes) has no
+	recoverable refs — return empty rather than aborting, mirroring
+	project_fingerprints so a single bad function never breaks an autoname pass.
 	"""
-	body = xbe_function_carve(parsed, va, size)
-	if not body:
+	try:
+		body = xbe_function_carve(parsed, va, size)
+	except XbeFormatError:
 		return ()
 
 	md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)

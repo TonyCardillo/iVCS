@@ -100,14 +100,12 @@ def function_real_relink(
 	*,
 	compile_fn: CompileFn = default_compile_fn,
 	link_fn: LinkFn = default_link_fn,
-	resolve: Callable[[str], int | None] | None = None,
 ) -> RealRelinkResult:
 	"""Recompile, relink at the function's true VA via Link.Exe, return placed bytes."""
 	workspace = FunctionWorkspace(root=project.workspace_for(fn), function_name=fn.name)
 	if not workspace.best_c.is_file() or not workspace.ctx_h.is_file():
 		return RealRelinkResult(fn.name, fn.va, fn.size, None, "missing best.c/ctx.h")
-	if resolve is None:
-		resolve = relocs_image_va_resolver(parsed)
+	resolve = relocs_image_va_resolver(parsed)
 
 	build = Path(tempfile.mkdtemp())
 	try:
