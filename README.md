@@ -40,7 +40,8 @@ uv sync
 
 # 2. Enumerate an XBE into a project manifest the UI can load
 mkdir -p projects/halo2-retail
-uv run python -m src enumerate path/to/default.xbe --name halo2-retail \
+uv run python -m src enumerate path/to/default.xbe \
+    --name halo2-retail \
     --output projects/halo2-retail/project.json
 
 # 3. Launch the UI (cloud runs need a key; a local LM Studio model works without one)
