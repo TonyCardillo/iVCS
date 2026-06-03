@@ -177,9 +177,6 @@ pre.code {
 .center { text-align: center; }
 .tight { letter-spacing: 0.18em; text-transform: uppercase; font-size: 10px; }
 
-.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
-@media (max-width: 900px) { .grid-2 { grid-template-columns: 1fr; } }
-
 .ascii-logo {
   color: var(--cyan);
   font-size: 11px;
@@ -203,13 +200,6 @@ pre.code {
 .badge.partial  { color: var(--amber); border-color: rgba(255, 180, 84, 0.45); }
 .badge.failed   { color: var(--red);   border-color: rgba(255, 122, 122, 0.45); }
 .badge.pending  { color: var(--cyan);  border-color: rgba(95, 215, 255, 0.45); }
-
-.kind-NONE         { color: var(--fg-faint); }
-.kind-INSERT       { color: var(--green); }
-.kind-DELETE       { color: var(--red); }
-.kind-REPLACE      { color: var(--violet); }
-.kind-OP_MISMATCH  { color: var(--amber); }
-.kind-ARG_MISMATCH { color: var(--cyan); }
 
 .progress {
   position: relative;

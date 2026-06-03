@@ -71,7 +71,7 @@ def _ensure_diff_json(workspace_root: Path, n: int, function_name: str | None) -
 		cmd.append(function_name)
 	try:
 		subprocess.run(cmd, capture_output=True, text=True, timeout=15, check=True)
-	except subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError:
+	except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError):
 		return None
 	return diff_path if diff_path.is_file() else None
 
@@ -111,7 +111,7 @@ def _attempt_info(workspace_root: Path, n: int, *, derive_missing: bool = True) 
 	if diff_path.is_file():
 		try:
 			diff = objdiff_parse(json.loads(diff_path.read_text()))
-		except json.JSONDecodeError, OSError:
+		except (json.JSONDecodeError, OSError):
 			return info
 		for symbol in diff.function_symbols("left"):
 			info["match_percent"] = symbol.match_percent

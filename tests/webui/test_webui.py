@@ -4,7 +4,9 @@ import os
 import re
 import types
 from pathlib import Path
+from urllib.parse import quote
 
+import pytest
 from hypothesis import assume, given
 from hypothesis import strategies as st
 
@@ -31,6 +33,22 @@ from src.webui import (
 	_sweep_section,
 	_va_from_workspace,
 )
+from src.webui import state as webui_state
+from src.webui.views_decomp import _symbol_notes_panel  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _isolate_webui_registries():
+	"""Each test gets empty job/sweep/verify registries, restored afterward, so
+	tests that call _register_sweep can't leak state into one another."""
+	registries = (webui_state._JOBS, webui_state._SWEEPS, webui_state._VERIFIES)
+	saved = [dict(r) for r in registries]
+	for r in registries:
+		r.clear()
+	yield
+	for r, snapshot in zip(registries, saved, strict=True):
+		r.clear()
+		r.update(snapshot)
 
 
 def _attempt(*, compiled: bool, diff_exists: bool, match_percent: float | None):
@@ -173,8 +191,17 @@ def test_project_crumb_uses_project_name(tmp_path):
 	)
 	label, href = _project_crumb(str(manifest))
 	assert label == "halo2-retail"
-	assert href.startswith("/progress?path=")
-	assert "halo2-retail" not in href or "project.json" in href  # quoted manifest path
+	# Label is the project name; href links to the (quoted) manifest path, not the name.
+	assert href == f"/progress?path={quote(str(manifest))}"
+	assert "halo2-retail" not in href
+
+
+def test_symbol_notes_panel_title_escaped_exactly_once(tmp_path):
+	# panel() escapes its head, so the title must be passed raw. A pre-escaped
+	# "Symbol &amp; notes" double-escapes to a literal "&amp;" on the page.
+	html = _symbol_notes_panel(tmp_path, None)
+	assert "Symbol &amp; notes" in html  # single escape of "Symbol & notes"
+	assert "&amp;amp;" not in html
 
 
 def test_path_query_suffix_empty_when_none():

@@ -146,7 +146,7 @@ def _symbol_notes_panel(root: Path, current_path: str | None) -> str:
 """
 	hints = _string_hints_html(root, current_path, va)
 	meta = "display label · machine symbol stays fn_<va>" if va is not None else "notes"
-	return panel("Symbol &amp; notes", rename_form + hints + notes_form, meta=meta)
+	return panel("Symbol & notes", rename_form + hints + notes_form, meta=meta)
 
 
 def _string_hints_html(root: Path, current_path: str | None, va: int | None) -> str:
