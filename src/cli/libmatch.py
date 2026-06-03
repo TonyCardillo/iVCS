@@ -19,8 +19,7 @@ from src.analysis.libmatch import (
 	sdk_manifest_write,
 	signature_index,
 )
-from src.core.project import project_load
-from src.formats.xbe import xbe_load
+from src.cli._common import path_exists_or_error, project_xbe_load
 
 
 def add_parser(subparsers) -> None:
@@ -39,22 +38,20 @@ def add_parser(subparsers) -> None:
 
 
 def _run(args) -> int:
-	if not args.project.is_file():
-		print(f"ERROR: {args.project} not found", file=sys.stderr)
+	loaded = project_xbe_load(args.project)
+	if loaded is None:
 		return 1
+	project, parsed = loaded
 
 	signatures = []
 	for lib in args.libs:
-		if not lib.is_file():
-			print(f"ERROR: {lib} not found", file=sys.stderr)
+		if not path_exists_or_error(lib):
 			return 1
 		sigs = library_signatures(lib.read_bytes())
 		signatures.extend(sigs)
 		print(f"  {lib.name:<16} {len(sigs):>6,} function signatures", file=sys.stderr)
 	index = signature_index(signatures)
 
-	project = project_load(args.project)
-	parsed = xbe_load(project.xbe_path)
 	fingerprints = project_fingerprints(project, parsed)
 	matches = match_fingerprints(fingerprints, index, min_size=args.min_size)
 

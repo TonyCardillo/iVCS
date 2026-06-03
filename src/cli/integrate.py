@@ -15,8 +15,8 @@ import time
 import types
 from pathlib import Path
 
-from src.core.project import function_status, project_load, project_sdk_vas
-from src.formats.xbe import xbe_load
+from src.cli._common import project_xbe_load
+from src.core.project import function_status, project_sdk_vas
 from src.verify.integrator import (
 	image_real_relink_verify,
 	image_splice_verify,
@@ -47,43 +47,39 @@ def add_parser(subparsers) -> None:
 	relink.set_defaults(func=_run_relink)
 
 
-def _load(args):
-	if not args.project.is_file():
-		print(f"ERROR: {args.project} not found", file=sys.stderr)
-		return None, None
-	project = project_load(args.project)
-	return project, xbe_load(project.xbe_path)
-
-
 def _run_report(args) -> int:
-	project, parsed = _load(args)
-	if project is None:
+	loaded = project_xbe_load(args.project)
+	if loaded is None:
 		return 1
+	project, parsed = loaded
 	return _report(project, parsed, project_sdk_vas(args.project))
 
 
 def _run_commit(args) -> int:
-	project, parsed = _load(args)
-	if project is None:
+	loaded = project_xbe_load(args.project)
+	if loaded is None:
 		return 1
+	project, parsed = loaded
 	return _commit(
 		project, parsed, function=args.function, force=args.force, no_compile=args.no_compile
 	)
 
 
 def _run_verify(args) -> int:
-	project, parsed = _load(args)
-	if project is None:
+	loaded = project_xbe_load(args.project)
+	if loaded is None:
 		return 1
+	project, parsed = loaded
 	result = image_splice_verify(project, parsed)
 	image_verify_cache_write(args.project, result, method="splice", when=time.time())
 	return _print_verify(project, result, "splice-verified")
 
 
 def _run_relink(args) -> int:
-	project, parsed = _load(args)
-	if project is None:
+	loaded = project_xbe_load(args.project)
+	if loaded is None:
 		return 1
+	project, parsed = loaded
 	result = image_real_relink_verify(project, parsed)
 	image_verify_cache_write(args.project, result, method="relink", when=time.time())
 	return _print_verify(project, result, "relink-verified")

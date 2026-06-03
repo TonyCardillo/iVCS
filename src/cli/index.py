@@ -16,8 +16,7 @@ from src.analysis.fingerprint import (
 	fingerprints_similar_to,
 	project_fingerprints,
 )
-from src.core.project import project_load
-from src.formats.xbe import xbe_load
+from src.cli._common import project_xbe_load
 
 
 def add_parser(subparsers) -> None:
@@ -38,18 +37,11 @@ def add_parser(subparsers) -> None:
 	similar.set_defaults(func=_run_similar)
 
 
-def _load(args):
-	if not args.project.is_file():
-		print(f"ERROR: {args.project} not found", file=sys.stderr)
-		return None, None
-	project = project_load(args.project)
-	return project, xbe_load(project.xbe_path)
-
-
 def _run_cluster(args) -> int:
-	project, parsed = _load(args)
-	if project is None:
+	loaded = project_xbe_load(args.project)
+	if loaded is None:
 		return 1
+	project, parsed = loaded
 	return _cluster(project, parsed, by=args.by, min_size=args.min_size, top=args.top)
 
 
@@ -57,9 +49,10 @@ def _run_similar(args) -> int:
 	if args.function is None:
 		print("ERROR: `similar` requires --function NAME", file=sys.stderr)
 		return 1
-	project, parsed = _load(args)
-	if project is None:
+	loaded = project_xbe_load(args.project)
+	if loaded is None:
 		return 1
+	project, parsed = loaded
 	return _similar(project, parsed, function=args.function, threshold=args.threshold, top=args.top)
 
 

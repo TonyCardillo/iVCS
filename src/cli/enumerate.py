@@ -13,6 +13,7 @@ import sys
 from collections import Counter
 from pathlib import Path
 
+from src.cli._common import path_exists_or_error
 from src.core.project import project_manifest_build
 from src.formats.xbe import (
 	xbe_functions_enumerate,
@@ -48,8 +49,7 @@ def add_parser(subparsers) -> argparse.ArgumentParser:
 
 
 def _run(args) -> int:
-	if not args.xbe_path.is_file():
-		print(f"ERROR: {args.xbe_path} not found", file=sys.stderr)
+	if not path_exists_or_error(args.xbe_path):
 		return 1
 
 	parsed = xbe_load(args.xbe_path)
