@@ -10,6 +10,9 @@ through the web UI, not the test suite.
 import subprocess
 from pathlib import Path
 
+from hypothesis import given
+from hypothesis import strategies as st
+
 from src.core.project import FunctionEntry, Project
 from src.core.workspace import FunctionWorkspace
 from src.decomp import ghidra_decompile
@@ -24,9 +27,26 @@ from src.drivers.launcher import (
 	_prepare_ghidra_warmstart,
 	_rel32_callee_vas_from_sites,
 	_select_referenced_structs,
+	_stdcall_arglist,
 	_wipe_workspace_history,
 )
 from src.formats.relocs import RelocKind, RelocSite
+
+
+class TestStdcallArglist:
+	# The single source of truth the three decl formatters share. The example
+	# tests below (forward/callee/kernel) are witnesses of these laws.
+	def test_zero_bytes_is_void_example(self):
+		assert _stdcall_arglist(0) == ("void", False)
+
+	@given(n=st.integers(min_value=1, max_value=64))
+	def test_multiple_of_four_is_n_ints_invariant(self, n):
+		# byte_count = 4n ⇒ exactly n `int` placeholders, not flagged irregular.
+		assert _stdcall_arglist(4 * n) == (", ".join(["int"] * n), False)
+
+	@given(byte_count=st.integers(min_value=1, max_value=256).filter(lambda b: b % 4 != 0))
+	def test_non_multiple_of_four_flags_irregular_and_falls_back_to_one_int(self, byte_count):
+		assert _stdcall_arglist(byte_count) == ("int", True)
 
 
 def test_infer_mangled_cdecl_ret_zero():

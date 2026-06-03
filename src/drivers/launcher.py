@@ -408,6 +408,22 @@ def _infer_mangled_name(body: bytes, base: str) -> str:
 	return f"_{base}"
 
 
+def _stdcall_arglist(byte_count: int) -> tuple[str, bool]:
+	"""The `int`-placeholder parameter list for a stdcall popping `byte_count`
+	bytes — one int per 4 bytes, `void` for zero. The bool flags an irregular
+	count (not a multiple of 4); callers surface that as a warning and fall back
+	to a single `int`."""
+	if byte_count == 0:
+		return "void", False
+	if byte_count % 4 == 0:
+		return ", ".join(["int"] * (byte_count // 4)), False
+	return "int", True
+
+
+def _stdcall_irregular_warning(byte_count: int) -> str:
+	return f"WARNING: target pops {byte_count} bytes — non-32-bit args."
+
+
 def _format_target_forward_decl(name: str, mangled: str) -> str | None:
 	"""Forward decl that pins the target's calling convention for MSVC.
 
@@ -429,15 +445,11 @@ def _format_target_forward_decl(name: str, mangled: str) -> str | None:
 		byte_count = int(suffix)
 	except ValueError:
 		return None
-	if byte_count == 0:
-		return f"int __stdcall {name}(void);"
-	if byte_count % 4 != 0:
-		return (
-			f"/* WARNING: target pops {byte_count} bytes — non-32-bit args. */\n"
-			f"int __stdcall {name}(int);"
-		)
-	args = ", ".join(["int"] * (byte_count // 4))
-	return f"int __stdcall {name}({args});"
+	args, irregular = _stdcall_arglist(byte_count)
+	decl = f"int __stdcall {name}({args});"
+	if irregular:
+		return f"/* {_stdcall_irregular_warning(byte_count)} */\n{decl}"
+	return decl
 
 
 def _compose_ctx_h(
@@ -481,13 +493,10 @@ def _format_callee_decl(name: str, conv: str, byte_count: int, *, label: str | N
 	anchor), while the human name rides along so the model reads it in context.
 	"""
 	if conv == "stdcall":
-		if byte_count == 0:
-			decl = f"int __stdcall {name}(void);"
-		elif byte_count % 4 == 0:
-			args = ", ".join(["int"] * (byte_count // 4))
-			decl = f"int __stdcall {name}({args});"
-		else:
-			decl = f"int __stdcall {name}(int);  /* WARN: target pops {byte_count} bytes */"
+		args, irregular = _stdcall_arglist(byte_count)
+		decl = f"int __stdcall {name}({args});"
+		if irregular:
+			decl += f"  /* {_stdcall_irregular_warning(byte_count)} */"
 	else:
 		decl = f"int {name}();"
 	if label and label != name:
@@ -513,11 +522,7 @@ def _format_kernel_decl(name: str) -> str:
 	byte_count = xboxkrnl_mangled_byte_count(name)
 	if byte_count is None:
 		return f"__declspec(dllimport) int {name}();"
-	if byte_count == 0:
-		return f"__declspec(dllimport) int __stdcall {name}(void);"
-	if byte_count % 4 != 0:
-		return f"__declspec(dllimport) int __stdcall {name}(int);"
-	args = ", ".join(["int"] * (byte_count // 4))
+	args, _ = _stdcall_arglist(byte_count)
 	return f"__declspec(dllimport) int __stdcall {name}({args});"
 
 
