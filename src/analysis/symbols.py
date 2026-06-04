@@ -15,6 +15,7 @@ Both sidecars sit beside project.json, matching `sdk.json`'s convention.
 """
 
 import json
+import os
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -82,4 +83,12 @@ def symbol_rename(project_path: Path | str, va: int, label: str) -> None:
 		labels.pop(va, None)
 
 	serialized = {f"0x{v:08X}": name for v, name in sorted(labels.items())}
-	_user_sidecar(project_path).write_text(json.dumps({"labels": serialized}, indent=2) + "\n")
+	_atomic_write(_user_sidecar(project_path), json.dumps({"labels": serialized}, indent=2) + "\n")
+
+
+def _atomic_write(path: Path, text: str) -> None:
+	"""Write via a sibling temp file + os.replace so a crash mid-write can't
+	truncate the user's labels — symbols.json is their only durable data."""
+	tmp = path.with_name(f"{path.name}.tmp")
+	tmp.write_text(text)
+	os.replace(tmp, path)
