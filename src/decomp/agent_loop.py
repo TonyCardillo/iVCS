@@ -274,7 +274,7 @@ def ghidra_only_run(
 		# "matched" so the aggregator counts it. best.c MUST be the normalized
 		# source that actually compiled+matched (attempt 0), NOT the raw Ghidra
 		# draft — the draft has undefined4/DAT_/FUN_ and won't recompile, which
-		# breaks the relink oracle and the source-tree integrator downstream.
+		# breaks the splice verifier and the source-tree integrator downstream.
 		best, model = _standing(match)
 		return _finalize(
 			workspace,

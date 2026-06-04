@@ -1,4 +1,4 @@
-"""Stats view: per-model leaderboards and the whole-image coverage oracle."""
+"""Stats view: per-model leaderboards and the whole-image coverage verifier."""
 
 from __future__ import annotations
 
@@ -67,14 +67,12 @@ def _image_coverage_table(cov) -> str:
 
 
 def _verify_buttons(project_path_str: str) -> str:
-	"""Two run buttons: splice (our relocator) and relink (real XDK Link.Exe)."""
+	"""Run button: byte-splice verify with our own relocator."""
 	path_q = quote(project_path_str)
 	return (
 		'<div class="hint-row" style="margin-top:10px;">'
-		f'<form class="hint-form" method="post" action="/verify/launch?path={path_q}&method=splice">'
+		f'<form class="hint-form" method="post" action="/verify/launch?path={path_q}">'
 		'<button type="submit" class="btn-run">▶ verify (splice)</button></form>'
-		f'<form class="hint-form" method="post" action="/verify/launch?path={path_q}&method=relink">'
-		'<button type="submit" class="btn-run">▶ relink (Link.Exe)</button></form>'
 		'<span class="muted">recompiles every matched function · needs Wine + toolchain</span>'
 		"</div>"
 	)
@@ -82,7 +80,7 @@ def _verify_buttons(project_path_str: str) -> str:
 
 def _verify_panel(project_path_str: str) -> tuple[str, bool]:
 	"""(panel_html, is_active). Live progress while a verify job runs; otherwise
-	the cached result (or a prompt) plus run buttons. The oracle recompiles every
+	the cached result (or a prompt) plus run buttons. The verifier recompiles every
 	matched function, so it's a background job — never computed on a page render."""
 	job = _verify_for(project_path_str)
 	if job is not None and job.is_active():
@@ -94,10 +92,10 @@ def _verify_panel(project_path_str: str) -> tuple[str, bool]:
 			'<div class="run-banner sweeping">'
 			'<span class="badge pending">VERIFYING</span>'
 			f'<span class="sweep-counts">{job.done}/{job.total} matched functions · '
-			f"{html.escape(job.method)}</span>{current}</div>"
+			f"splice</span>{current}</div>"
 			f'<div class="sweep-bar"><div class="sweep-bar-fill" style="width:{pct:.1f}%"></div></div>'
 		)
-		return panel("Relink-verified", body, meta=f"{pct:.0f}% · recompiling + relinking"), True
+		return panel("Splice-verified", body, meta=f"{pct:.0f}% · recompiling + splicing"), True
 
 	failed_note = ""
 	if job is not None and job.state == "error":
@@ -112,14 +110,14 @@ def _verify_panel(project_path_str: str) -> tuple[str, bool]:
 			"(needs Wine + the toolchain). Run it as a background job:</p>"
 			f"{_verify_buttons(project_path_str)}{failed_note}"
 		)
-		return panel("Relink-verified", body), False
+		return panel("Splice-verified", body), False
 
 	pct = cache.get("verified_percent", 0.0)
-	age = ""
+	checked = "—"
 	gen = cache.get("generated_at")
 	if isinstance(gen, (int, float)):
 		secs = max(0, int(time.time() - gen))
-		age = f" · {secs // 3600}h{(secs % 3600) // 60}m ago" if secs >= 60 else " · just now"
+		checked = f"{secs // 3600}h{(secs % 3600) // 60}m ago" if secs >= 60 else "just now"
 	body = (
 		'<div class="kv">'
 		'<div class="k">verified</div>'
@@ -128,15 +126,15 @@ def _verify_panel(project_path_str: str) -> tuple[str, bool]:
 		'<div class="k">functions</div>'
 		f'<div class="v">{cache.get("functions_verified", 0)} / '
 		f"{cache.get('functions', 0)} fully reproduced</div>"
-		'<div class="k">method</div>'
-		f'<div class="v">{html.escape(str(cache.get("method", "?")))}{age}</div>'
+		'<div class="k">checked</div>'
+		f'<div class="v">{checked}</div>'
 		"</div>"
 		f"{_progress_bar(pct)}"
 		'<p class="muted tight" style="margin-top:8px;">Matched functions recompiled, '
 		"placed at their real VA, and byte-compared against the original image.</p>"
 		f"{_verify_buttons(project_path_str)}{failed_note}"
 	)
-	return panel("Relink-verified", body), False
+	return panel("Splice-verified", body), False
 
 
 def view_stats(project_path_str: str) -> str:

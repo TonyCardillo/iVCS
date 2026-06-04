@@ -286,7 +286,7 @@ def _va_from_workspace(root: Path) -> int | None:
 	"""Recover a function's VA from its `fn_<hex>` workspace dir name.
 
 	The dir is keyed by the machine name (never renamed), so the VA is decodable
-	straight out of it — the same anchor the symbol map and relink oracle use.
+	straight out of it — the same anchor the symbol map and splice verifier use.
 	"""
 	m = re.search(r"fn_([0-9A-Fa-f]{8})", root.name)
 	return int(m.group(1), 16) if m else None

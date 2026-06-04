@@ -88,8 +88,7 @@ class Handler(BaseHTTPRequestHandler):
 				return
 			if route == "/verify/launch":
 				path = q.get("path", "") or form.get("path", "")
-				method = (q.get("method") or form.get("method") or "splice").strip()
-				verify_launch(path, "relink" if method == "relink" else "splice")
+				verify_launch(path)
 				self._redirect(f"/stats?path={quote(path)}")
 				return
 			self._send(404, view_error(f"unknown POST route: {route}"))

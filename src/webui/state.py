@@ -99,12 +99,11 @@ def _active_workspace_paths() -> set[Path]:
 
 @dataclass
 class VerifyState:
-	"""Live handle for a whole-image relink-verify run. Like the sweep, one
+	"""Live handle for a whole-image byte-splice verify run. Like the sweep, one
 	worker thread mutates it in place and it dies on a server restart (the cache
 	it writes on completion survives)."""
 
 	project_path: str
-	method: str  # "splice" (own relocator) | "relink" (real Link.Exe)
 	total: int
 	state: str = "running"  # running | done | error
 	done: int = 0

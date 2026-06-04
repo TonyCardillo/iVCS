@@ -98,37 +98,10 @@ def coff_object_build(
 	)
 
 
-def coff_absolute_symbols_build(symbols: dict[str, int]) -> bytes:
-	"""A sectionless COFF/i386 object defining each name as an absolute symbol.
-
-	The real-relink path (Phase 4b) feeds this to Link.Exe so the linker resolves
-	a function's REL32/DIR32 externals; other functions' VAs, kernel thunk slots -
-	to fixed image addresses, exactly as they sit in the original image. An
-	`IMAGE_SYM_ABSOLUTE` (section number -1) symbol's value IS its virtual address.
-	"""
-	records = [
-		_SymbolRecord(
-			name=name,
-			value=va,
-			section_number=IMAGE_SYM_ABSOLUTE,
-			type=IMAGE_SYM_TYPE_NULL,
-			storage_class=IMAGE_SYM_CLASS_EXTERNAL,
-		)
-		for name, va in symbols.items()
-	]
-	symbol_blob, string_table = _symbol_table_pack(records)
-	header = _coff_header_pack(
-		section_count=0,
-		symbol_table_ptr=COFF_HEADER_SIZE,
-		symbol_count=_symbol_slot_count(records),
-	)
-	return header + symbol_blob + string_table
-
-
 def coff_defined_function_rename(data: bytes, new_name: str) -> bytes:
 	"""Rename the single defined external function symbol in a compiled object.
 
-	objdiff and the relink oracle pair symbols by name against the canonical
+	objdiff and the splice verifier pair symbols by name against the canonical
 	`_fn_<VA>`. This lets a matching-decomp attempt keep a readable function name
 	in its C source (CPlayer, XMemAlloc) while the object still exports the name
 	the rest of the pipeline expects; so a correct match counts instead of

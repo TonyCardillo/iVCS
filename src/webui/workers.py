@@ -32,7 +32,6 @@ from src.drivers.sweep import (
 	sweep_run,
 )
 from src.verify.integrator import (
-	image_real_relink_verify,
 	image_splice_verify,
 	image_verify_cache_write,
 )
@@ -210,15 +209,15 @@ def autoname_run(project_path_str: str, *, max_size: int = _AUTONAME_MAX_SIZE) -
 	return len(plan)
 
 
-def verify_launch(project_path_str: str, method: str = "splice") -> VerifyState:
-	"""Run the whole-image relink oracle over every matched function in a daemon
-	thread, caching the result on completion.
+def verify_launch(project_path_str: str) -> VerifyState:
+	"""Byte-splice verify every matched function in a daemon thread, caching the
+	result on completion.
 
-	`method` is "splice" (our own relocator) or "relink" (the real XDK Link.Exe).
-	Returns immediately; the VerifyState advances done/current as functions are
-	checked. Idempotent while one is already running for this project. The oracle
-	recompiles every matched function, which is exactly why it's a background job
-	and not computed on a page render."""
+	Recompiles each matched function, relocates it with our own relocator, and
+	byte-compares against the original image. Returns immediately; the VerifyState
+	advances done/current as functions are checked. Idempotent while one is already
+	running for this project. This recompiles every matched function, which is
+	exactly why it's a background job and not computed on a page render."""
 	existing = _verify_for(project_path_str)
 	if existing and existing.is_active():
 		return existing
@@ -228,9 +227,8 @@ def verify_launch(project_path_str: str, method: str = "splice") -> VerifyState:
 	stats = project_aggregate(project, sdk_vas=_sdk_vas_for(project_path_str))
 	total = sum(1 for s in stats.function_statuses if s.state == "matched")
 
-	state = VerifyState(project_path=project_path_str, method=method, total=total)
+	state = VerifyState(project_path=project_path_str, total=total)
 	_register_verify(state)
-	verifier = image_real_relink_verify if method == "relink" else image_splice_verify
 
 	def on_result(fv) -> None:
 		state.done += 1
@@ -239,8 +237,8 @@ def verify_launch(project_path_str: str, method: str = "splice") -> VerifyState:
 	def _run() -> None:
 		state.started_at = time.time()
 		try:
-			result = verifier(project, parsed, on_result=on_result)
-			image_verify_cache_write(project_path_str, result, method=method, when=time.time())
+			result = image_splice_verify(project, parsed, on_result=on_result)
+			image_verify_cache_write(project_path_str, result, when=time.time())
 			state.state = "done"
 		except Exception as e:  # noqa: BLE001 — surface any failure to the UI
 			state.error = f"{type(e).__name__}: {e}"

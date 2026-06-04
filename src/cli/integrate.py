@@ -1,11 +1,10 @@
-"""`report` / `commit` / `verify` / `relink` subcommands.
+"""`report` / `commit` / `verify` subcommands.
 
 `report` prints per-segment matched / committed coverage. `commit` promotes
 matched functions' best.c into <src_root>/<section>/<name>.c. `verify` recompiles
 each matched function, relocates it with our own relocator, and byte-compares
-against the original image; `relink` does the same via the real XDK Link.Exe as
-an independent oracle. verify/relink need Wine + the toolchain. All the verbs
-live in src.verify.integrator; this module is argument plumbing + printing.
+against the original image (needs Wine + the toolchain). All the verbs live in
+src.verify.integrator; this module is argument plumbing + printing.
 """
 
 from __future__ import annotations
@@ -18,7 +17,6 @@ from pathlib import Path
 from src.cli._common import project_xbe_load
 from src.core.project import function_status, project_sdk_vas
 from src.verify.integrator import (
-	image_real_relink_verify,
 	image_splice_verify,
 	image_verify_cache_write,
 	integrate_commit,
@@ -41,10 +39,6 @@ def add_parser(subparsers) -> None:
 	verify = subparsers.add_parser("verify", help="Byte-splice verify matched functions")
 	verify.add_argument("project", type=Path, help="Path to project.json")
 	verify.set_defaults(func=_run_verify)
-
-	relink = subparsers.add_parser("relink", help="Real-relink verify via XDK Link.Exe")
-	relink.add_argument("project", type=Path, help="Path to project.json")
-	relink.set_defaults(func=_run_relink)
 
 
 def _run_report(args) -> int:
@@ -71,18 +65,8 @@ def _run_verify(args) -> int:
 		return 1
 	project, parsed = loaded
 	result = image_splice_verify(project, parsed)
-	image_verify_cache_write(args.project, result, method="splice", when=time.time())
+	image_verify_cache_write(args.project, result, when=time.time())
 	return _print_verify(project, result, "splice-verified")
-
-
-def _run_relink(args) -> int:
-	loaded = project_xbe_load(args.project)
-	if loaded is None:
-		return 1
-	project, parsed = loaded
-	result = image_real_relink_verify(project, parsed)
-	image_verify_cache_write(args.project, result, method="relink", when=time.time())
-	return _print_verify(project, result, "relink-verified")
 
 
 def _report(project, parsed, sdk_vas: frozenset[int]) -> int:

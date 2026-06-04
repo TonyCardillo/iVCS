@@ -1,4 +1,4 @@
-"""Tests for whole-image byte-splice verification (integrator Phase 4a).
+"""Tests for whole-image byte-splice verification (integrator Phase 4).
 
 A data-backed ParsedXbe carries the original image bytes; a fake compiler emits
 a real COFF object (via the writer) so the reader + relocator run end-to-end

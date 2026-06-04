@@ -5,8 +5,6 @@ from hypothesis import strategies as st
 
 from src.formats.coff import (
 	IMAGE_FILE_MACHINE_I386,
-	IMAGE_SYM_ABSOLUTE,
-	coff_absolute_symbols_build,
 	coff_object_build,
 )
 from src.formats.coff_read import coff_object_read
@@ -85,24 +83,3 @@ class TestRoundTripProperty:
 
 		# The function symbol survives the trip.
 		assert "fn_main" in {s.name for s in obj.symbols}
-
-
-class TestAbsoluteSymbols:
-	# coff_absolute_symbols_build is a separate (sectionless) writer with no
-	# round-trip property; these examples pin its contract directly.
-	def test_value_is_the_virtual_address_example(self):
-		obj = coff_object_read(
-			coff_absolute_symbols_build({"_fn_00410000": 0x00410000, "__imp__NtClose@4": 0x88100})
-		)
-		by_name = {s.name: s for s in obj.symbols}
-		assert by_name["_fn_00410000"].value == 0x00410000
-		assert by_name["__imp__NtClose@4"].value == 0x88100
-
-	def test_section_number_is_absolute_example(self):
-		obj = coff_object_read(coff_absolute_symbols_build({"_data_00420000": 0x00420000}))
-		assert obj.symbols[0].section_number == IMAGE_SYM_ABSOLUTE
-
-	def test_no_sections_example(self):
-		obj = coff_object_read(coff_absolute_symbols_build({"x": 1}))
-		assert obj.sections == ()
-		assert obj.text_section() is None

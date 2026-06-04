@@ -9,7 +9,6 @@ adding a command is local to its module.
     python -m src report    projects/halo2/project.json
     python -m src commit    projects/halo2/project.json [--function NAME]
     python -m src verify     projects/halo2/project.json
-    python -m src relink     projects/halo2/project.json
     python -m src cluster    projects/halo2/project.json [--by exact|opcode|equiv]
     python -m src similar    projects/halo2/project.json --function NAME
     python -m src libmatch   projects/halo2/project.json LIB.lib [LIB2.lib ...]

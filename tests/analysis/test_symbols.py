@@ -1,7 +1,7 @@
 """Tests for the symbol map: a VA-keyed human-label overlay.
 
 The map never touches machine symbols (`_fn_<va>` must stay VA-decodable for the
-relink oracle); it only renders friendly labels for the webui and ctx comments.
+splice verifier); it only renders friendly labels for the webui and ctx comments.
 Precedence: user override > SDK name (libmatch) > default `fn_<VA>`.
 """
 

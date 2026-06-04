@@ -482,11 +482,10 @@ class TestImageVerifyCache:
 			matched_bytes=32,
 			verified_bytes=24,
 		)
-		image_verify_cache_write(project_path, result, method="splice", when=1234.0)
+		image_verify_cache_write(project_path, result, when=1234.0)
 		assert image_verify_cache_path(project_path) == tmp_path / "image_verify.json"
 
 		got = image_verify_cache_load(project_path)
-		assert got["method"] == "splice"
 		assert got["verified_bytes"] == 24
 		assert got["matched_bytes"] == 32
 		assert got["functions"] == 2

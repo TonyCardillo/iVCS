@@ -26,9 +26,7 @@ from src.decomp.compile_tool import CompileOutput, default_compile_fn
 from src.formats.coff_read import CoffObject, coff_object_read
 from src.formats.relocs import relocs_image_va_resolver
 from src.formats.xbe import ParsedXbe, XbeFormatError, xbe_function_carve, xbe_section_containing_va
-from src.verify.link_tool import default_link_fn
 from src.verify.relink import RelinkError, relink_place
-from src.verify.relink_image import LinkFn, function_object_compile, function_real_relink
 
 CompileFn = Callable[[Path, Path, Path], CompileOutput]
 """(c_source, out_obj, workspace_root) -> CompileOutput. Injected for testing."""
@@ -314,9 +312,36 @@ def project_coverage(
 	return tuple(coverage)
 
 
-# --- Phase 4a: whole-image byte-splice verification -------------------------
+# --- Phase 4: whole-image byte-splice verification --------------------------
 # objdiff masks rel32/disp32, so "100% matched" can hide a wrong-address symbol;
 # splicing each function to its real VA and byte-comparing closes that gap.
+
+
+def _self_contained_source(ctx_filename: str, best_c: str) -> str:
+	"""best.c carries no include; prepend its copied ctx.h so it builds alone."""
+	return f'#include "{ctx_filename}"\n\n{best_c}'
+
+
+def function_object_compile(
+	workspace: FunctionWorkspace, build_dir: Path, fn_name: str, compile_fn: CompileFn
+) -> Path | None:
+	"""Write a matched function's ctx.h + self-contained best.c into `build_dir`,
+	compile it, and return the `.obj` path.
+
+	None when the workspace lacks inputs or the compile fails — callers treat that
+	as an unverified function rather than raising. The caller owns `build_dir`'s
+	lifecycle.
+	"""
+	if not workspace.best_c.is_file() or not workspace.ctx_h.is_file():
+		return None
+	ctx = build_dir / f"{fn_name}.ctx.h"
+	ctx.write_text(workspace.ctx_h.read_text())
+	src = build_dir / f"{fn_name}.c"
+	src.write_text(_self_contained_source(ctx.name, workspace.best_c.read_text()))
+	obj = build_dir / f"{fn_name}.obj"
+	if not compile_fn(src, obj, build_dir).success or not obj.is_file():
+		return None
+	return obj
 
 
 def _compiled_function_object(
@@ -453,45 +478,6 @@ def image_splice_verify(
 	)
 
 
-# --- Phase 4b: real relink verification (Link.Exe) --------------------------
-# Independent oracle: the real XDK linker, not our relocator. Disagreement with
-# Phase 4a points at a relocation our own placement got wrong.
-
-
-def _function_real_relink_verify(
-	project: Project,
-	parsed: ParsedXbe,
-	fn: FunctionEntry,
-	compile_fn: CompileFn,
-	link_fn: LinkFn,
-) -> FunctionVerify:
-	relinked = function_real_relink(project, parsed, fn, compile_fn=compile_fn, link_fn=link_fn)
-	if not relinked.ok:
-		return FunctionVerify(fn.name, fn.va, fn.size, 0, relinked.reason)
-	try:
-		original = xbe_function_carve(parsed, fn.va, fn.size)
-	except XbeFormatError as exc:
-		return FunctionVerify(fn.name, fn.va, fn.size, 0, f"carve failed: {exc}")
-	return _byte_match_verify(fn, relinked.function_bytes, original)
-
-
-def image_real_relink_verify(
-	project: Project,
-	parsed: ParsedXbe,
-	*,
-	compile_fn: CompileFn = default_compile_fn,
-	link_fn: LinkFn = default_link_fn,
-	on_result: Callable[[FunctionVerify], None] | None = None,
-) -> ImageVerify:
-	"""Relink every matched function with Link.Exe at its true VA and byte-compare
-	against the original image."""
-	return _image_verify(
-		project,
-		lambda fn: _function_real_relink_verify(project, parsed, fn, compile_fn, link_fn),
-		on_result=on_result,
-	)
-
-
 # --- Whole-image byte coverage (code AND data) ------------------------------
 #
 # project_coverage answers "% of enumerated code matched" per segment. This
@@ -610,10 +596,9 @@ def image_coverage(
 
 # --- Verify-result cache (UI reads what the CLI computes) --------------------
 #
-# image_splice_verify / image_real_relink_verify recompile every matched
-# function, so they're far too slow for a page render. The CLI runs them and
-# caches the headline numbers next to project.json; the webui just displays the
-# cached result (and how stale it is).
+# image_splice_verify recompiles every matched function, so it's far too slow
+# for a page render. The CLI runs it and caches the headline numbers next to
+# project.json; the webui just displays the cached result (and how stale it is).
 
 
 def image_verify_cache_path(project_path: Path | str) -> Path:
@@ -621,13 +606,12 @@ def image_verify_cache_path(project_path: Path | str) -> Path:
 
 
 def image_verify_cache_write(
-	project_path: Path | str, result: ImageVerify, *, method: str, when: float
+	project_path: Path | str, result: ImageVerify, *, when: float
 ) -> None:
 	"""Persist the headline verify numbers (not the full per-function list)."""
 	image_verify_cache_path(project_path).write_text(
 		json.dumps(
 			{
-				"method": method,
 				"verified_bytes": result.verified_bytes,
 				"matched_bytes": result.matched_bytes,
 				"verified_percent": result.verified_percent,

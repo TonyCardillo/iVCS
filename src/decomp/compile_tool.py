@@ -107,7 +107,7 @@ def obj_function_symbol_canonicalize(obj_path: Path, function_name: str) -> None
 
 	The attempt's C may name the function readably (CPlayer, XMemAlloc); the
 	object must export the canonical `_fn_<VA>` so objdiff pairs it with
-	target.obj and the relink oracle can find it. A no-op when the symbol is
+	target.obj and the splice verifier can find it. A no-op when the symbol is
 	already canonical or can't be uniquely identified.
 	"""
 	obj = obj_path.read_bytes()

@@ -106,7 +106,7 @@ def _symbol_notes_panel(root: Path, current_path: str | None) -> str:
 	"""Rename box + free-text notes for the function this workspace decompiles.
 
 	The rename is a display label only — the machine symbol stays `fn_<va>`, so
-	nothing here touches the matching or relink path. Notes are keyed by the
+	nothing here touches the matching or verify path. Notes are keyed by the
 	workspace dir, so they work even without a project path; rename needs the
 	project path to locate `symbols.json`.
 	"""

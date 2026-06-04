@@ -70,7 +70,6 @@ python -m src enumerate game.xbe --name halo2 -o projects/halo2/project.json
 python -m src report   projects/halo2/project.json   # per-segment coverage
 python -m src commit   projects/halo2/project.json   # promote matched best.c into the tree
 python -m src verify   projects/halo2/project.json   # byte-splice verify against the image
-python -m src relink   projects/halo2/project.json   # real-relink verify via XDK Link.Exe
 python -m src cluster  projects/halo2/project.json   # group structurally-identical functions
 python -m src similar  projects/halo2/project.json --function NAME
 python -m src libmatch projects/halo2/project.json d3d8.lib --save   # name SDK code
@@ -95,7 +94,6 @@ src/
     relocs.py         REL32 + DIR32 discovery via Capstone; __imp__ resolution
     coff.py           Microsoft COFF/i386 .obj emitter
     coff_read.py      COFF/i386 .obj reader (inverse of coff.py) for whole-image verify
-    pe_read.py        Minimal PE32 reader: pull linked section bytes back out
     archive.py        !<arch> static-library parser (extract COFF members from .lib)
     carver.py         Three-line orchestrator: carve → resolve → coff
   decomp/           Warm-start + agent loop
@@ -105,9 +103,7 @@ src/
     objdiff.py        objdiff-cli wrapper + typed JSON parser
     llm_clients.py    LiteLLM client adapter
   verify/           Relink, compare, integrate
-    relink.py         One-function linker
-    relink_image.py   Real relink via Link.Exe: pad-to-VA, stub externals, extract
-    link_tool.py      Link.Exe wrapper
+    relink.py         One-function linker (place a compiled obj at its real VA)
     integrator.py     Segment model + commit matched C into the source tree + coverage
   analysis/         Naming / dedup / annotations
     fingerprint.py    x86 structural index: hashes, cluster, similarity
@@ -120,7 +116,7 @@ src/
     batch.py          Overnight batch harness (planning logic)
     sweep.py          Project-wide Ghidra baseline sweep
   cli/              Thin CLI frontends (one subcommand each)
-    enumerate · report/commit/verify/relink · cluster/similar · libmatch · batch
+    enumerate · report/commit/verify · cluster/similar · libmatch · batch
   webui/            Local web UI: XBE explorer, decomp run/launch, batch/sweep control
   dev/              Diagnostics: smoke_run (objdiff-smoke fixture), halo2_sanity (real XBE)
 

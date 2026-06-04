@@ -1,10 +1,10 @@
 """VA-keyed human-label overlay for the decomp.
 
 A function's *machine symbol* (`_fn_00175F40`) encodes its virtual address in the
-name; the relink oracle decodes the VA straight back out of it, so that name can
+name; the splice verifier decodes the VA straight back out of it, so that name can
 never be renamed. This module is the other half: a pure *display* layer mapping a
 VA to a friendly label for the web UI and ctx comments. Renaming here never
-touches the matching/relink path.
+touches the matching/verify path.
 
 Precedence, highest first:
   1. user override   — `symbols.json` next to project.json, edited by you

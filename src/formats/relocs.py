@@ -278,8 +278,8 @@ def relocs_image_va_resolver(parsed: ParsedXbe) -> Callable[[str], int | None]:
 
 	The inverse of `reloc_symbol_name`: `_fn_<va>` / `_data_<va>` carry the
 	absolute VA in the name; `__imp__<export>` resolves to the kernel thunk-table
-	slot the import occupied. Both the byte-splice verifier (Phase 4a) and the
-	real relink (Phase 4b) place externals at the addresses this returns.
+	slot the import occupied. The byte-splice verifier places externals at the
+	addresses this returns.
 	"""
 	imports = relocs_kernel_import_va_map(parsed)
 
