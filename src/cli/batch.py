@@ -41,10 +41,17 @@ from src.formats.relocs import relocs_discover
 from src.formats.xbe import xbe_function_carve, xbe_load
 from src.paths import RECON_DIR
 
-# Prefer bundled objdiff-cli; don't override an explicit env setting.
 _BUNDLED_OBJDIFF = RECON_DIR / "objdiff-smoke" / "objdiff-cli"
-if "IVCS_OBJDIFF_CLI" not in os.environ and _BUNDLED_OBJDIFF.is_file():
-	os.environ["IVCS_OBJDIFF_CLI"] = str(_BUNDLED_OBJDIFF)
+
+
+def _ensure_bundled_objdiff() -> None:
+	"""Prefer the bundled objdiff-cli; don't override an explicit env setting.
+
+	Set when the batch command actually runs, not at import — importing this
+	module (the dispatcher imports every command) must not mutate the environment.
+	"""
+	if "IVCS_OBJDIFF_CLI" not in os.environ and _BUNDLED_OBJDIFF.is_file():
+		os.environ["IVCS_OBJDIFF_CLI"] = str(_BUNDLED_OBJDIFF)
 
 
 def add_parser(subparsers) -> None:
@@ -187,6 +194,7 @@ def _print_queue(queue: list[QueueItem]) -> None:
 
 
 def _run(args) -> int:
+	_ensure_bundled_objdiff()
 	project = project_load(args.project)
 	parsed = xbe_load(project.xbe_path)
 	sdk_vas = project_sdk_vas(args.project)
