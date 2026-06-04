@@ -61,8 +61,6 @@ _SOFT_TIMEOUT_PROMPT = (
 @dataclass(frozen=True)
 class AgentConfig:
 	model: str
-	api_base: str
-	api_key: str = "sk-local"
 	max_iterations: int = 15
 	hard_timeout_seconds: float = 300.0
 	soft_timeout_fraction: float = 0.7

@@ -73,7 +73,6 @@ def _make_run_one(project, parsed, symbols, *, max_iterations: int, timeout: flo
 			)
 			config = AgentConfig(
 				model=llm_recorded_model("local"),
-				api_base="",
 				max_iterations=max_iterations,
 				hard_timeout_seconds=timeout,
 			)

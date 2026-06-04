@@ -98,7 +98,6 @@ def main() -> int:
 
 		config = AgentConfig(
 			model="anthropic/claude-haiku-4-5",
-			api_base="",  # cloud, not local; api_base unused
 			max_iterations=8,
 			hard_timeout_seconds=180.0,
 		)

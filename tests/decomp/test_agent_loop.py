@@ -92,7 +92,6 @@ def _scripted_diff(*scores: float):
 def _make_config(**overrides) -> AgentConfig:
 	base = {
 		"model": "fake/local",
-		"api_base": "http://127.0.0.1:1234/v1",
 		"max_iterations": 5,
 		"hard_timeout_seconds": 60.0,
 	}

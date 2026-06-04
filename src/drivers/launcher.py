@@ -223,7 +223,6 @@ def launch_decomp_job(
 				llm = llm_client_for(model, api_key=key)
 				config = AgentConfig(
 					model=recorded_model,
-					api_base="",
 					max_iterations=max_iterations,
 					hard_timeout_seconds=hard_timeout_seconds,
 				)
