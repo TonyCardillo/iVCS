@@ -10,6 +10,7 @@ src.verify.integrator; this module is argument plumbing + printing.
 from __future__ import annotations
 
 import sys
+import tempfile
 import time
 import types
 from pathlib import Path
@@ -113,16 +114,17 @@ def _commit(project, parsed, *, function: str | None, force: bool, no_compile: b
 		targets = [f for f in project.functions if function_status(project, f).state == "matched"]
 
 	committed = skipped = failed = 0
-	for fn in targets:
-		res = integrate_commit(project, parsed, fn, **kwargs)
-		if res.skipped_reason is not None:
-			skipped += 1
-			print(f"  skip  {fn.name}: {res.skipped_reason}", file=sys.stderr)
-		elif not res.compiled and not no_compile:
-			failed += 1
-			print(f"  WARN  {fn.name}: committed but failed to recompile", file=sys.stderr)
-		else:
-			committed += 1
+	with tempfile.TemporaryDirectory() as build_dir:
+		for fn in targets:
+			res = integrate_commit(project, parsed, fn, build_dir=Path(build_dir), **kwargs)
+			if res.skipped_reason is not None:
+				skipped += 1
+				print(f"  skip  {fn.name}: {res.skipped_reason}", file=sys.stderr)
+			elif not res.compiled and not no_compile:
+				failed += 1
+				print(f"  WARN  {fn.name}: committed but failed to recompile", file=sys.stderr)
+			else:
+				committed += 1
 	tail = " (compile skipped)" if no_compile else f", {failed} recompile-failed"
 	print(f"committed {committed}, skipped {skipped}{tail}", file=sys.stderr)
 	return 0

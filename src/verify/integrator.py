@@ -14,7 +14,6 @@ Phase 1 (here): the segment model — grouping, gaps, overlaps, source paths.
 """
 
 import json
-import shutil
 import tempfile
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -196,6 +195,7 @@ def integrate_commit(
 	*,
 	compile_fn: CompileFn = default_compile_fn,
 	force: bool = False,
+	build_dir: Path | None = None,
 ) -> CommitResult:
 	"""Promote a matched function's `best.c` into the source tree.
 
@@ -235,11 +235,13 @@ def integrate_commit(
 		ctx_dest.unlink(missing_ok=True)  # idempotent: drop a stale per-fn header
 	dest.write_text("\n".join(includes) + f"\n\n{workspace.best_c.read_text()}")
 
-	obj_dir = Path(tempfile.mkdtemp())
-	try:
-		compiled = bool(compile_fn(dest, obj_dir / f"{fn.name}.obj", dest.parent).success)
-	finally:
-		shutil.rmtree(obj_dir, ignore_errors=True)
+	# A caller committing many functions passes a shared build_dir (outputs are
+	# keyed by function name, so they never collide); a lone call gets its own.
+	if build_dir is not None:
+		compiled = bool(compile_fn(dest, build_dir / f"{fn.name}.obj", dest.parent).success)
+	else:
+		with tempfile.TemporaryDirectory() as d:
+			compiled = bool(compile_fn(dest, Path(d) / f"{fn.name}.obj", dest.parent).success)
 	return CommitResult(dest, compiled, None)
 
 
