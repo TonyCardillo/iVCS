@@ -345,20 +345,18 @@ def function_object_compile(
 
 
 def _compiled_function_object(
-	project: Project, fn: FunctionEntry, compile_fn: CompileFn
+	project: Project, fn: FunctionEntry, compile_fn: CompileFn, build_dir: Path
 ) -> CoffObject | None:
 	"""Recompile a matched function's best.c standalone; return the parsed object.
 
 	None when the workspace lacks inputs or the recompile fails — the verifier
-	records that as an unverified function rather than raising.
+	records that as an unverified function rather than raising. `build_dir` is a
+	scratch dir owned by the caller and shared across functions (outputs are keyed
+	by function name, so they never collide).
 	"""
 	workspace = FunctionWorkspace(root=project.workspace_for(fn), function_name=fn.name)
-	build_dir = Path(tempfile.mkdtemp())
-	try:
-		obj = function_object_compile(workspace, build_dir, fn.name, compile_fn)
-		return coff_object_read(obj.read_bytes()) if obj is not None else None
-	finally:
-		shutil.rmtree(build_dir, ignore_errors=True)
+	obj = function_object_compile(workspace, build_dir, fn.name, compile_fn)
+	return coff_object_read(obj.read_bytes()) if obj is not None else None
 
 
 @dataclass(frozen=True)
@@ -418,13 +416,14 @@ def _function_splice_verify(
 	fn: FunctionEntry,
 	resolve: Callable[[str], int | None],
 	compile_fn: CompileFn,
+	build_dir: Path,
 ) -> FunctionVerify:
 	try:
 		original = xbe_function_carve(parsed, fn.va, fn.size)
 	except XbeFormatError as exc:
 		return FunctionVerify(fn.name, fn.va, fn.size, 0, f"carve failed: {exc}")
 
-	obj = _compiled_function_object(project, fn, compile_fn)
+	obj = _compiled_function_object(project, fn, compile_fn, build_dir)
 	if obj is None:
 		return FunctionVerify(fn.name, fn.va, fn.size, 0, "recompile failed or missing inputs")
 
@@ -471,11 +470,14 @@ def image_splice_verify(
 	against the original image. Returns per-function and whole-image verified
 	byte counts."""
 	resolve = relocs_image_va_resolver(parsed)
-	return _image_verify(
-		project,
-		lambda fn: _function_splice_verify(project, parsed, fn, resolve, compile_fn),
-		on_result=on_result,
-	)
+	with tempfile.TemporaryDirectory() as build_dir:
+		return _image_verify(
+			project,
+			lambda fn: _function_splice_verify(
+				project, parsed, fn, resolve, compile_fn, Path(build_dir)
+			),
+			on_result=on_result,
+		)
 
 
 # --- Whole-image byte coverage (code AND data) ------------------------------
