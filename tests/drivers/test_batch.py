@@ -19,6 +19,7 @@ from src.decomp.objdiff import (
 from src.drivers.batch import (
 	QueueItem,
 	RunOutcome,
+	_rename_to_twin,
 	batch_queue,
 	batch_run,
 	propagate_to_twins,
@@ -52,6 +53,23 @@ def _fp(va: int, size: int, *, exact: int) -> Fingerprint:
 		equiv_hash=exact,
 		opcodes=(),
 	)
+
+
+class TestRenameToTwin:
+	def test_each_prefix_normalizes_to_twin_canonical_example(self):
+		# fn_/FUN_/sub_ all collapse to the twin's canonical fn_<VA>.
+		for name in ("fn_00175f40", "FUN_00175F40", "sub_00175f40"):
+			out = _rename_to_twin(f"void {name}(void) {{}}", 0x00175F40, 0x00200000)
+			assert "fn_00200000(void)" in out
+			assert "00175" not in out
+
+	def test_address_shaped_immediate_in_body_is_left_untouched_example(self):
+		# The rep's address as a bare literal is NOT the function name (a C
+		# identifier can't start with a digit), so it must survive the rename.
+		src = "int fn_00175F40(void) { return 0x00175F40; }"
+		out = _rename_to_twin(src, 0x00175F40, 0x00200000)
+		assert "fn_00200000(void)" in out  # the name retargets
+		assert "0x00175F40" in out  # the immediate does not
 
 
 class TestOrdering:

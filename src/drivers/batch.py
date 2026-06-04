@@ -165,10 +165,11 @@ def _rename_to_twin(source: str, rep_va: int, twin_va: int) -> str:
 	the prefix and case vary by origin (`fn_00175F40` from the agent/normalizer,
 	`FUN_00175f40` from a raw Ghidra draft). We rewrite any such token to the
 	twin's canonical `fn_<TWIN_VA>` so the compiled symbol is `_fn_<twin_va>` and
-	objdiff pairs it with the twin's target. Safe because we only ever propagate
-	leaves, whose body holds no other address references.
+	objdiff pairs it with the twin's target. The prefix is required: a C identifier
+	can't start with a digit, so the function name always carries one — matching a
+	bare address would corrupt an address-shaped immediate in the body.
 	"""
-	pattern = re.compile(rf"(?:FUN_|fn_|sub_)?{rep_va:08x}", re.IGNORECASE)
+	pattern = re.compile(rf"(?:FUN_|fn_|sub_){rep_va:08x}", re.IGNORECASE)
 	return pattern.sub(f"fn_{twin_va:08X}", source)
 
 
