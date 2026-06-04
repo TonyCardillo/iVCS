@@ -197,8 +197,4 @@ def _arg_diff_parse(args: list) -> tuple[int, ...]:
 
 
 def _int_or_none(value) -> int | None:
-	if value is None:
-		return None
-	if isinstance(value, str):
-		return int(value)
-	return int(value)
+	return None if value is None else int(value)
