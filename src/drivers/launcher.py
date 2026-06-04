@@ -118,11 +118,13 @@ def prepare_decomp_workspace(
 	listing. Used by both the web UI's threaded launch and the batch runner.
 	"""
 	body = xbe_function_carve(parsed, fn.va, fn.size)
+	sites = relocs_discover(body, fn.va)
+	conventions = _rel32_callee_conventions(parsed, sites, fn.va)
 	mangled = _infer_mangled_name(body, fn.name)
 	obj_bytes = carver_target_obj_build(parsed, fn.va, fn.size, mangled)
-	target_asm = _disassemble_listing(parsed, fn.va, fn.size)
-	callee_decls = _extract_rel32_callee_decls(parsed, fn.va, fn.size, label_for=label_for)
-	kernel_imports = _extract_kernel_imports(parsed, fn.va, fn.size)
+	target_asm = _disassemble_listing(body, fn.va)
+	callee_decls = _callee_decls_from_conventions(conventions, label_for=label_for)
+	kernel_imports = _extract_kernel_imports(parsed, sites)
 
 	workspace = FunctionWorkspace(root=project.workspace_for(fn), function_name=mangled)
 	workspace.initialize()
@@ -146,7 +148,7 @@ def prepare_decomp_workspace(
 		workspace,
 		struct_names=struct_names,
 		stdcall_target=fn.name if "@" in mangled else None,
-		callee_arities=_extract_callee_arities(parsed, fn.va, fn.size),
+		callee_arities=_callee_arities_from_conventions(conventions),
 	)
 	return workspace, target_asm
 
@@ -545,13 +547,12 @@ def _rel32_callee_vas_from_sites(
 
 
 def _rel32_callee_conventions(
-	parsed: ParsedXbe, fn_va: int, fn_size: int
+	parsed: ParsedXbe, sites: list[RelocSite], fn_va: int
 ) -> list[tuple[int, str, int]]:
 	"""[(va, convention, popped_bytes)] for each same-binary REL32 callee of
-	fn_va. Same inference the carver uses for target.obj's call-site symbol, so
-	ctx.h decls and relocation decoration always agree."""
-	body = xbe_function_carve(parsed, fn_va, fn_size)
-	sites = relocs_discover(body, fn_va)
+	fn_va, given its already-discovered relocation `sites`. Same inference the
+	carver uses for target.obj's call-site symbol, so ctx.h decls and relocation
+	decoration always agree."""
 
 	def is_executable(va: int) -> bool:
 		section = xbe_section_containing_va(parsed, va)
@@ -594,15 +595,13 @@ def _callee_alias_line(label: str | None, name: str) -> str | None:
 	return f"#define {label} {name}"
 
 
-def _extract_rel32_callee_decls(
-	parsed: ParsedXbe,
-	fn_va: int,
-	fn_size: int,
+def _callee_decls_from_conventions(
+	conventions: list[tuple[int, str, int]],
 	*,
 	label_for: Callable[[int], str] | None = None,
 ) -> tuple[str, ...]:
-	"""Forward decls for same-binary callees of fn_va, with convention inferred
-	from the first ret in each callee's bytes.
+	"""Forward decls for same-binary callees, from precomputed (va, convention,
+	popped_bytes) triples.
 
 	`label_for(va)` supplies the human label for each callee. When it differs
 	from `fn_<va>` it rides along as a trailing comment AND, if it's a safe C
@@ -612,7 +611,7 @@ def _extract_rel32_callee_decls(
 	"""
 	decls: list[str] = []
 	seen_aliases: set[str] = set()
-	for va, conv, byte_count in _rel32_callee_conventions(parsed, fn_va, fn_size):
+	for va, conv, byte_count in conventions:
 		name = f"fn_{va:08X}"
 		label = label_for(va) if label_for else None
 		decl = _format_callee_decl(name, conv, byte_count, label=label)
@@ -624,23 +623,22 @@ def _extract_rel32_callee_decls(
 	return tuple(decls)
 
 
-def _extract_callee_arities(parsed: ParsedXbe, fn_va: int, fn_size: int) -> dict[str, int]:
-	"""{callee_name: stdcall arg count} for fn_va's stdcall callees.
+def _callee_arities_from_conventions(conventions: list[tuple[int, str, int]]) -> dict[str, int]:
+	"""{callee_name: stdcall arg count} for the stdcall callees, from precomputed
+	(va, convention, popped_bytes) triples.
 
 	Lets the warm-start normalizer pad under-count Ghidra call sites up to the
 	arity the `@N`-pinned prototype demands (Ghidra routinely under-counts)."""
 	return {
 		f"fn_{va:08X}": byte_count // 4
-		for va, conv, byte_count in _rel32_callee_conventions(parsed, fn_va, fn_size)
+		for va, conv, byte_count in conventions
 		if conv == "stdcall" and byte_count > 0
 	}
 
 
-def _extract_kernel_imports(parsed: ParsedXbe, fn_va: int, fn_size: int) -> tuple[str, ...]:
-	"""Scan DIR32 sites for kernel-thunk references; return plain export
-	names (e.g., 'NtClose'), deduped and sorted."""
-	body = xbe_function_carve(parsed, fn_va, fn_size)
-	sites = relocs_discover(body, fn_va)
+def _extract_kernel_imports(parsed: ParsedXbe, sites: list[RelocSite]) -> tuple[str, ...]:
+	"""Scan precomputed DIR32 sites for kernel-thunk references; return plain
+	export names (e.g., 'NtClose'), deduped and sorted."""
 	seen: set[str] = set()
 	for site in sites:
 		if site.kind != RelocKind.DIR32:
@@ -654,8 +652,7 @@ def _extract_kernel_imports(parsed: ParsedXbe, fn_va: int, fn_size: int) -> tupl
 	return tuple(sorted(seen))
 
 
-def _disassemble_listing(parsed: ParsedXbe, fn_va: int, size: int) -> str:
-	body = xbe_function_carve(parsed, fn_va, size)
+def _disassemble_listing(body: bytes, fn_va: int) -> str:
 	md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
 	lines = [
 		f"{instr.address:#010x}  {instr.bytes.hex():<14} {instr.mnemonic} {instr.op_str}"
