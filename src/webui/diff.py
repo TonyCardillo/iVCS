@@ -8,6 +8,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 from src.core.project import json_load_or_none
@@ -71,7 +72,11 @@ def _ensure_diff_json(workspace_root: Path, n: int, function_name: str | None) -
 		cmd.append(function_name)
 	try:
 		subprocess.run(cmd, capture_output=True, text=True, timeout=15, check=True)
-	except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError):
+	except subprocess.CalledProcessError as e:
+		sys.stderr.write(f"objdiff-cli failed (exit {e.returncode}) for {obj_path}:\n{e.stderr or ''}")
+		return None
+	except (subprocess.TimeoutExpired, FileNotFoundError) as e:
+		sys.stderr.write(f"objdiff-cli could not run for {obj_path}: {type(e).__name__}: {e}\n")
 		return None
 	return diff_path if diff_path.is_file() else None
 

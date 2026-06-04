@@ -2,6 +2,7 @@
 
 import os
 import re
+import subprocess
 import threading
 import time
 import types
@@ -128,6 +129,24 @@ def test_ensure_diff_json_regenerates_stale_cache(tmp_path, monkeypatch):
 
 	assert _ensure_diff_json(tmp_path, 2, "_fn_00430D97") == diff
 	assert calls, "a stale diff should trigger objdiff regeneration"
+
+
+def test_ensure_diff_json_logs_stderr_on_cli_failure(tmp_path, monkeypatch, capsys):
+	"""When objdiff-cli fails, the diff is unavailable (None) — but the failure
+	must not be silent: its stderr is surfaced to the server log."""
+	obj, diff, target = _diff_workspace(tmp_path)
+	_touch(target, 1000)
+	_touch(diff, 1000)
+	_touch(obj, 2000)  # stale -> triggers a regeneration attempt
+
+	def fake_run(cmd, **kwargs):
+		raise subprocess.CalledProcessError(returncode=2, cmd=cmd, stderr="objdiff: bad symbol\n")
+
+	monkeypatch.setattr(webui.diff, "_objdiff_cli_path", lambda: "objdiff-cli")
+	monkeypatch.setattr(webui.diff.subprocess, "run", fake_run)
+
+	assert _ensure_diff_json(tmp_path, 2, "_fn_00430D97") is None
+	assert "objdiff: bad symbol" in capsys.readouterr().err  # the diagnostic reaches the log
 
 
 def test_ensure_diff_json_keeps_fresh_cache(tmp_path, monkeypatch):
