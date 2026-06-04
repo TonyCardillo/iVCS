@@ -21,9 +21,11 @@ from src.webui.state import (
 	_sweep_for,
 )
 from src.webui.templates import (
+	badge,
 	crumbs,
 	page,
 	panel,
+	sweep_bar,
 )
 from src.webui.views_index import _discover_projects
 
@@ -86,7 +88,7 @@ def _sweep_section(project_path_str: str, stats: ProjectStats) -> tuple[str, boo
 		)
 		body = (
 			'<div class="run-banner sweeping">'
-			'<span class="badge pending">SWEEPING</span>'
+			f'{badge("pending", "SWEEPING")}'
 			f'<span class="sweep-counts">{sweep.done}/{sweep.total} · '
 			f'<span class="green">{sweep.matched} matched</span> · '
 			f"{sweep.partial} partial · {sweep.failed} failed</span>"
@@ -94,8 +96,7 @@ def _sweep_section(project_path_str: str, stats: ProjectStats) -> tuple[str, boo
 			f'<form class="inline sweep-stop" method="post" action="/sweep/stop?path={path_q}">'
 			'<button type="submit">stop</button></form>'
 			"</div>"
-			f'<div class="sweep-bar"><div class="sweep-bar-fill" '
-			f'style="width:{pct:.1f}%"></div></div>'
+			f"{sweep_bar(pct)}"
 		)
 		return panel("Ghidra sweep", body, meta=f"{pct:.0f}% · serial baseline pass"), True
 
@@ -136,13 +137,13 @@ def _autoname_section(project_path_str: str, named: int | None) -> str:
 	notice = ""
 	if named is not None and named > 0:
 		notice = (
-			'<div class="run-banner done"><span class="badge matched">NAMED</span>'
+			f'<div class="run-banner done">{badge("matched", "NAMED")}'
 			f'<span>auto-named <span class="green">{named}</span> '
 			f"function{'s' if named != 1 else ''} from referenced strings</span></div>"
 		)
 	elif named is not None:
 		notice = (
-			'<div class="run-banner"><span class="badge pending">—</span>'
+			f'<div class="run-banner">{badge("pending", "—")}'
 			'<span class="muted">no new high-confidence names found</span></div>'
 		)
 	button = (

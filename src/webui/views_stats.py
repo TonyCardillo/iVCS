@@ -22,9 +22,11 @@ from src.webui.state import (
 )
 from src.webui.templates import (
 	_progress_bar,
+	badge,
 	crumbs,
 	page,
 	panel,
+	sweep_bar,
 )
 from src.webui.views_progress import (
 	_model_attempt_table,
@@ -90,10 +92,10 @@ def _verify_panel(project_path_str: str) -> tuple[str, bool]:
 		)
 		body = (
 			'<div class="run-banner sweeping">'
-			'<span class="badge pending">VERIFYING</span>'
+			f'{badge("pending", "VERIFYING")}'
 			f'<span class="sweep-counts">{job.done}/{job.total} matched functions · '
 			f"splice</span>{current}</div>"
-			f'<div class="sweep-bar"><div class="sweep-bar-fill" style="width:{pct:.1f}%"></div></div>'
+			f"{sweep_bar(pct)}"
 		)
 		return panel("Splice-verified", body, meta=f"{pct:.0f}% · recompiling + splicing"), True
 

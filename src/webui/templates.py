@@ -81,6 +81,16 @@ def panel(head: str, body: str, meta: str = "") -> str:
 	)
 
 
+def badge(cls: str, text: str) -> str:
+	"""A status pill: `<span class="badge {cls}">{text}</span>`, text escaped."""
+	return f'<span class="badge {cls}">{html.escape(text)}</span>'
+
+
+def sweep_bar(pct: float) -> str:
+	"""The thin animated live-progress bar used by sweep/verify/autoname runs."""
+	return f'<div class="sweep-bar"><div class="sweep-bar-fill" style="width:{pct:.1f}%"></div></div>'
+
+
 def _progress_bar(value: float | None) -> str:
 	pct = value if isinstance(value, (int, float)) else 0.0
 	pct = max(0.0, min(100.0, pct))

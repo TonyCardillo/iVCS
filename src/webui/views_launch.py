@@ -18,6 +18,7 @@ from src.webui.state import (
 	_job_for,
 )
 from src.webui.templates import (
+	badge,
 	crumbs,
 	page,
 	panel,
@@ -75,7 +76,7 @@ def view_launch_form(project_path_str: str, va_str: str) -> str:
 		reason = (existing_result or {}).get("termination_reason") or "no result.json"
 		existing_state_html = f"""
 <div class="rerun-notice">
-  <span class="badge partial">PRIOR RUN</span>
+  {badge("partial", "PRIOR RUN")}
   <span>attempts on disk: <span class="amber">{len(existing_attempts)}</span>
         · best: <span class="green">{best_str}</span>
         · last reason: <span class="cyan">{html.escape(reason)}</span></span>

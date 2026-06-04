@@ -36,6 +36,7 @@ from src.webui import (
 	_va_from_workspace,
 )
 from src.webui import state as webui_state
+from src.webui.templates import badge, sweep_bar  # noqa: E402
 from src.webui.views_decomp import _symbol_notes_panel  # noqa: E402
 
 
@@ -464,6 +465,22 @@ class TestSweepSection:
 		assert active is False
 		assert "last sweep finished" in html
 		assert "/sweep/launch" in html  # can run again
+
+
+class TestBadge:
+	def test_wraps_class_and_text_example(self):
+		assert badge("matched", "100%") == '<span class="badge matched">100%</span>'
+
+	def test_escapes_text_example(self):
+		# Centralizing the escape is half the point of the helper.
+		assert badge("failed", "<x>&") == '<span class="badge failed">&lt;x&gt;&amp;</span>'
+
+
+class TestSweepBar:
+	def test_formats_width_one_decimal_example(self):
+		assert sweep_bar(42.0) == (
+			'<div class="sweep-bar"><div class="sweep-bar-fill" style="width:42.0%"></div></div>'
+		)
 
 
 class TestXbeCachedLoad:

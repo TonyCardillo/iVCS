@@ -34,6 +34,7 @@ from src.webui.state import (
 )
 from src.webui.templates import (
 	_progress_bar,
+	badge,
 	crumbs,
 	page,
 	panel,
@@ -61,7 +62,7 @@ def _project_crumb(current_path: str | None) -> tuple[str, str | None]:
 
 def _status_badge(result_json: dict | None) -> str:
 	if result_json is None:
-		return '<span class="badge pending">in progress</span>'
+		return badge("pending", "in progress")
 	reason = result_json.get("termination_reason", "?")
 	success = result_json.get("success", False)
 	cls = (
@@ -69,7 +70,7 @@ def _status_badge(result_json: dict | None) -> str:
 		if success
 		else ("failed" if reason in ("hard_timeout", "llm_no_progress") else "partial")
 	)
-	return f'<span class="badge {cls}">{html.escape(reason)}</span>'
+	return badge(cls, reason)
 
 
 def _sparkline_svg(attempts: list[dict]) -> str:
@@ -248,15 +249,13 @@ def view_decomp_run(root_str: str, current_path: str | None) -> str:
 		label, badge_cls, badge_text = _attempt_status_labels(a, is_in_flight=is_in_flight)
 		if label is not None:
 			mp_html = f'<span class="muted">{label}</span>'
-			status_html = f'<span class="badge {badge_cls}">{badge_text}</span>'
+			status_html = badge(badge_cls, badge_text)
 		else:
 			mp = a["match_percent"]
 			cls = "" if mp > 0 else "zero"
 			mp_html = f'<span class="mp {cls}">{mp:.2f}%</span>'
 			status_html = (
-				'<span class="badge matched">100%</span>'
-				if mp == 100.0
-				else '<span class="badge partial">partial</span>'
+				badge("matched", "100%") if mp == 100.0 else badge("partial", "partial")
 			)
 		ghidra_tag = (
 			'<span class="badge partial" title="Ghidra warm-start baseline">ghidra</span>'
@@ -299,7 +298,7 @@ def view_decomp_run(root_str: str, current_path: str | None) -> str:
 			)
 			banner = (
 				f'<div class="run-banner running">'
-				f'<span class="badge pending">{job.state.upper()}</span>'
+				f'{badge("pending", job.state.upper())}'
 				f'<span>iter <span class="amber">{job.iterations_completed}</span>/{job.max_iterations}'
 				f" · elapsed {elapsed}s / {int(job.hard_timeout_seconds)}s"
 				f' · model <span class="cyan">{html.escape(job.model)}</span></span>'
@@ -309,7 +308,7 @@ def view_decomp_run(root_str: str, current_path: str | None) -> str:
 		elif job.state == "error":
 			banner = (
 				f'<div class="run-banner failed">'
-				f'<span class="badge failed">ERROR</span>'
+				f'{badge("failed", "ERROR")}'
 				f'<span class="muted">{html.escape(job.error or "")}</span>'
 				f"</div>"
 			)
@@ -322,7 +321,7 @@ def view_decomp_run(root_str: str, current_path: str | None) -> str:
 			)
 			banner = (
 				f'<div class="run-banner done">'
-				f'<span class="badge matched">FINISHED</span>'
+				f'{badge("matched", "FINISHED")}'
 				f'<span>reason <span class="amber">{html.escape(reason)}</span>'
 				f' · best <span class="green">{best_str}</span>'
 				f" · iter {job.iterations_completed}/{job.max_iterations}</span>"
@@ -510,7 +509,7 @@ def _interrupted_banner(root: Path, current_path: str | None) -> str:
 		resume = f'<a class="resume" href="{href}">resume run →</a>'
 	return (
 		'<div class="run-banner interrupted">'
-		'<span class="badge failed">INTERRUPTED</span>'
+		f'{badge("failed", "INTERRUPTED")}'
 		'<span class="muted">run stopped mid-flight (server restarted) · '
 		"attempts and best.c preserved on disk</span>"
 		f"{resume}"
