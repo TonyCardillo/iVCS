@@ -15,13 +15,16 @@ from src.formats.xbe import (
 	xbe_load,
 )
 
+_PARSE_CACHE_LOCK = threading.Lock()
+
 _PARSE_CACHE: dict[str, ParsedXbe] = {}
 
 
 def xbe_cached_load(path: str) -> ParsedXbe:
-	if path not in _PARSE_CACHE:
-		_PARSE_CACHE[path] = xbe_load(path)
-	return _PARSE_CACHE[path]
+	with _PARSE_CACHE_LOCK:
+		if path not in _PARSE_CACHE:
+			_PARSE_CACHE[path] = xbe_load(path)
+		return _PARSE_CACHE[path]
 
 
 _JOBS_LOCK = threading.Lock()

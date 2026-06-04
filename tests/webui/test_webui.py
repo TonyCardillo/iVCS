@@ -2,6 +2,8 @@
 
 import os
 import re
+import threading
+import time
 import types
 from pathlib import Path
 from urllib.parse import quote
@@ -39,9 +41,14 @@ from src.webui.views_decomp import _symbol_notes_panel  # noqa: E402
 
 @pytest.fixture(autouse=True)
 def _isolate_webui_registries():
-	"""Each test gets empty job/sweep/verify registries, restored afterward, so
-	tests that call _register_sweep can't leak state into one another."""
-	registries = (webui_state._JOBS, webui_state._SWEEPS, webui_state._VERIFIES)
+	"""Each test gets empty job/sweep/verify registries and parse cache, restored
+	afterward, so tests can't leak state into one another."""
+	registries = (
+		webui_state._JOBS,
+		webui_state._SWEEPS,
+		webui_state._VERIFIES,
+		webui_state._PARSE_CACHE,
+	)
 	saved = [dict(r) for r in registries]
 	for r in registries:
 		r.clear()
@@ -457,3 +464,37 @@ class TestSweepSection:
 		assert active is False
 		assert "last sweep finished" in html
 		assert "/sweep/launch" in html  # can run again
+
+
+class TestXbeCachedLoad:
+	# The cache is read/written from many threads (ThreadingHTTPServer requests +
+	# workers). Parsing the same XBE must happen once no matter how many callers
+	# stampede the empty cache at the same instant.
+	def test_concurrent_loads_parse_once_invariant(self, monkeypatch):
+		calls: list[str] = []
+		calls_lock = threading.Lock()
+
+		def slow_fake_load(path: str):
+			with calls_lock:
+				calls.append(path)
+			time.sleep(0.01)  # widen the check-then-store window the race lives in
+			return object()  # a distinct ParsedXbe stand-in per real parse
+
+		monkeypatch.setattr(webui_state, "xbe_load", slow_fake_load)
+
+		n = 24
+		barrier = threading.Barrier(n)
+		results: list[object] = [None] * n
+
+		def worker(i: int) -> None:
+			barrier.wait()  # release all threads into the cache together
+			results[i] = webui_state.xbe_cached_load("/x/default.xbe")
+
+		threads = [threading.Thread(target=worker, args=(i,)) for i in range(n)]
+		for t in threads:
+			t.start()
+		for t in threads:
+			t.join()
+
+		assert len(calls) == 1  # parsed exactly once despite the stampede
+		assert len({id(r) for r in results}) == 1  # every caller got the same instance
