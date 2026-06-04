@@ -3,7 +3,7 @@
 Two operations:
 - ghidra_project_ensure: idempotently import + analyze an XBE into a Ghidra
   project. Pays the ~100s analysis cost once.
-- ghidra_decompile_function: invoke a Jython post-script that decompiles
+- ghidra_decompile_function: invoke a Java post-script that decompiles
   one function by VA and writes C source to a file. Project must already
   exist (re-imports would re-pay the analysis cost).
 """

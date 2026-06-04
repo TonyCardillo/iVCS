@@ -1,6 +1,6 @@
-# objdiff + widberg/msvc8.0p round-trip smoke test
+# objdiff + XDK 5849 VC7.1 round-trip smoke test
 
-End-to-end validation that `objdiff-cli` produces a usable, structured diff against object files emitted by the widberg MSVC 8 toolchain under Wine. This is the dress rehearsal for the agent loop — proving the data shape the LLM will consume is real and useful before any LLM work.
+End-to-end validation that `objdiff-cli` produces a usable, structured diff against object files emitted by the XDK 5849 VC7.1 toolchain under Wine. This is the dress rehearsal for the agent loop — proving the data shape the LLM will consume is real and useful before any LLM work.
 
 ## Result (run on 2026-05-25)
 
@@ -71,8 +71,8 @@ The model proposes ONE C edit, we rebuild, re-diff, hill-climb. No assembly pars
 ## Surprises and notes
 
 - **`<` vs `<=` produces wildly different codegen at `/O2`.** Our variant change dropped the match from 100% to 8.6% — MSVC restructured the loop entirely. This is a useful real-world reminder that "one-character source diffs" can produce large object-level diffs. Matching decomp is not about character similarity.
-- **MSVC C-mode is C89.** No in-loop variable declarations (`for (int i = 0; ...)` is a syntax error). All locals at function top. Worth a permanent note in the v2 prompt scaffolding so the LLM doesn't keep proposing C99 code that won't compile.
-- **Function symbols are prefixed with `_`** (MSVC `__cdecl` mangling for C). For C++ we'll see full MSVC mangling (`?Foo@Bar@@QAEHHH@Z`); objdiff handles demangling natively.
+- **MSVC C-mode is C89.** No in-loop variable declarations (`for (int i = 0; ...)` is a syntax error). All locals at function top.
+- **Function symbols are prefixed with `_`** (MSVC `__cdecl` mangling for C).
 - **`match_percent` is non-null on one side and null on the other** in the pretty JSON for unsymmetric diffs. Use the compact `--format json` if you need it on both sides, or compute from instruction counts. Not blocking but worth knowing.
 
 ## Files

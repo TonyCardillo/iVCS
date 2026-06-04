@@ -50,8 +50,9 @@ uv run python -m src.webui            # serves http://127.0.0.1:8765/ (--port to
 ```
 
 Then open <http://127.0.0.1:8765/> and point it at
-`projects/halo2-retail/project.json`. (`objdiff-cli` is auto-detected from the
-bundled copy, so `IVCS_OBJDIFF_CLI` is optional.)
+`projects/halo2-retail/project.json`. (The webui and `batch` auto-detect
+`objdiff-cli` from the bundled copy; the other CLI subcommands need it on PATH
+or `IVCS_OBJDIFF_CLI` set.)
 
 Environment:
 
@@ -60,10 +61,15 @@ Environment:
 | `IVCS_MSVC_DIR` | Root of the XDK 5849 VC7.1 toolchain containing `bin/cl.exe`. | `<repo>/compilers/xdk5849-vc71` |
 | `IVCS_WINE` | Wine binary to invoke `cl.exe`. | `wine` (on PATH) |
 | `IVCS_OBJDIFF_CLI` | Path to the `objdiff-cli` binary. | `objdiff-cli` (on PATH) |
+| `IVCS_GHIDRA_HOME` | Ghidra install used for warm-start (see `docs/ghidra_setup.md`). | `<repo>/tools/ghidra_12.0.3_PUBLIC` |
+| `IVCS_GHIDRA_PROJECT_DIR` | Where Ghidra projects are stored. | `/tmp/ghidra-projects` |
+| `IVCS_GHIDRA_PROJECT_NAME` | Ghidra project name. | XBE filename stem |
+| `IVCS_LLM_API_BASE` | Local LLM server URL (used when no cloud key). | `http://127.0.0.1:1234/v1` |
+| `IVCS_LLM_MODEL` | Local LLM model ID. | auto-detected from LM Studio |
 
 ## CLI
 
-Everything the web UI does is also a subcommand of `python -m src`:
+The main pipeline verbs are also subcommands of `python -m src`:
 
 ```bash
 python -m src enumerate game.xbe --name halo2 -o projects/halo2/project.json
@@ -102,6 +108,8 @@ src/
     compile_tool.py   LLM agent tool (compile + view assembly)
     objdiff.py        objdiff-cli wrapper + typed JSON parser
     llm_clients.py    LiteLLM client adapter
+    history.py        Per-attempt best-result reader
+    inline_asm.py     Inline-asm budget guard (blocks transcription to __asm)
   verify/           Relink, compare, integrate
     relink.py         One-function linker (place a compiled obj at its real VA)
     integrator.py     Segment model + commit matched C into the source tree + coverage
