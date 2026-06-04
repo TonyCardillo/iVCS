@@ -96,10 +96,8 @@ class Handler(BaseHTTPRequestHandler):
 			self._send(429, view_error(f"jobs at capacity: {e}"))
 		except (FileNotFoundError, KeyError, ValueError) as e:
 			self._send(400, view_error(f"{type(e).__name__}: {e}"))
-		except Exception:  # noqa: BLE001
-			tb = traceback.format_exc()
-			sys.stderr.write(tb)
-			self._send(500, view_error(tb))
+		except Exception:  # noqa: BLE001 — last-resort net for the UI
+			self._send_500()
 
 	def do_GET(self):
 		parts = urlsplit(self.path)
@@ -157,9 +155,7 @@ class Handler(BaseHTTPRequestHandler):
 		except (XbeFormatError, KeyError, ValueError) as e:
 			self._send(400, view_error(f"{type(e).__name__}: {e}"))
 		except Exception:  # noqa: BLE001 — last-resort net for the UI
-			tb = traceback.format_exc()
-			sys.stderr.write(tb)
-			self._send(500, view_error(tb))
+			self._send_500()
 
 	def _send(self, status: int, body: str) -> None:
 		encoded = body.encode("utf-8")
@@ -168,6 +164,12 @@ class Handler(BaseHTTPRequestHandler):
 		self.send_header("Content-Length", str(len(encoded)))
 		self.end_headers()
 		self.wfile.write(encoded)
+
+	def _send_500(self) -> None:
+		"""Log the traceback server-side; show the client a generic message so no
+		internal paths or stack frames leak into the browser."""
+		sys.stderr.write(traceback.format_exc())
+		self._send(500, view_error("internal server error — see server logs"))
 
 	def _redirect(self, location: str) -> None:
 		self.send_response(302)
