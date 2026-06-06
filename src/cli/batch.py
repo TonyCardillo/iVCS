@@ -219,17 +219,18 @@ def _run(args) -> int:
 	)
 
 	client = llm_client_for("local")
+	symbols = symbol_map_load(args.project)
 	summary = batch_run(
 		queue,
 		run_one=_make_run_one(
 			project,
 			parsed,
-			symbol_map_load(args.project),
+			symbols,
 			max_iterations=args.max_iterations,
 			timeout=args.timeout,
 			client=client,
 		),
-		propagate=_make_propagate(project, parsed, symbol_map_load(args.project)),
+		propagate=_make_propagate(project, parsed, symbols),
 		should_stop=stop_file.exists,
 		log=_make_logger(log_path),
 	)

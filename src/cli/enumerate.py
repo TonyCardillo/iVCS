@@ -71,7 +71,7 @@ def _run(args) -> int:
 	print(
 		f"enumerated {len(functions)} functions, {total_bytes:,} bytes "
 		f"(min={sizes[0] if sizes else 0}, "
-		f"median={sizes[len(sizes) // 2] if sizes else 0}, "
+		f"mid={sizes[len(sizes) // 2] if sizes else 0}, "
 		f"max={sizes[-1] if sizes else 0})",
 		file=sys.stderr,
 	)
