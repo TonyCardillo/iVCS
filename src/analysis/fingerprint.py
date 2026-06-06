@@ -150,13 +150,22 @@ def _levenshtein_bounded(a: tuple[int, ...], b: tuple[int, ...], bound: int) -> 
 	return previous[-1]
 
 
+# The top of the [0, 1] scale is a reserved band so structural identity is always
+# distinguishable from a mere near-match: 1.0 is byte-identical, _STRUCTURAL_IDENTITY
+# is opcode-identical (bytes differ), and every genuine near-match is clamped to at
+# most _NEAR_MATCH_CEILING — strictly below — so it can never collide with the
+# sentinel on very long sequences (where a one-opcode edit can compute to 0.9999).
+_STRUCTURAL_IDENTITY = 0.9999
+_NEAR_MATCH_CEILING = 0.9998
+
+
 def fingerprint_similarity(a: Fingerprint, b: Fingerprint, *, threshold: float = 0.0) -> float:
 	"""Opcode-sequence similarity in [0, 1] (coddog's `diff_symbols`).
 
 	Edit distance over the opcode ids, normalized by the summed length. A length
 	gap that can't beat `threshold` short-circuits to 0; an exact opcode match on
-	functions whose raw bytes differ returns 0.9999 (structurally identical, not
-	byte-identical).
+	functions whose raw bytes differ returns _STRUCTURAL_IDENTITY (structurally
+	identical, not byte-identical), a band genuine near-matches never reach.
 	"""
 	l1, l2 = len(a.opcodes), len(b.opcodes)
 	max_edit = float(l1 + l2)
@@ -171,9 +180,15 @@ def fingerprint_similarity(a: Fingerprint, b: Fingerprint, *, threshold: float =
 		return 0.0
 
 	normalized = (max_edit - distance) / max_edit
-	if normalized == 1.0 and a.exact_hash != b.exact_hash:
-		return 0.9999
-	return normalized
+	if distance == 0:
+		# Identical opcode sequence: a perfect 1.0 only when the raw bytes match
+		# too; an immediate-only difference ranks just below, in a band reserved
+		# for structural identity.
+		return 1.0 if a.exact_hash == b.exact_hash else _STRUCTURAL_IDENTITY
+	# A genuine near-match must stay strictly below the reserved band: over very
+	# long opcode sequences a one-opcode edit can compute to exactly 0.9999 and
+	# would otherwise be indistinguishable from an opcode-identical pair.
+	return min(normalized, _NEAR_MATCH_CEILING)
 
 
 def fingerprints_similar_to(

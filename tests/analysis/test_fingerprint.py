@@ -85,6 +85,27 @@ class TestSimilarity:
 		b = _fp("b", 0x2000, RET)
 		assert fingerprint_similarity(a, b, threshold=0.9) == 0.0
 
+	def test_near_match_cannot_reach_structural_identity_band(self, monkeypatch):
+		# A genuine near-match over long opcode sequences can compute normalized
+		# == 0.9999, colliding with the structural-identity sentinel. It must be
+		# clamped strictly below that reserved band. (Levenshtein is stubbed so the
+		# 5000-long DP doesn't run; only the score arithmetic is under test.)
+		import src.analysis.fingerprint as fpmod
+
+		monkeypatch.setattr(fpmod, "_levenshtein_bounded", lambda a, b, bound: 1)
+		opcodes_a = tuple([7] * 5000)  # max_edit = 10000 → (10000-1)/10000 == 0.9999
+		opcodes_b = tuple([7] * 5000)
+		a = Fingerprint(
+			"a", 0x1000, 0, exact_hash=1, opcode_hash=9, equiv_hash=9, opcodes=opcodes_a
+		)
+		b = Fingerprint(
+			"b", 0x2000, 0, exact_hash=2, opcode_hash=9, equiv_hash=9, opcodes=opcodes_b
+		)
+
+		score = fpmod.fingerprint_similarity(a, b)
+		assert score < fpmod._STRUCTURAL_IDENTITY  # a near-match never enters the reserved band
+		assert score == fpmod._NEAR_MATCH_CEILING
+
 
 class TestClustering:
 	def test_groups_equal_opcode_hash(self):
