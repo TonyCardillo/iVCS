@@ -44,6 +44,18 @@ class TestMalformedReloc:
 		with pytest.raises(RelinkError):
 			relink_place(obj, 0x00400000, lambda n: 0x00410000)
 
+	def test_reloc_symbol_index_not_in_slot_table_raises_relink_error_example(self):
+		# symbol_by_slot is sparse (aux records skip slots). A reloc pointing at
+		# a missing/out-of-range slot must raise RelinkError, not the bare KeyError
+		# that symbol_by_slot[slot] would otherwise emit — otherwise it escapes the
+		# splice verifier's per-function catch and aborts the whole image-verify loop.
+		text = b"\xe8\x00\x00\x00\x00\xc3"
+		relocs = [CoffReloc(offset=1, symbol_index=7, type=IMAGE_REL_I386_REL32)]
+		symbols = {0: _extern(".text"), 1: _extern("_fn_00410000")}
+		obj = _obj(text, relocs, symbols)
+		with pytest.raises(RelinkError):
+			relink_place(obj, 0x00400000, lambda n: 0x00410000)
+
 
 class TestNoRelocations:
 	def test_text_unchanged(self):

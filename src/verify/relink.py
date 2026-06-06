@@ -43,6 +43,8 @@ def relink_place(obj: CoffObject, placement_va: int, resolve: SymbolVaResolve) -
 			raise RelinkError(
 				f"relocation field at offset {reloc.offset} runs past .text ({len(buf)} bytes)"
 			)
+		if reloc.symbol_index not in obj.symbol_by_slot:
+			raise RelinkError(f"relocation references unknown symbol slot {reloc.symbol_index}")
 		symbol = obj.symbol_at(reloc.symbol_index)
 		addend = struct.unpack_from("<i", buf, reloc.offset)[0]
 
