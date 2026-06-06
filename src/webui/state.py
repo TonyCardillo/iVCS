@@ -49,8 +49,31 @@ def _register_job(job: JobInfo) -> None:
 		_JOBS[job.workspace_path.resolve()] = job
 
 
+def _unregister_job(workspace_path: Path) -> None:
+	with _JOBS_LOCK:
+		_JOBS.pop(workspace_path.resolve(), None)
+
+
 class JobsAtCapacity(Exception):
 	"""Raised when launching would exceed IVCS_MAX_CONCURRENT_JOBS."""
+
+
+def job_admit(job: JobInfo) -> None:
+	"""Atomically reserve a slot for `job`: under one lock, enforce the per-workspace
+	and concurrency-cap guards and register it. Raises (leaving the registry
+	untouched) if a job already runs for this workspace or the cap is reached.
+
+	Spawning the worker happens only after this returns, so collapsing the
+	check and the register into one critical section stops two concurrent submits
+	from both passing the guard and racing on one workspace's files."""
+	key = job.workspace_path.resolve()
+	with _JOBS_LOCK:
+		existing = _JOBS.get(key)
+		if existing is not None and existing.is_active():
+			raise RuntimeError(f"already running for this workspace (state={existing.state})")
+		if sum(1 for j in _JOBS.values() if j.is_active()) >= _MAX_CONCURRENT_JOBS:
+			raise JobsAtCapacity(f"{_MAX_CONCURRENT_JOBS} concurrent jobs already running")
+		_JOBS[key] = job
 
 
 @dataclass
@@ -93,6 +116,20 @@ def _register_sweep(sweep: SweepState) -> None:
 		_SWEEPS[sweep.project_path] = sweep
 
 
+def sweep_register_if_idle(sweep: SweepState) -> SweepState:
+	"""Atomically register `sweep` unless an active sweep already owns its project.
+
+	Returns whichever sweep holds the slot: `sweep` if it won the race, else the
+	live incumbent. Callers spawn the worker thread only when they get their own
+	back, so concurrent launches for one project yield a single worker."""
+	with _SWEEPS_LOCK:
+		existing = _SWEEPS.get(sweep.project_path)
+		if existing is not None and existing.is_active():
+			return existing
+		_SWEEPS[sweep.project_path] = sweep
+		return sweep
+
+
 def _active_workspace_paths() -> set[Path]:
 	"""Resolved workspace dirs with a live per-function job — the sweep skips
 	these so it never races another writer on the same function's files."""
@@ -131,3 +168,16 @@ def _verify_for(project_path_str: str) -> VerifyState | None:
 def _register_verify(verify: VerifyState) -> None:
 	with _VERIFIES_LOCK:
 		_VERIFIES[verify.project_path] = verify
+
+
+def verify_register_if_idle(verify: VerifyState) -> VerifyState:
+	"""Atomically register `verify` unless an active verify already owns its project.
+
+	Returns whichever verify holds the slot: `verify` if it won, else the live
+	incumbent — the caller spawns a worker only for its own."""
+	with _VERIFIES_LOCK:
+		existing = _VERIFIES.get(verify.project_path)
+		if existing is not None and existing.is_active():
+			return existing
+		_VERIFIES[verify.project_path] = verify
+		return verify

@@ -112,7 +112,10 @@ src/
     inline_asm.py     Inline-asm budget guard (blocks transcription to __asm)
   verify/           Relink, compare, integrate
     relink.py         One-function linker (place a compiled obj at its real VA)
-    integrator.py     Segment model + commit matched C into the source tree + coverage
+    segments.py       Segment model: group functions by XBE section; source paths
+    commit.py         Commit matched best.c into the segment-organized source tree
+    coverage.py       Per-segment + whole-image byte coverage reporting
+    splice_verify.py  Recompile→relink→byte-compare vs. the image + the verify cache
   analysis/         Naming / dedup / annotations
     fingerprint.py    x86 structural index: hashes, cluster, similarity
     libmatch.py       Match the image against XDK library signatures to name SDK code

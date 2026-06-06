@@ -12,10 +12,8 @@ from src.core.project import (
 	project_aggregate,
 	project_load,
 )
-from src.verify.integrator import (
-	image_coverage,
-	image_verify_cache_load,
-)
+from src.verify.coverage import image_coverage
+from src.verify.splice_verify import image_verify_cache_load
 from src.webui.state import (
 	_verify_for,
 	xbe_cached_load,
@@ -92,7 +90,7 @@ def _verify_panel(project_path_str: str) -> tuple[str, bool]:
 		)
 		body = (
 			'<div class="run-banner sweeping">'
-			f'{badge("pending", "VERIFYING")}'
+			f"{badge('pending', 'VERIFYING')}"
 			f'<span class="sweep-counts">{job.done}/{job.total} matched functions · '
 			f"splice</span>{current}</div>"
 			f"{sweep_bar(pct)}"

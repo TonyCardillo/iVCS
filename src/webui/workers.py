@@ -7,6 +7,7 @@ import os
 import sys
 import threading
 import time
+import traceback
 from urllib.parse import quote
 
 from src.analysis.strings_xref import (
@@ -31,23 +32,21 @@ from src.drivers.sweep import (
 	sweep_queue,
 	sweep_run,
 )
-from src.verify.integrator import (
+from src.verify.splice_verify import (
 	image_splice_verify,
 	image_verify_cache_write,
 )
 from src.webui.state import (
-	_MAX_CONCURRENT_JOBS,
-	JobsAtCapacity,
 	SweepState,
 	VerifyState,
-	_active_jobs,
 	_active_workspace_paths,
-	_job_for,
 	_register_job,
-	_register_sweep,
-	_register_verify,
 	_sweep_for,
+	_unregister_job,
 	_verify_for,
+	job_admit,
+	sweep_register_if_idle,
+	verify_register_if_idle,
 	xbe_cached_load,
 )
 from src.webui.views_progress import _sdk_vas_for
@@ -57,18 +56,11 @@ def launch_job_from_form(
 	project_path_str: str, va_str: str, form: dict[str, str]
 ) -> tuple[str, JobInfo]:
 	"""Validate caps and form fields, then spawn a job. Returns (redirect_url, job)."""
-	if len(_active_jobs()) >= _MAX_CONCURRENT_JOBS:
-		raise JobsAtCapacity(f"{_MAX_CONCURRENT_JOBS} concurrent jobs already running")
-
 	project = project_load(project_path_str)
 	va = int(va_str, 0)
 	fn = next((f for f in project.functions if f.va == va), None)
 	if fn is None:
 		raise ValueError(f"function VA {va:#x} not in {project.name}")
-
-	existing_job = _job_for(project.workspace_for(fn))
-	if existing_job and existing_job.is_active():
-		raise RuntimeError(f"already running for this workspace (state={existing_job.state})")
 
 	model = form.get("model", "claude-haiku-4-5").strip() or "claude-haiku-4-5"
 	max_iter = max(1, min(50, int(form.get("max_iterations", "8") or "8")))
@@ -77,20 +69,39 @@ def launch_job_from_form(
 	reset_ctx = form.get("reset_ctx_h", "").lower() in ("1", "on", "true", "yes")
 	use_ghidra = form.get("use_ghidra_warmstart", "").lower() in ("1", "on", "true", "yes")
 
-	parsed = xbe_cached_load(str(project.xbe_path))
-	symbols = symbol_map_load(project_path_str)
-	job = launch_decomp_job(
-		project,
-		fn,
+	# Reserve the slot atomically before launching: launch_decomp_job starts the
+	# worker thread, so the cap/per-workspace guard must win first. A pending
+	# JobInfo holds the slot until the live job replaces it; on launch failure we
+	# release it so a wedged attempt doesn't permanently block the workspace.
+	pending = JobInfo(
+		workspace_path=project.workspace_for(fn),
+		function_name=fn.name,
+		va=fn.va,
+		size=fn.size,
 		model=model,
 		max_iterations=max_iter,
 		hard_timeout_seconds=timeout,
-		parsed_xbe=parsed,
-		wipe_history=wipe,
-		reset_ctx_h=reset_ctx,
-		use_ghidra_warmstart=use_ghidra,
-		label_for=symbols.label_for,
 	)
+	job_admit(pending)
+
+	try:
+		parsed = xbe_cached_load(str(project.xbe_path))
+		symbols = symbol_map_load(project_path_str)
+		job = launch_decomp_job(
+			project,
+			fn,
+			model=model,
+			max_iterations=max_iter,
+			hard_timeout_seconds=timeout,
+			parsed_xbe=parsed,
+			wipe_history=wipe,
+			reset_ctx_h=reset_ctx,
+			use_ghidra_warmstart=use_ghidra,
+			label_for=symbols.label_for,
+		)
+	except BaseException:
+		_unregister_job(pending.workspace_path)
+		raise
 	_register_job(job)
 	redirect = f"/decomp/run?root={quote(str(job.workspace_path))}&path={quote(project_path_str)}"
 	return redirect, job
@@ -125,7 +136,9 @@ def sweep_launch(project_path_str: str) -> SweepState:
 		project_name=project.name,
 		total=len(queue),
 	)
-	_register_sweep(state)
+	registered = sweep_register_if_idle(state)
+	if registered is not state:
+		return registered  # lost the race: another launch is already sweeping this project
 
 	parsed = xbe_cached_load(str(project.xbe_path))
 	symbols = symbol_map_load(project_path_str)
@@ -157,7 +170,10 @@ def sweep_launch(project_path_str: str) -> SweepState:
 				log=log,
 			)
 			state.state = "stopped" if state.stop_requested else "done"
-		except Exception as e:  # noqa: BLE001 — surface any orchestration failure
+		except Exception as e:  # noqa: BLE001 — a worker thread must not die; report to the UI
+			# Log the traceback so a real bug isn't invisible behind the one-line state.error.
+			sys.stderr.write(f"[sweep] orchestration failed: {type(e).__name__}: {e}\n")
+			traceback.print_exc()
 			state.error = f"{type(e).__name__}: {e}"
 			state.state = "error"
 		finally:
@@ -228,7 +244,9 @@ def verify_launch(project_path_str: str) -> VerifyState:
 	total = sum(1 for s in stats.function_statuses if s.state == "matched")
 
 	state = VerifyState(project_path=project_path_str, total=total)
-	_register_verify(state)
+	registered = verify_register_if_idle(state)
+	if registered is not state:
+		return registered  # lost the race: another launch is already verifying this project
 
 	def on_result(fv) -> None:
 		state.done += 1
@@ -240,7 +258,10 @@ def verify_launch(project_path_str: str) -> VerifyState:
 			result = image_splice_verify(project, parsed, on_result=on_result)
 			image_verify_cache_write(project_path_str, result, when=time.time())
 			state.state = "done"
-		except Exception as e:  # noqa: BLE001 — surface any failure to the UI
+		except Exception as e:  # noqa: BLE001 — a worker thread must not die; report to the UI
+			# Log the traceback so a real bug isn't invisible behind the one-line state.error.
+			sys.stderr.write(f"[verify] failed: {type(e).__name__}: {e}\n")
+			traceback.print_exc()
 			state.error = f"{type(e).__name__}: {e}"
 			state.state = "error"
 		finally:

@@ -1,4 +1,4 @@
-"""Tests for whole-image byte-splice verification (integrator Phase 4).
+"""Tests for whole-image byte-splice verification (src.verify.splice_verify).
 
 A data-backed ParsedXbe carries the original image bytes; a fake compiler emits
 a real COFF object (via the writer) so the reader + relocator run end-to-end
@@ -15,7 +15,7 @@ from src.core.workspace import FunctionWorkspace
 from src.formats.coff import coff_object_build
 from src.formats.relocs import RelocKind, RelocSite, ResolvedReloc
 from src.formats.xbe import SECTION_FLAG_EXECUTABLE, ParsedXbe, XbeHeader, XbeSection
-from src.verify.integrator import image_splice_verify
+from src.verify.splice_verify import image_splice_verify
 
 TEXT_VA = 0x00011000
 

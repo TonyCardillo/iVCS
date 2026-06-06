@@ -3,8 +3,9 @@
 `report` prints per-segment matched / committed coverage. `commit` promotes
 matched functions' best.c into <src_root>/<section>/<name>.c. `verify` recompiles
 each matched function, relocates it with our own relocator, and byte-compares
-against the original image (needs Wine + the toolchain). All the verbs live in
-src.verify.integrator; this module is argument plumbing + printing.
+against the original image (needs Wine + the toolchain). The verbs live in
+src.verify (commit / coverage / splice_verify); this module is argument plumbing
++ printing.
 """
 
 from __future__ import annotations
@@ -17,12 +18,9 @@ from pathlib import Path
 
 from src.cli._common import project_xbe_load
 from src.core.project import function_status, project_sdk_vas
-from src.verify.integrator import (
-	image_splice_verify,
-	image_verify_cache_write,
-	integrate_commit,
-	project_coverage,
-)
+from src.verify.commit import integrate_commit
+from src.verify.coverage import project_coverage
+from src.verify.splice_verify import image_splice_verify, image_verify_cache_write
 
 
 def add_parser(subparsers) -> None:
