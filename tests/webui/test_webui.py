@@ -1,5 +1,6 @@
 """Tests for the few pure helpers in src/webui/."""
 
+import html
 import os
 import re
 import subprocess
@@ -17,6 +18,7 @@ import src.webui as webui
 from src.analysis.notes import notes_load  # noqa: E402
 from src.analysis.symbols import symbol_map_load  # noqa: E402
 from src.core.project import ProjectStats  # noqa: E402
+from src.drivers.launcher import JobInfo  # noqa: E402
 from src.webui import (
 	SweepState,
 	_attempt_model_label,
@@ -37,8 +39,18 @@ from src.webui import (
 	_va_from_workspace,
 )
 from src.webui import state as webui_state
+from src.webui.server import _is_post_origin_allowed  # noqa: E402
+from src.webui.state import (  # noqa: E402
+	_MAX_CONCURRENT_JOBS,
+	JobsAtCapacity,
+	VerifyState,
+	job_admit,
+	sweep_register_if_idle,
+	verify_register_if_idle,
+)
 from src.webui.templates import badge, sweep_bar  # noqa: E402
-from src.webui.views_decomp import _symbol_notes_panel  # noqa: E402
+from src.webui.views_decomp import _string_hints_html, _symbol_notes_panel  # noqa: E402
+from src.webui.views_index import _discover_projects  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -221,6 +233,46 @@ def test_project_crumb_uses_project_name(tmp_path):
 	# Label is the project name; href links to the (quoted) manifest path, not the name.
 	assert href == f"/progress?path={quote(str(manifest))}"
 	assert "halo2-retail" not in href
+
+
+def test_project_crumb_propagates_unexpected_error(tmp_path, monkeypatch):
+	# The graceful fallback is for malformed/missing manifests (OSError/ValueError/
+	# KeyError). A programming bug (TypeError from a refactor) must NOT be swallowed
+	# into a silent 'workspace' breadcrumb — it should surface, not hide.
+	manifest = tmp_path / "project.json"
+	manifest.write_text("{}")
+
+	def boom(_path):
+		raise TypeError("bug in project_load")
+
+	monkeypatch.setattr("src.webui.views_decomp.project_load", boom)
+	with pytest.raises(TypeError):
+		_project_crumb(str(manifest))
+
+
+def test_string_hints_propagates_unexpected_error(tmp_path, monkeypatch):
+	manifest = tmp_path / "project.json"
+	manifest.write_text("{}")
+
+	def boom(_path):
+		raise TypeError("bug in project_load")
+
+	monkeypatch.setattr("src.webui.views_decomp.project_load", boom)
+	with pytest.raises(TypeError):
+		_string_hints_html(tmp_path, str(manifest), 0x1000)
+
+
+def test_discover_projects_propagates_unexpected_error(tmp_path, monkeypatch):
+	(tmp_path / "projects" / "p").mkdir(parents=True)
+	(tmp_path / "projects" / "p" / "project.json").write_text("{}")
+	monkeypatch.setattr("src.webui.views_index.REPO_ROOT", tmp_path)
+
+	def boom(_path):
+		raise TypeError("bug in project_load")
+
+	monkeypatch.setattr("src.webui.views_index.project_load", boom)
+	with pytest.raises(TypeError):
+		_discover_projects()
 
 
 def test_symbol_notes_panel_title_escaped_exactly_once(tmp_path):
@@ -494,6 +546,94 @@ class TestBadge:
 		# Centralizing the escape is half the point of the helper.
 		assert badge("failed", "<x>&") == '<span class="badge failed">&lt;x&gt;&amp;</span>'
 
+	@given(text=st.text())
+	def test_badge_text_is_always_html_escaped_oracle(self, text):
+		# The security-relevant invariant the example only spot-checks: for ANY text,
+		# the badge's inner content is exactly html.escape(text) (the oracle), so no
+		# input can break out of the <span> and inject markup.
+		prefix, suffix = '<span class="badge x">', "</span>"
+		out = badge("x", text)
+		assert out.startswith(prefix) and out.endswith(suffix)
+		inner = out[len(prefix) : -len(suffix)]
+		assert inner == html.escape(text)
+		# Concretely: a tag delimiter from `text` can never survive into the markup.
+		assert "<" not in inner and ">" not in inner
+
+
+class TestPostOriginAllowed:
+	# State-changing POSTs must refuse browser CSRF: a cross-origin fetch/form-POST
+	# carries the attacker page's Origin and is rejected; same-origin and
+	# non-browser (no-Origin) requests are allowed.
+	def test_same_origin_allowed(self):
+		assert _is_post_origin_allowed("http://127.0.0.1:8765", "127.0.0.1:8765") is True
+
+	def test_localhost_same_origin_allowed(self):
+		assert _is_post_origin_allowed("http://localhost:8765", "localhost:8765") is True
+
+	def test_cross_origin_refused(self):
+		assert _is_post_origin_allowed("https://evil.example", "127.0.0.1:8765") is False
+
+	def test_origin_host_mismatch_refused(self):
+		# Same scheme, different port/host is still cross-origin.
+		assert _is_post_origin_allowed("http://127.0.0.1:9999", "127.0.0.1:8765") is False
+
+	def test_absent_origin_allowed(self):
+		# curl / same-origin navigations omit Origin; a browser CSRF attack cannot.
+		assert _is_post_origin_allowed(None, "127.0.0.1:8765") is True
+
+
+class TestStylesheet:
+	def test_page_links_external_stylesheet_not_inline(self):
+		# The CSS is served once via /static/app.css instead of being re-sent inline
+		# in every page's <head>.
+		from src.webui.templates import page
+
+		out = page("t", "<p>hi</p>", current_path=None)
+		assert '<link rel="stylesheet" href="/static/app.css">' in out
+		assert "<style>" not in out
+
+	def test_static_css_file_exists_with_real_rules(self):
+		from src.webui.styles import APP_CSS_PATH
+
+		text = APP_CSS_PATH.read_text()
+		assert ":root" in text and ".badge" in text
+
+	def test_route_serves_css_with_etag_then_304(self):
+		# End-to-end: the route returns text/css + an ETag, and a conditional
+		# re-request revalidates to a bodyless 304 (the bandwidth win).
+		import urllib.request
+		from http.server import ThreadingHTTPServer
+		from urllib.error import HTTPError
+
+		from src.webui.server import _APP_CSS_BYTES, Handler
+		from src.webui.styles import APP_CSS_HREF
+
+		srv = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+		port = srv.server_address[1]
+		thread = threading.Thread(target=srv.serve_forever, daemon=True)
+		thread.start()
+		try:
+			url = f"http://127.0.0.1:{port}{APP_CSS_HREF}"
+			with urllib.request.urlopen(url, timeout=5) as r:  # noqa: S310 — hardcoded loopback URL
+				assert r.status == 200
+				assert r.headers["Content-Type"] == "text/css; charset=utf-8"
+				etag = r.headers["ETag"]
+				body = r.read()
+			assert etag and body == _APP_CSS_BYTES
+
+			req = urllib.request.Request(url, headers={"If-None-Match": etag})  # noqa: S310 — loopback
+			try:
+				with urllib.request.urlopen(req, timeout=5) as r2:  # noqa: S310 — loopback URL
+					status, body2 = r2.status, r2.read()
+			except HTTPError as e:  # urllib raises on 304 (no cached entry to return)
+				status, body2 = e.code, e.read()
+			assert status == 304
+			assert body2 == b""
+		finally:
+			srv.shutdown()
+			srv.server_close()
+			thread.join(timeout=5)
+
 
 class TestSweepBar:
 	def test_formats_width_one_decimal_example(self):
@@ -534,3 +674,112 @@ class TestXbeCachedLoad:
 
 		assert len(calls) == 1  # parsed exactly once despite the stampede
 		assert len({id(r) for r in results}) == 1  # every caller got the same instance
+
+
+def _job(ws: str, state: str = "pending") -> JobInfo:
+	return JobInfo(
+		workspace_path=Path(ws),
+		function_name=Path(ws).name,
+		va=0x1000,
+		size=16,
+		model="m",
+		max_iterations=8,
+		hard_timeout_seconds=300.0,
+		state=state,
+	)
+
+
+class TestSweepRegisterIfIdle:
+	def test_registers_when_absent(self):
+		s = SweepState(project_path="/p/a.json", project_name="a", total=3)
+		assert sweep_register_if_idle(s) is s
+		assert webui_state._SWEEPS["/p/a.json"] is s
+
+	def test_returns_incumbent_when_active(self):
+		first = sweep_register_if_idle(
+			SweepState(project_path="/p/b.json", project_name="b", total=3)
+		)
+		second = SweepState(project_path="/p/b.json", project_name="b", total=9)
+		assert sweep_register_if_idle(second) is first  # loser gets the incumbent
+		assert webui_state._SWEEPS["/p/b.json"] is first  # registry unchanged
+
+	def test_replaces_stale_finished_sweep(self):
+		done = SweepState(project_path="/p/c.json", project_name="c", total=3, state="done")
+		sweep_register_if_idle(done)
+		fresh = SweepState(project_path="/p/c.json", project_name="c", total=3)
+		assert sweep_register_if_idle(fresh) is fresh  # a finished sweep can be relaunched
+
+	def test_exactly_one_winner_under_concurrent_launch_invariant(self):
+		# The race the fix closes: N double-clicks on Launch must yield ONE sweep
+		# thread, not N. Each thread tries to register its own state for one project;
+		# exactly one must win so only that caller spawns a worker.
+		n = 24
+		barrier = threading.Barrier(n)
+		states = [
+			SweepState(project_path="/p/race.json", project_name="r", total=i) for i in range(n)
+		]
+		winners: list[SweepState] = [None] * n
+
+		def worker(i: int) -> None:
+			barrier.wait()
+			winners[i] = sweep_register_if_idle(states[i])
+
+		threads = [threading.Thread(target=worker, args=(i,)) for i in range(n)]
+		for t in threads:
+			t.start()
+		for t in threads:
+			t.join()
+
+		assert len({id(w) for w in winners}) == 1  # every caller agrees on one owner
+		assert sum(1 for s in states if winners[0] is s) == 1  # exactly one state won
+
+
+class TestVerifyRegisterIfIdle:
+	def test_registers_when_absent(self):
+		v = VerifyState(project_path="/p/v.json", total=5)
+		assert verify_register_if_idle(v) is v
+
+	def test_returns_incumbent_when_active(self):
+		first = verify_register_if_idle(VerifyState(project_path="/p/w.json", total=5))
+		assert verify_register_if_idle(VerifyState(project_path="/p/w.json", total=9)) is first
+
+
+class TestJobAdmit:
+	def test_registers_when_under_cap_and_workspace_idle(self):
+		job = _job("/ws/fn_1")
+		job_admit(job)
+		assert webui_state._JOBS[Path("/ws/fn_1").resolve()] is job
+
+	def test_raises_when_workspace_already_active(self):
+		job_admit(_job("/ws/fn_2"))
+		with pytest.raises(RuntimeError, match="already running"):
+			job_admit(_job("/ws/fn_2"))
+
+	def test_raises_at_capacity(self):
+		for i in range(_MAX_CONCURRENT_JOBS):
+			job_admit(_job(f"/ws/cap_{i}"))
+		with pytest.raises(JobsAtCapacity):
+			job_admit(_job("/ws/one_too_many"))
+
+	def test_exactly_one_winner_for_same_workspace_under_concurrency_invariant(self):
+		# Two rapid submits for the SAME function must not both spawn a worker that
+		# carves/writes the same workspace files. Exactly one job_admit may succeed.
+		n = 16
+		barrier = threading.Barrier(n)
+		outcomes: list[bool] = [False] * n
+
+		def worker(i: int) -> None:
+			barrier.wait()
+			try:
+				job_admit(_job("/ws/same"))
+				outcomes[i] = True
+			except RuntimeError, JobsAtCapacity:
+				outcomes[i] = False
+
+		threads = [threading.Thread(target=worker, args=(i,)) for i in range(n)]
+		for t in threads:
+			t.start()
+		for t in threads:
+			t.join()
+
+		assert sum(outcomes) == 1  # only one submit won the workspace

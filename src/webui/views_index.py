@@ -63,6 +63,7 @@ def _discover_projects() -> list[tuple[str, str, int]]:
 		try:
 			project = project_load(manifest)
 			found.append((str(manifest), project.name, len(project.functions)))
-		except Exception:  # noqa: BLE001, S112 — malformed manifests just get skipped
+		except OSError, ValueError, KeyError:
+			# A malformed manifest is skipped; a programming bug is left to surface.
 			continue
 	return found

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sys
 import traceback
@@ -18,6 +19,7 @@ from urllib.parse import (
 
 from src.formats.xbe import XbeFormatError
 from src.webui.state import JobsAtCapacity
+from src.webui.styles import APP_CSS_HREF, APP_CSS_PATH
 from src.webui.templates import view_error
 from src.webui.views_decomp import (
 	view_decomp_attempt,
@@ -42,6 +44,25 @@ from src.webui.workers import (
 	verify_launch,
 )
 
+# The stylesheet is static for the life of the process, so read it (and its ETag)
+# once at startup and serve from memory — no per-request disk I/O.
+_APP_CSS_BYTES = APP_CSS_PATH.read_bytes()
+_APP_CSS_ETAG = f'"{hashlib.sha256(_APP_CSS_BYTES).hexdigest()[:16]}"'
+
+
+def _is_post_origin_allowed(origin: str | None, host: str) -> bool:
+	"""Whether a state-changing POST may proceed (CSRF guard for the local UI).
+
+	The UI is same-origin, so when the browser sends an Origin it must equal our
+	own http://<Host>; a cross-site fetch/form-POST from another page carries that
+	page's Origin and is refused. A request with no Origin (same-origin form
+	navigations, curl) is allowed — a browser CSRF attack cannot suppress Origin,
+	and a local non-browser client is outside the threat model for a loopback app.
+	"""
+	if origin is None:
+		return True
+	return origin == f"http://{host}"
+
 
 class Handler(BaseHTTPRequestHandler):
 	def log_message(self, _fmt, *_args):
@@ -55,6 +76,11 @@ class Handler(BaseHTTPRequestHandler):
 		length = int(self.headers.get("Content-Length", "0") or "0")
 		raw = self.rfile.read(length).decode("utf-8") if length else ""
 		form = {k: v[0] for k, v in parse_qs(raw).items()}
+
+		# Refuse browser CSRF before mutating anything (the body is already drained).
+		if not _is_post_origin_allowed(self.headers.get("Origin"), self.headers.get("Host", "")):
+			self._send(403, view_error("cross-origin POST refused"))
+			return
 
 		try:
 			if route == "/decomp/launch":
@@ -143,6 +169,9 @@ class Handler(BaseHTTPRequestHandler):
 					html_out = view_progress_index(current_path=None)
 				else:
 					html_out = view_stats(project_path)
+			elif route == APP_CSS_HREF:
+				self._send_app_css()
+				return
 			elif route == "/healthz":
 				self._send_json(200, {"ok": True})
 				return
@@ -164,6 +193,22 @@ class Handler(BaseHTTPRequestHandler):
 		self.send_header("Content-Length", str(len(encoded)))
 		self.end_headers()
 		self.wfile.write(encoded)
+
+	def _send_app_css(self) -> None:
+		"""Serve the stylesheet with an ETag so the browser revalidates cheaply: a
+		304 (empty body) replaces re-sending the whole sheet on every page load."""
+		if self.headers.get("If-None-Match") == _APP_CSS_ETAG:
+			self.send_response(304)
+			self.send_header("ETag", _APP_CSS_ETAG)
+			self.end_headers()
+			return
+		self.send_response(200)
+		self.send_header("Content-Type", "text/css; charset=utf-8")
+		self.send_header("Content-Length", str(len(_APP_CSS_BYTES)))
+		self.send_header("ETag", _APP_CSS_ETAG)
+		self.send_header("Cache-Control", "no-cache")
+		self.end_headers()
+		self.wfile.write(_APP_CSS_BYTES)
 
 	def _send_500(self) -> None:
 		"""Log the traceback server-side; show the client a generic message so no

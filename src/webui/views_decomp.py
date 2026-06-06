@@ -55,7 +55,9 @@ def _project_crumb(current_path: str | None) -> tuple[str, str | None]:
 		try:
 			project = project_load(current_path)
 			return (project.name, f"/progress?path={quote(current_path)}")
-		except Exception:  # noqa: BLE001, S110 — malformed/missing manifest falls back gracefully
+		except OSError, ValueError, KeyError:
+			# A malformed/missing manifest falls back gracefully; a programming
+			# bug (AttributeError/TypeError) is left to surface, not swallowed.
 			pass
 	return ("workspace", None)
 
@@ -168,7 +170,9 @@ def _string_hints_html(root: Path, current_path: str | None, va: int | None) -> 
 			return ""
 		parsed = xbe_cached_load(str(project.xbe_path))
 		refs = function_string_refs(parsed, fn.va, fn.size)
-	except Exception:  # noqa: BLE001 — hints are best-effort; never break the page
+	except OSError, ValueError, KeyError:
+		# Hints are best-effort for a malformed/missing manifest or XBE; a real
+		# programming bug is left to surface rather than silently blanking the panel.
 		return ""
 	if not refs:
 		return ""
@@ -254,9 +258,7 @@ def view_decomp_run(root_str: str, current_path: str | None) -> str:
 			mp = a["match_percent"]
 			cls = "" if mp > 0 else "zero"
 			mp_html = f'<span class="mp {cls}">{mp:.2f}%</span>'
-			status_html = (
-				badge("matched", "100%") if mp == 100.0 else badge("partial", "partial")
-			)
+			status_html = badge("matched", "100%") if mp == 100.0 else badge("partial", "partial")
 		ghidra_tag = (
 			'<span class="badge partial" title="Ghidra warm-start baseline">ghidra</span>'
 			if a["n"] == 0
@@ -298,7 +300,7 @@ def view_decomp_run(root_str: str, current_path: str | None) -> str:
 			)
 			banner = (
 				f'<div class="run-banner running">'
-				f'{badge("pending", job.state.upper())}'
+				f"{badge('pending', job.state.upper())}"
 				f'<span>iter <span class="amber">{job.iterations_completed}</span>/{job.max_iterations}'
 				f" · elapsed {elapsed}s / {int(job.hard_timeout_seconds)}s"
 				f' · model <span class="cyan">{html.escape(job.model)}</span></span>'
@@ -308,7 +310,7 @@ def view_decomp_run(root_str: str, current_path: str | None) -> str:
 		elif job.state == "error":
 			banner = (
 				f'<div class="run-banner failed">'
-				f'{badge("failed", "ERROR")}'
+				f"{badge('failed', 'ERROR')}"
 				f'<span class="muted">{html.escape(job.error or "")}</span>'
 				f"</div>"
 			)
@@ -321,7 +323,7 @@ def view_decomp_run(root_str: str, current_path: str | None) -> str:
 			)
 			banner = (
 				f'<div class="run-banner done">'
-				f'{badge("matched", "FINISHED")}'
+				f"{badge('matched', 'FINISHED')}"
 				f'<span>reason <span class="amber">{html.escape(reason)}</span>'
 				f' · best <span class="green">{best_str}</span>'
 				f" · iter {job.iterations_completed}/{job.max_iterations}</span>"
@@ -509,7 +511,7 @@ def _interrupted_banner(root: Path, current_path: str | None) -> str:
 		resume = f'<a class="resume" href="{href}">resume run →</a>'
 	return (
 		'<div class="run-banner interrupted">'
-		f'{badge("failed", "INTERRUPTED")}'
+		f"{badge('failed', 'INTERRUPTED')}"
 		'<span class="muted">run stopped mid-flight (server restarted) · '
 		"attempts and best.c preserved on disk</span>"
 		f"{resume}"

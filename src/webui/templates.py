@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import html
 
-from src.webui.styles import CSS
+from src.webui.styles import APP_CSS_HREF
 
 
 def page(
@@ -48,7 +48,7 @@ def page(
 <html lang="en"><head>
 <meta charset="utf-8">
 <title>{html.escape(title)} · iVCS</title>
-<style>{CSS}</style>
+<link rel="stylesheet" href="{APP_CSS_HREF}">
 </head><body>
 <header>
   <div class="brand">◇ &nbsp;i&middot;V&middot;C&middot;S<span class="dot">●</span></div>
@@ -88,7 +88,9 @@ def badge(cls: str, text: str) -> str:
 
 def sweep_bar(pct: float) -> str:
 	"""The thin animated live-progress bar used by sweep/verify/autoname runs."""
-	return f'<div class="sweep-bar"><div class="sweep-bar-fill" style="width:{pct:.1f}%"></div></div>'
+	return (
+		f'<div class="sweep-bar"><div class="sweep-bar-fill" style="width:{pct:.1f}%"></div></div>'
+	)
 
 
 def _progress_bar(value: float | None) -> str:
