@@ -11,8 +11,10 @@ from __future__ import annotations
 
 import os
 import re
+import sys
 import threading
 import time
+import traceback
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -240,7 +242,12 @@ def launch_decomp_job(
 			job.best_match_percent = result.best_match_percent
 			job.termination_reason = result.termination_reason
 			job.state = "done"
-		except Exception as e:  # noqa: BLE001 — surface any failure to the UI
+		except Exception as e:  # noqa: BLE001 — a daemon thread must not die; report to the UI
+			# Log the traceback so a genuine bug (e.g. an AttributeError from a
+			# refactor) is visible in the server log, not just stashed as a
+			# one-line UI string indistinguishable from a model/compile failure.
+			sys.stderr.write(f"[decomp] {fn.name} failed: {type(e).__name__}: {e}\n")
+			traceback.print_exc()
 			job.error = f"{type(e).__name__}: {e}"
 			job.state = "error"
 
@@ -328,8 +335,6 @@ def _prepare_ghidra_warmstart(
 	normalization. On any GhidraError, logs and returns empties so the run
 	proceeds without struct context (or without the draft entirely).
 	"""
-	import sys
-
 	cfg = ghidra_config_from_env(project.xbe_path)
 	if not workspace.ghidra_warmstart.is_file():
 		try:
