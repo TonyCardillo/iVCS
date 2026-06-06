@@ -6,6 +6,7 @@ Defaults live in default_compile_fn / default_diff_fn and are
 exercised in the recon scripts, not here.
 """
 
+import subprocess
 from functools import partial
 from pathlib import Path
 
@@ -222,6 +223,67 @@ class TestCompileFailure:
 			diff_fn=counting_diff,
 		)
 		assert call_count["n"] == 0
+
+
+class TestSubprocessFailure:
+	"""A hung/crashed cl.exe or objdiff-cli must surface as a failed attempt the
+	loop can hill-climb past, not an exception that unwinds agent_loop_run and
+	loses the run's standing-best result before _finalize can write it."""
+
+	def _raise_timeout(self, *args, **kwargs):
+		raise subprocess.TimeoutExpired(cmd=["cl.exe"], timeout=60)
+
+	def _raise_called_process_error(self, *args, **kwargs):
+		raise subprocess.CalledProcessError(returncode=1, cmd=["objdiff-cli"], stderr="boom")
+
+	def test_compile_timeout_returns_failure_example(self, tmp_path):
+		ws = _make_workspace(tmp_path)
+		result = compile_and_view_assembly(
+			workspace=ws,
+			c_code="int f(void){return 0;}\n",
+			compile_fn=self._raise_timeout,
+			diff_fn=_fake_diff_match,
+		)
+		assert result.success is False
+		assert result.match_percent is None
+		assert result.error is not None
+		# The attempt is still persisted and counted, like any failed attempt.
+		assert ws.attempt_paths(result.attempt_number).c.is_file()
+
+	def test_compile_called_process_error_returns_failure_example(self, tmp_path):
+		# winepath runs with check=True inside default_compile_fn, so a winepath
+		# failure raises CalledProcessError out of the compile step.
+		ws = _make_workspace(tmp_path)
+		result = compile_and_view_assembly(
+			workspace=ws,
+			c_code="int f(void){return 0;}\n",
+			compile_fn=self._raise_called_process_error,
+			diff_fn=_fake_diff_match,
+		)
+		assert result.success is False
+		assert result.error is not None
+
+	def test_diff_timeout_returns_failure_example(self, tmp_path):
+		ws = _make_workspace(tmp_path)
+		result = compile_and_view_assembly(
+			workspace=ws,
+			c_code="int f(void){return 0;}\n",
+			compile_fn=_fake_compile_ok,
+			diff_fn=self._raise_timeout,
+		)
+		assert result.success is False
+		assert result.error is not None
+
+	def test_diff_called_process_error_returns_failure_example(self, tmp_path):
+		ws = _make_workspace(tmp_path)
+		result = compile_and_view_assembly(
+			workspace=ws,
+			c_code="int f(void){return 0;}\n",
+			compile_fn=_fake_compile_ok,
+			diff_fn=self._raise_called_process_error,
+		)
+		assert result.success is False
+		assert result.error is not None
 
 
 class TestSymbolNotInDiff:

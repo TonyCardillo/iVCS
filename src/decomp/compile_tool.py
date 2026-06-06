@@ -82,7 +82,14 @@ def compile_and_view_assembly(
 			asm_rejected=True,
 		)
 
-	compile_out = compile_fn(paths.c, paths.obj, workspace.root)
+	try:
+		compile_out = compile_fn(paths.c, paths.obj, workspace.root)
+	except (subprocess.TimeoutExpired, subprocess.CalledProcessError) as exc:
+		return CompileAndViewResult(
+			success=False,
+			attempt_number=attempt_n,
+			error=subprocess_error_format("cl.exe", exc),
+		)
 	if not compile_out.success:
 		return CompileAndViewResult(
 			success=False,
@@ -91,7 +98,14 @@ def compile_and_view_assembly(
 		)
 
 	obj_function_symbol_canonicalize(paths.obj, workspace.function_name)
-	diff_result = diff_fn(workspace.target_obj, paths.obj, workspace.function_name)
+	try:
+		diff_result = diff_fn(workspace.target_obj, paths.obj, workspace.function_name)
+	except (subprocess.TimeoutExpired, subprocess.CalledProcessError) as exc:
+		return CompileAndViewResult(
+			success=False,
+			attempt_number=attempt_n,
+			error=subprocess_error_format("objdiff-cli", exc),
+		)
 	match_percent = function_match_percent(diff_result, workspace.function_name)
 
 	return CompileAndViewResult(
@@ -213,6 +227,22 @@ def compile_error_format(out: CompileOutput) -> str:
 	if cleaned_stderr:
 		parts.append("--- stderr ---\n" + cleaned_stderr)
 	return "\n".join(parts) or "compile failed (no output)"
+
+
+def subprocess_error_format(tool: str, exc: subprocess.SubprocessError) -> str:
+	"""Render a hung/crashed compile or diff subprocess as an LLM-readable error.
+
+	A TimeoutExpired (cl.exe wedged under Wine) or CalledProcessError (objdiff-cli
+	exited non-zero) is mapped to a failed attempt so the agent loop hill-climbs
+	past it and _finalize still runs, rather than the exception unwinding the run.
+	"""
+	if isinstance(exc, subprocess.TimeoutExpired):
+		return f"{tool} timed out after {exc.timeout:g}s"
+	if isinstance(exc, subprocess.CalledProcessError):
+		stderr = (exc.stderr or "").strip() if isinstance(exc.stderr, str) else ""
+		detail = f": {stderr}" if stderr else ""
+		return f"{tool} exited {exc.returncode}{detail}"
+	return f"{tool} failed: {exc}"
 
 
 def _winepath(wine: str, unix_path: str) -> str:
