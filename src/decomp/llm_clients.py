@@ -12,6 +12,14 @@ import urllib.request
 from dataclasses import dataclass
 
 from litellm import completion as litellm_completion
+from openai import APIConnectionError
+
+from src.decomp.agent_loop import LLMClientError
+
+# A model call that hasn't responded in this long is treated as a dead socket, not
+# a slow think: long enough for a big reasoning response, short enough that a wedged
+# endpoint can't park an unattended batch worker forever.
+_DEFAULT_REQUEST_TIMEOUT_SECONDS = 240.0
 
 _LM_STUDIO_API_BASE = "http://127.0.0.1:1234/v1"
 # Last-resort fallback name when no IVCS_LLM_MODEL is set AND the server can't be
@@ -37,7 +45,7 @@ def _lm_studio_detect_loaded_model() -> str | None:
 		url = f"{_lm_studio_api_base()}/models"
 		with urllib.request.urlopen(url, timeout=2) as resp:  # noqa: S310
 			data = json.load(resp)
-	except (OSError, ValueError):
+	except OSError, ValueError:
 		return None
 	for entry in data.get("data", []):
 		mid = entry.get("id", "")
@@ -57,6 +65,7 @@ class LiteLLMClient:
 	model: str
 	api_base: str | None = None
 	api_key: str = "sk-local"
+	request_timeout_seconds: float = _DEFAULT_REQUEST_TIMEOUT_SECONDS
 
 	def complete(self, messages: list[dict], tools: list[dict]) -> dict:
 		kwargs = {
@@ -64,11 +73,18 @@ class LiteLLMClient:
 			"messages": messages,
 			"tools": tools,
 			"api_key": self.api_key,
+			"timeout": self.request_timeout_seconds,
 		}
 		if self.api_base is not None:
 			kwargs["api_base"] = self.api_base
 
-		response = litellm_completion(**kwargs)
+		try:
+			response = litellm_completion(**kwargs)
+		except APIConnectionError as exc:
+			# Covers litellm.Timeout and APIConnectionError (both subclass openai's):
+			# the endpoint hung or was unreachable. Re-raise as the loop's contract
+			# type so it finalizes instead of unwinding the run.
+			raise LLMClientError(f"LLM request failed: {exc}") from exc
 		message = response.choices[0].message
 
 		result: dict = {"role": "assistant", "content": getattr(message, "content", None)}
@@ -102,7 +118,12 @@ def llm_recorded_model(model: str) -> str:
 	return model
 
 
-def llm_client_for(model: str, *, api_key: str | None = None) -> LiteLLMClient:
+def llm_client_for(
+	model: str,
+	*,
+	api_key: str | None = None,
+	request_timeout_seconds: float = _DEFAULT_REQUEST_TIMEOUT_SECONDS,
+) -> LiteLLMClient:
 	"""Build the LLM client for a run mode.
 
 	`model == "local"` targets an OpenAI-compatible local server (LM Studio by
@@ -110,9 +131,15 @@ def llm_client_for(model: str, *, api_key: str | None = None) -> LiteLLMClient:
 	Anthropic model and requires `ANTHROPIC_API_KEY` (or an explicit `api_key`).
 	"""
 	if model == "local":
-		return LiteLLMClient(model=f"openai/{_local_model_name()}", api_base=_lm_studio_api_base())
+		return LiteLLMClient(
+			model=f"openai/{_local_model_name()}",
+			api_base=_lm_studio_api_base(),
+			request_timeout_seconds=request_timeout_seconds,
+		)
 
 	key = api_key or os.environ.get("ANTHROPIC_API_KEY")
 	if not key:
 		raise RuntimeError("ANTHROPIC_API_KEY not set in environment")
-	return LiteLLMClient(model=f"anthropic/{model}", api_key=key)
+	return LiteLLMClient(
+		model=f"anthropic/{model}", api_key=key, request_timeout_seconds=request_timeout_seconds
+	)

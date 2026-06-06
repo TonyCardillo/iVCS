@@ -16,6 +16,7 @@ from src.core.workspace import FunctionWorkspace
 from src.decomp.agent_loop import (
 	COMPILE_TOOL_NAME,
 	AgentConfig,
+	LLMClientError,
 	_extract_c_code,
 	_prior_best,
 	_tool_call_id,
@@ -209,6 +210,38 @@ class TestCompileError:
 		)
 		assert result.success is True
 		assert result.iterations == 2
+
+
+class TestLLMTransportError:
+	def test_llm_error_finalizes_without_propagating_and_keeps_best_example(self, tmp_path):
+		# A hung/unreachable LLM endpoint surfaces as LLMClientError from complete().
+		# The loop must catch it, finalize with reason "llm_error", and preserve the
+		# standing best — not let the exception unwind agent_loop_run and lose the run.
+		ws = _make_workspace(tmp_path, fn_name="_foo")
+		best_c = "int foo(){return 0;}\n"
+
+		class FlakyClient:
+			def __init__(self):
+				self.calls = 0
+
+			def complete(self, messages, tools):
+				self.calls += 1
+				if self.calls == 1:
+					return assistant_tool_call("compile_and_view_assembly", {"c_code": best_c})
+				raise LLMClientError("endpoint timed out after 240s")
+
+		result = agent_loop_run(
+			workspace=ws,
+			target_asm="ret",
+			config=_make_config(max_iterations=5),
+			llm_client=FlakyClient(),
+			compile_fn=_compile_ok,
+			diff_fn=_scripted_diff(60.0),
+		)
+		assert result.termination_reason == "llm_error"
+		assert result.success is False
+		assert result.best_match_percent == 60.0
+		assert ws.best_c.read_text() == best_c
 
 
 class TestBudgetExhausted:

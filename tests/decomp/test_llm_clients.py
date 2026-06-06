@@ -8,7 +8,9 @@ rather than calling a real model.
 from unittest.mock import MagicMock, patch
 
 import pytest
+from openai import APIConnectionError, APITimeoutError
 
+from src.decomp.agent_loop import LLMClientError
 from src.decomp.llm_clients import LiteLLMClient, llm_client_for, llm_recorded_model
 
 
@@ -101,6 +103,41 @@ class TestCallPassthrough:
 			client.complete(messages=[], tools=[])
 		call_kwargs = mock_completion.call_args.kwargs
 		assert "api_base" not in call_kwargs
+
+
+class TestRequestTimeout:
+	def test_default_request_timeout_passed_to_completion(self):
+		client = LiteLLMClient(model="anthropic/claude-haiku-4-5")
+		with patch("src.decomp.llm_clients.litellm_completion") as mock_completion:
+			mock_completion.return_value = _mock_response(content="ok")
+			client.complete(messages=[], tools=[])
+		assert mock_completion.call_args.kwargs["timeout"] == 240.0
+
+	def test_override_request_timeout_passed_through(self):
+		client = LiteLLMClient(model="anthropic/claude-haiku-4-5", request_timeout_seconds=30.0)
+		with patch("src.decomp.llm_clients.litellm_completion") as mock_completion:
+			mock_completion.return_value = _mock_response(content="ok")
+			client.complete(messages=[], tools=[])
+		assert mock_completion.call_args.kwargs["timeout"] == 30.0
+
+	def test_timeout_error_translated_to_llm_client_error(self):
+		client = LiteLLMClient(model="anthropic/claude-haiku-4-5")
+		with patch("src.decomp.llm_clients.litellm_completion") as mock_completion:
+			mock_completion.side_effect = APITimeoutError(request=MagicMock())
+			with pytest.raises(LLMClientError):
+				client.complete(messages=[], tools=[])
+
+	def test_connection_error_translated_to_llm_client_error(self):
+		client = LiteLLMClient(model="anthropic/claude-haiku-4-5")
+		with patch("src.decomp.llm_clients.litellm_completion") as mock_completion:
+			mock_completion.side_effect = APIConnectionError(message="boom", request=MagicMock())
+			with pytest.raises(LLMClientError):
+				client.complete(messages=[], tools=[])
+
+	def test_client_for_plumbs_request_timeout(self, monkeypatch):
+		monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+		client = llm_client_for("claude-haiku-4-5", request_timeout_seconds=15.0)
+		assert client.request_timeout_seconds == 15.0
 
 
 class TestLlmClientFor:

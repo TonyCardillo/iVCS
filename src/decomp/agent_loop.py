@@ -74,12 +74,25 @@ class AgentResult:
 	success: bool
 	best_match_percent: float | None
 	iterations: int
-	termination_reason: str  # matched | budget_exhausted | llm_no_progress | hard_timeout
+	# matched | budget_exhausted | llm_no_progress | hard_timeout | llm_error
+	termination_reason: str
+
+
+class LLMClientError(Exception):
+	"""A transport-level failure (timeout / unreachable endpoint) from an LLMClient.
+
+	Part of the LLMClient contract: complete() raises this instead of hanging or
+	leaking a provider-specific exception, so the loop can finalize cleanly and
+	preserve the run's standing best rather than unwinding mid-run.
+	"""
 
 
 class LLMClient(Protocol):
 	def complete(self, messages: list[dict], tools: list[dict]) -> dict:
-		"""Returns an assistant message dict in OpenAI tool-call shape."""
+		"""Returns an assistant message dict in OpenAI tool-call shape.
+
+		Raises LLMClientError if the model endpoint times out or is unreachable.
+		"""
 
 
 def agent_loop_run(
@@ -128,7 +141,14 @@ def agent_loop_run(
 			messages.append({"role": "user", "content": _SOFT_TIMEOUT_PROMPT})
 			soft_timeout_injected = True
 
-		response = llm_client.complete(messages, tools)
+		try:
+			response = llm_client.complete(messages, tools)
+		except LLMClientError:
+			# Endpoint hung or unreachable: finalize cleanly so the run's standing
+			# best survives and the batch moves on, rather than unwinding mid-run.
+			return _finalize(
+				workspace, "llm_error", best_match, iterations, best_c_code, model=best_model
+			)
 		messages.append(response)
 
 		c_code = _extract_c_code(response)
@@ -493,6 +513,7 @@ __all__ = [
 	"AgentConfig",
 	"AgentResult",
 	"LLMClient",
+	"LLMClientError",
 	"agent_loop_run",
 	"ghidra_only_run",
 ]
