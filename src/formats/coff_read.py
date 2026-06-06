@@ -61,6 +61,20 @@ class CoffReadError(ValueError):
 	pass
 
 
+def _require_within(data: bytes, offset: int, size: int, what: str) -> None:
+	"""Validate that a [offset, offset+size) region lies within `data`.
+
+	The reader trusts offsets read from the object itself (the symbol-table
+	pointer, each section's raw/reloc pointers). A truncated or corrupt .obj would
+	otherwise surface a bare struct.error (or silently short-read), escaping the
+	CoffReadError contract the splice verifier relies on for untrusted cl.exe output.
+	"""
+	if offset < 0 or size < 0 or offset + size > len(data):
+		raise CoffReadError(
+			f"{what} region [{offset}, {offset + size}) is outside the object ({len(data)} bytes)"
+		)
+
+
 def coff_object_read(data: bytes) -> CoffObject:
 	"""Parse a complete COFF/i386 object into sections, relocs, and symbols."""
 	if len(data) < COFF_HEADER_SIZE:
@@ -69,6 +83,10 @@ def coff_object_read(data: bytes) -> CoffObject:
 	machine, section_count, _timestamp, symbol_table_ptr, symbol_count = struct.unpack_from(
 		"<HHIII", data, 0
 	)
+
+	if symbol_count:
+		_require_within(data, symbol_table_ptr, symbol_count * COFF_SYMBOL_SIZE, "symbol table")
+	_require_within(data, COFF_HEADER_SIZE, section_count * COFF_SECTION_SIZE, "section headers")
 
 	string_table = _string_table_read(data, symbol_table_ptr, symbol_count)
 	symbols, symbol_by_slot = _symbols_read(data, symbol_table_ptr, symbol_count, string_table)
@@ -90,8 +108,12 @@ def _section_read(data: bytes, entry_offset: int, string_table: bytes) -> CoffSe
 	(raw_size, raw_ptr, reloc_ptr, _line_ptr, reloc_count) = struct.unpack_from(
 		"<IIIIH", data, entry_offset + 16
 	)
+	if raw_ptr:
+		_require_within(data, raw_ptr, raw_size, "section raw data")
 	raw = data[raw_ptr : raw_ptr + raw_size] if raw_ptr else b""
 
+	if reloc_count:
+		_require_within(data, reloc_ptr, reloc_count * COFF_RELOC_SIZE, "relocations")
 	relocations: list[CoffReloc] = []
 	for i in range(reloc_count):
 		off, sym_idx, rtype = struct.unpack_from("<IIH", data, reloc_ptr + i * COFF_RELOC_SIZE)

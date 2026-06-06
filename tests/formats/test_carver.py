@@ -1,6 +1,8 @@
 """Tests for the end-to-end XBE→target.obj orchestrator."""
 
 from src.formats.carver import carver_target_obj_build
+from src.formats.coff import IMAGE_REL_I386_REL32
+from src.formats.coff_read import coff_object_read
 from src.formats.xbe import SECTION_FLAG_EXECUTABLE, xbe_parse
 from tests.formats.test_xbe import build_minimal_xbe
 
@@ -25,5 +27,15 @@ class TestCarverTargetObjBuild:
 			)
 		)
 		blob = carver_target_obj_build(parsed, fn_va, len(body), "_caller")
-		# The external "_fn_00020000" must be in the symbol table somewhere
-		assert b"_fn_00020000" in blob
+
+		# Parse the result instead of substring-sniffing: the E8 call's imm32 site
+		# (offset 1) must become exactly one REL32 reloc whose symbol resolves to the
+		# callee, and the carved function must be the defined symbol under "_caller".
+		obj = coff_object_read(blob)
+		text = obj.text_section()
+		assert text is not None
+		(reloc,) = text.relocations
+		assert reloc.offset == 1
+		assert reloc.type == IMAGE_REL_I386_REL32
+		assert obj.symbol_at(reloc.symbol_index).name == "_fn_00020000"
+		assert "_caller" in {s.name for s in obj.symbols}

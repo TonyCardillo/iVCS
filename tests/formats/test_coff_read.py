@@ -1,14 +1,57 @@
 """Round-trip tests for the COFF reader against the COFF writer."""
 
+import struct
+
+import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
 from src.formats.coff import (
+	COFF_HEADER_SIZE,
 	IMAGE_FILE_MACHINE_I386,
 	coff_object_build,
 )
-from src.formats.coff_read import coff_object_read
+from src.formats.coff_read import CoffReadError, coff_object_read
 from src.formats.relocs import RelocKind, RelocSite, ResolvedReloc
+
+
+class TestMalformedObject:
+	# A truncated or corrupt .obj must raise the module's own CoffReadError, not an
+	# opaque struct.error. The splice verifier compiles untrusted cl.exe output and
+	# only handles CoffReadError; a bare struct.error would escape (cf. relink #1).
+	def _valid(self) -> bytes:
+		return coff_object_build(b"\xc3", "fn_1", relocations=[])
+
+	def test_truncated_object_raises_coff_read_error_example(self):
+		obj = self._valid()
+		with pytest.raises(CoffReadError):
+			coff_object_read(obj[: len(obj) // 2])  # cuts through the symbol table
+
+	def test_symbol_table_pointer_past_eof_raises_coff_read_error_example(self):
+		obj = bytearray(self._valid())
+		struct.pack_into("<I", obj, 8, len(obj) + 0x1000)  # PointerToSymbolTable @ +8
+		with pytest.raises(CoffReadError):
+			coff_object_read(bytes(obj))
+
+	def test_section_count_past_eof_raises_coff_read_error_example(self):
+		obj = bytearray(self._valid())
+		struct.pack_into("<H", obj, 2, 0xFFFF)  # NumberOfSections @ +2
+		with pytest.raises(CoffReadError):
+			coff_object_read(bytes(obj))
+
+	def test_section_reloc_count_overflow_raises_coff_read_error_example(self):
+		obj = bytearray(self._valid())
+		# Section 0's NumberOfRelocations is the uint16 at section_header + 32.
+		struct.pack_into("<H", obj, COFF_HEADER_SIZE + 32, 0xFFFF)
+		with pytest.raises(CoffReadError):
+			coff_object_read(bytes(obj))
+
+	def test_section_raw_pointer_past_eof_raises_coff_read_error_example(self):
+		obj = bytearray(self._valid())
+		# Section 0's PointerToRawData is the uint32 at section_header + 20.
+		struct.pack_into("<I", obj, COFF_HEADER_SIZE + 20, len(obj) + 0x1000)
+		with pytest.raises(CoffReadError):
+			coff_object_read(bytes(obj))
 
 
 class TestReadHeaderAndText:

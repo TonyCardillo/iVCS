@@ -38,8 +38,6 @@ IMAGE_SYM_CLASS_STATIC = 3
 IMAGE_SYM_TYPE_NULL = 0x0000
 IMAGE_SYM_TYPE_FUNCTION = 0x0020
 
-IMAGE_SYM_ABSOLUTE = -1  # section number signalling an absolute-valued symbol
-
 _SHORT_NAME_LEN = 8
 
 
@@ -61,7 +59,12 @@ def coff_object_build(
 	"""Return a complete COFF/i386 .obj as bytes."""
 	text_relocated = _text_zero_imm32_sites(text_bytes, relocations)
 	unique_externals = _unique_external_names(relocations, exclude=function_name)
-	symbols = _symbol_table_build(function_name, unique_externals)
+	# The .text aux record reports the section's raw length and reloc count; the
+	# count matches _reloc_records_build's output (relocs with a mappable kind).
+	reloc_count = sum(1 for r in relocations if r.site.kind in _RELOC_KIND_TO_COFF_TYPE)
+	symbols = _symbol_table_build(
+		function_name, unique_externals, text_length=len(text_relocated), reloc_count=reloc_count
+	)
 	symbol_index_by_name = {sym.name: i for i, sym in _enumerate_with_aux(symbols)}
 
 	reloc_records = _reloc_records_build(relocations, symbol_index_by_name)
@@ -209,7 +212,9 @@ def _unique_external_names(relocations: list[ResolvedReloc], *, exclude: str) ->
 	return ordered
 
 
-def _symbol_table_build(function_name: str, external_names: list[str]) -> list[_SymbolRecord]:
+def _symbol_table_build(
+	function_name: str, external_names: list[str], *, text_length: int, reloc_count: int
+) -> list[_SymbolRecord]:
 	return [
 		_SymbolRecord(
 			name=".text",
@@ -217,7 +222,7 @@ def _symbol_table_build(function_name: str, external_names: list[str]) -> list[_
 			section_number=1,
 			type=IMAGE_SYM_TYPE_NULL,
 			storage_class=IMAGE_SYM_CLASS_STATIC,
-			aux_data=_section_aux_record(length=0, nrelocs=0),
+			aux_data=_section_aux_record(length=text_length, nrelocs=reloc_count),
 		),
 		_SymbolRecord(
 			name=function_name,

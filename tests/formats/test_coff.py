@@ -220,6 +220,30 @@ class TestCoffSymbolTable:
 		# The reader skips aux records, so an absent next slot proves the one aux.
 		assert (text_slot + 1) not in obj.symbol_by_slot
 
+	def test_section_symbol_aux_records_text_length_and_reloc_count_example(self):
+		# The .text section-definition aux record must report the section's real raw
+		# length and relocation count (per the COFF spec), not hardcoded zeros — a
+		# zero'd aux is a malformed object that a stricter consumer (link.exe/dumpbin)
+		# would mis-read.
+		body = b"\xe8\x00\x00\x00\x00\xe8\x00\x00\x00\x00\xc3"  # 11 bytes, two REL32 sites
+		relocs = [
+			ResolvedReloc(
+				site=RelocSite(imm_offset=1, kind=RelocKind.REL32, target_va=0x1000),
+				symbol_name="_a",
+			),
+			ResolvedReloc(
+				site=RelocSite(imm_offset=6, kind=RelocKind.REL32, target_va=0x2000),
+				symbol_name="_b",
+			),
+		]
+		blob = coff_object_build(body, "_caller", relocations=relocs)
+		text_slot = _symbol_slot(coff_object_read(blob), ".text")
+		symbol_table_ptr = struct.unpack_from("<I", blob, 8)[0]  # PointerToSymbolTable @ +8
+		aux_off = symbol_table_ptr + (text_slot + 1) * COFF_SYMBOL_SIZE
+		length, nrelocs = struct.unpack_from("<IH", blob, aux_off)  # Length, NumberOfRelocations
+		assert length == len(body)
+		assert nrelocs == len(relocs)
+
 	def test_one_external_symbol_per_unique_reloc_target(self):
 		body = b"\xe8\x00\x00\x00\x00" * 3 + b"\xc3"
 		relocs = [

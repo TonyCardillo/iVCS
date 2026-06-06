@@ -262,7 +262,7 @@ def xbe_functions_enumerate(parsed: ParsedXbe) -> tuple[XbeFunction, ...]:
 				fn_start_off = None
 				continue
 
-			if mnem == "ret" or mnem.startswith("retn") or mnem.startswith("retf"):
+			if mnem == "ret" or mnem.startswith("retf"):
 				next_va = section_va + end_off
 				is_boundary = (
 					end_off >= n
