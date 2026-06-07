@@ -84,10 +84,15 @@ typedef void *           PIO_STATUS_BLOCK;
    must be a function type for an indirect call `(**(code **)x)()` to compile.
    `int` return suits both ignored- and consumed-result call sites. */
 typedef int              code();
-/* --- Ghidra p-code intrinsics (universal decompiler output) ----------------
-   Odd-width integer types and the CONCAT/SUB/ZEXT/SEXT/CARRY pseudo-ops Ghidra
-   emits for sub-register and multi-word arithmetic. Harmless when unused; they
-   let a warm-start draft compile so the agent inherits a working baseline. */
+"""
+
+# Ghidra's p-code intrinsics (odd-width int types and the CONCAT/SUB/ZEXT/SEXT/
+# CARRY pseudo-ops it emits for sub-register and multi-word arithmetic). Only
+# ~1% of drafts reference these, and the block is ~500 tokens, so it is appended
+# to ctx.h on demand (see `_draft_needs_pcode`) rather than riding into every
+# compile and every LLM prompt.
+_PCODE_INTRINSICS = """\
+/* Ghidra p-code intrinsics — included because this draft references them. */
 typedef int              int3;
 typedef unsigned int     uint3;
 typedef __int64          int5;
@@ -124,6 +129,18 @@ typedef unsigned __int64 uint7;
 #define CARRY4(a,b) \
 ((unsigned int)((unsigned int)(a) + (unsigned int)(b)) < (unsigned int)(a))
 """
+
+# Tokens whose presence in a draft means the p-code intrinsics block is needed:
+# the CONCAT/SUB/ZEXT/SEXT/CARRY/SBORROW pseudo-ops and the odd-width int types.
+_PCODE_TOKEN_PATTERN = re.compile(
+	r"\b(CONCAT\d\d|SUB\d\d|ZEXT\d\d|SEXT\d\d|CARRY\d|SBORROW\d|u?int[3567])\b"
+)
+
+
+def _draft_needs_pcode(text: str) -> bool:
+	"""True if a Ghidra draft references any p-code intrinsic or odd-width int
+	type, so ctx.h must carry the (otherwise omitted) intrinsics block."""
+	return bool(_PCODE_TOKEN_PATTERN.search(text))
 
 
 @dataclass
@@ -185,8 +202,19 @@ def prepare_decomp_workspace(
 	)
 
 	if reset_ctx_h or not workspace.ctx_h.is_file():
+		needs_pcode = (
+			workspace.ghidra_warmstart.is_file()
+			and _draft_needs_pcode(workspace.ghidra_warmstart.read_text())
+		)
 		workspace.ctx_h.write_text(
-			_compose_ctx_h(fn.name, mangled, callee_decls, kernel_imports, struct_decls)
+			_compose_ctx_h(
+				fn.name,
+				mangled,
+				callee_decls,
+				kernel_imports,
+				struct_decls,
+				needs_pcode=needs_pcode,
+			)
 		)
 
 	_mirror_warmstart_as_attempt_zero(
@@ -514,10 +542,18 @@ def _compose_ctx_h(
 	callee_decls: tuple[str, ...] = (),
 	kernel_imports: tuple[str, ...] = (),
 	struct_decls: str = "",
+	*,
+	needs_pcode: bool = False,
 ) -> str:
 	"""Build the auto-stub ctx.h: typedefs, Ghidra-harvested struct layouts,
-	target forward decl, kernel import decls, same-binary callee decls."""
+	target forward decl, kernel import decls, same-binary callee decls.
+
+	The ~500-token p-code intrinsics block is appended only when `needs_pcode` is
+	set (the draft references CONCAT/SUB/.../odd-width-int) — ~99% of functions
+	never touch it, so it stays out of their ctx.h and their LLM prompt."""
 	parts = [_DEFAULT_CTX_H]
+	if needs_pcode:
+		parts.append(_PCODE_INTRINSICS)
 	if struct_decls:
 		parts.append("\n/* Ghidra-harvested struct layouts. */\n" + struct_decls)
 	forward = _format_target_forward_decl(name, mangled)

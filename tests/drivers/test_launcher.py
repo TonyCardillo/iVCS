@@ -122,14 +122,22 @@ def test_compose_ctx_h_typedefs_code_as_callable():
 	assert "typedef" in _DEFAULT_CTX_H
 
 
-def test_default_ctx_h_declares_pcode_intrinsics():
-	# Ghidra emits CONCAT/SUB/ZEXT/SEXT/CARRY pseudo-ops and odd-width int types;
-	# the prelude must define them so warm-start drafts that use them compile.
-	from src.drivers.launcher import _DEFAULT_CTX_H
+def test_pcode_intrinsics_included_only_on_demand():
+	# The ~500-token p-code block is dead weight in ~99% of functions, so it's
+	# appended to ctx.h only when the draft references it — keeping it out of the
+	# base prelude and the LLM prompt otherwise.
+	from src.drivers.launcher import _draft_needs_pcode
 
-	assert "CONCAT31" in _DEFAULT_CTX_H
-	assert "ZEXT" in _DEFAULT_CTX_H and "SEXT" in _DEFAULT_CTX_H and "CARRY" in _DEFAULT_CTX_H
-	assert "int3" in _DEFAULT_CTX_H
+	base = _compose_ctx_h("fn_X", "_fn_X")
+	assert "CONCAT31" not in base and "int3" not in base  # omitted by default
+
+	withp = _compose_ctx_h("fn_X", "_fn_X", needs_pcode=True)
+	assert "CONCAT31" in withp and "ZEXT" in withp and "CARRY" in withp and "int3" in withp
+
+	assert _draft_needs_pcode("x = CONCAT31(a, b);") is True
+	assert _draft_needs_pcode("y = (int3)z;") is True
+	assert _draft_needs_pcode("int n = foo(bar);") is False
+	assert _draft_needs_pcode("unsigned int u = v;") is False  # `uint` substring must not trip
 
 
 def test_sweep_regenerates_stale_ctx_h():
