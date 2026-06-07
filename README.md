@@ -20,6 +20,7 @@ For each function enumerated from an XBE:
 ## Features
 
 - Project workspaces in `projects/`
+- Extracts a game's `default.xbe` from an Xbox disc image (XISO)
 - Parses XBE format and enumerates every function into a `project.json` manifest
 - Synthesizes `ctx.h` with inferred typedefs, struct layouts, and calling conventions
 - Deterministic first decomp attempt with normalized Ghidra output
@@ -38,13 +39,17 @@ monitor decomp runs, drive the batch/sweep harnesses, and read coverage.
 # 1. Install (creates .venv from pyproject.toml + uv.lock)
 uv sync
 
-# 2. Enumerate an XBE into a project manifest the UI can load
+# 2. (optional) Recover default.xbe from a game disc image — or use the UI's Extract page
+uv run python -m src extract "path/to/Halo 2.xiso.iso" \
+    --file default.xbe --output path/to/default.xbe
+
+# 3. Enumerate an XBE into a project manifest the UI can load
 mkdir -p projects/halo2-retail
 uv run python -m src enumerate path/to/default.xbe \
     --name halo2-retail \
     --output projects/halo2-retail/project.json
 
-# 3. Launch the UI (cloud runs need a key; a local LM Studio model works without one)
+# 4. Launch the UI (cloud runs need a key; a local LM Studio model works without one)
 export ANTHROPIC_API_KEY=sk-ant-...   # optional
 uv run python -m src.webui            # serves http://127.0.0.1:8765/ (--port to change)
 ```
@@ -73,6 +78,7 @@ Environment:
 The main pipeline verbs are also subcommands of `python -m src`:
 
 ```bash
+python -m src extract  "Halo 2.xiso.iso" --file default.xbe -o game.xbe  # pull default.xbe from a disc image
 python -m src enumerate game.xbe --name halo2 -o projects/halo2/project.json
 python -m src report   projects/halo2/project.json   # per-segment coverage
 python -m src commit   projects/halo2/project.json   # promote matched best.c into the tree
@@ -103,6 +109,7 @@ src/
     coff_read.py      COFF/i386 .obj reader (inverse of coff.py) for whole-image verify
     archive.py        !<arch> static-library parser (extract COFF members from .lib)
     carver.py         Three-line orchestrator: carve → resolve → coff
+    xiso.py           XDVDFS (Xbox disc image) reader + default.xbe extractor
   decomp/           Warm-start + agent loop
     ghidra_decompile.py  Ghidra-headless warm-start
     agent_loop.py     LLM loop policy
@@ -128,8 +135,8 @@ src/
     batch.py          Overnight batch harness (planning logic)
     sweep.py          Project-wide Ghidra baseline sweep
   cli/              Thin CLI frontends (one subcommand each)
-    enumerate · report/commit/verify · cluster/similar · libmatch · batch
-  webui/            Local web UI: XBE explorer, decomp run/launch, batch/sweep control
+    extract · enumerate · report/commit/verify · cluster/similar · libmatch · batch
+  webui/            Local web UI: XBE explorer, decomp run/launch, batch/sweep control, disc extract
   dev/              Diagnostics: smoke_run (objdiff-smoke fixture), halo2_sanity (real XBE)
 
 tests/              Mirrors the src/ package layout (core/ formats/ decomp/ …)
