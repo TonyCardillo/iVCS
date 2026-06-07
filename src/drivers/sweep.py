@@ -68,9 +68,14 @@ def sweep_outcome_classify(va: int, name: str, result: AgentResult) -> SweepOutc
 	pct = result.best_match_percent
 	if result.termination_reason in ("compile_failed", "ghidra_unavailable"):
 		state = "failed"
-	elif pct is not None and pct >= 100.0:
+	elif pct is None:
+		# The baseline compiled, but the diff never paired/scored the function's
+		# symbol — match% couldn't be computed. That's a failure to evaluate, not
+		# a genuine 0% no-match (which requires a paired, scored-zero symbol).
+		state = "failed"
+	elif pct >= 100.0:
 		state = "matched"
-	elif pct is not None and pct > 0.0:
+	elif pct > 0.0:
 		state = "partial"
 	else:
 		state = "no_match"

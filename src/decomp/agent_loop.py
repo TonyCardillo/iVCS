@@ -285,6 +285,14 @@ def ghidra_only_run(
 		best, model = _standing(None)
 		return _finalize(workspace, "compile_failed", best, 0, model=model)
 
+	# Canonicalize before every diff, not just after a fresh compile. A cached
+	# 0000.obj can carry a stale defined-symbol name (e.g. an `@8` stdcall
+	# decoration from Ghidra's param guess) that no longer matches the current
+	# workspace name (`@4` from the binary's `ret`): _baseline_compile_attempt_zero
+	# early-returns when the obj exists, so its post-compile canonicalize never
+	# runs, and objdiff then can't pair the symbol — scoring it None, a phantom
+	# no-match. Idempotent when the name is already canonical.
+	obj_function_symbol_canonicalize(paths.obj, workspace.function_name)
 	diff = diff_fn(workspace.target_obj, paths.obj, workspace.function_name)
 	match = function_match_percent(diff, workspace.function_name)
 

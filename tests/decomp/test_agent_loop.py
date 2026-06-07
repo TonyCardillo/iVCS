@@ -636,6 +636,47 @@ class TestGhidraOnlyRun:
 		assert best == normalized
 		assert "undefined4" not in best and "FUN_" not in best and "DAT_" not in best
 
+	def test_canonicalizes_cached_obj_symbol_before_diff(self, tmp_path):
+		# The reported bug: a cached 0000.obj carries a stale defined-symbol name
+		# (e.g. an `@8` stdcall decoration from Ghidra's param guess) that no
+		# longer matches the current workspace name (`@4` from the binary's ret).
+		# _baseline_compile_attempt_zero early-returns when the obj exists, so it
+		# never re-canonicalizes; objdiff then can't pair the symbol and scores it
+		# None — counted as a phantom no-match. ghidra_only_run must canonicalize
+		# the obj to workspace.function_name before diffing, regardless of caching.
+		from src.formats.coff import (
+			IMAGE_SYM_CLASS_EXTERNAL,
+			IMAGE_SYM_TYPE_FUNCTION,
+			coff_object_build,
+		)
+		from src.formats.coff_read import coff_object_read
+
+		ws = _make_workspace(tmp_path, fn_name="_fn_00013D50@4")
+		ws.attempt_paths(0).c.write_text("int __stdcall fn_00013D50(int){return 0;}\n")
+		# A real COFF obj whose defined function symbol is the STALE name.
+		stale = coff_object_build(b"\xc2\x04\x00", "_fn_00013D50@8", [])
+		ws.attempt_paths(0).obj.write_bytes(stale)
+
+		seen = {}
+
+		def diff_fn(target, base, symbol):
+			co = coff_object_read(Path(base).read_bytes())
+			seen["base_defined"] = [
+				s.name
+				for s in co.symbols
+				if s.storage_class == IMAGE_SYM_CLASS_EXTERNAL
+				and s.section_number > 0
+				and s.type == IMAGE_SYM_TYPE_FUNCTION
+			]
+			return _diff_with_match_percent(symbol, 29.25)
+
+		result = ghidra_only_run(workspace=ws, compile_fn=_compile_ok, diff_fn=diff_fn)
+
+		# The obj handed to objdiff must carry the canonical workspace name, so the
+		# symbol pairs and the real partial match (29.25%) is recorded — not None.
+		assert seen["base_defined"] == ["_fn_00013D50@4"]
+		assert result.best_match_percent == 29.25
+
 	def test_unavailable_baseline_keeps_prior_model_attribution(self, tmp_path):
 		# The reported bug: a real model already earned the standing best (40% via
 		# haiku across several attempts), then a ghidra-only pass ran where the

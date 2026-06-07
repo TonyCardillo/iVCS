@@ -87,9 +87,12 @@ class TestSweepOutcomeClassify:
 		out = sweep_outcome_classify(0x10, "a", _result("ghidra_only", 0.0))
 		assert out.state == "no_match"
 
-	def test_no_match_when_none(self):
+	def test_failed_when_match_unscored(self):
+		# A None percent means the symbol was never paired/scored in the diff —
+		# the function couldn't be evaluated, which is a failure, not a true 0%
+		# no-match (which requires the symbol be compiled, paired, and scored 0).
 		out = sweep_outcome_classify(0x10, "a", _result("ghidra_only", None))
-		assert out.state == "no_match"
+		assert out.state == "failed"
 
 	def test_failed_on_compile_failure(self):
 		out = sweep_outcome_classify(0x10, "a", _result("compile_failed", None))
