@@ -60,9 +60,10 @@ Environment:
 | --- | --- | --- |
 | `IVCS_MSVC_DIR` | Root of the XDK 5849 VC7.1 toolchain containing `bin/cl.exe`. | `<repo>/compilers/xdk5849-vc71` |
 | `IVCS_WINE` | Wine binary to invoke `cl.exe`. | `wine` (on PATH) |
+| `IVCS_WINEPATH_TIMEOUT` | Seconds allowed for `wine winepath` (raise if a cold wine start is slow). | `60` |
 | `IVCS_OBJDIFF_CLI` | Path to the `objdiff-cli` binary. | `objdiff-cli` (on PATH) |
 | `IVCS_GHIDRA_HOME` | Ghidra install used for warm-start (see `docs/ghidra_setup.md`). | `<repo>/tools/ghidra_12.0.3_PUBLIC` |
-| `IVCS_GHIDRA_PROJECT_DIR` | Where Ghidra projects are stored. | `/tmp/ghidra-projects` |
+| `IVCS_GHIDRA_PROJECT_DIR` | Where Ghidra projects are stored (persists across reboots). | `~/.cache/ivcs/ghidra-projects` |
 | `IVCS_GHIDRA_PROJECT_NAME` | Ghidra project name. | XBE filename stem |
 | `IVCS_LLM_API_BASE` | Local LLM server URL (used when no cloud key). | `http://127.0.0.1:1234/v1` |
 | `IVCS_LLM_MODEL` | Local LLM model ID. | auto-detected from LM Studio |

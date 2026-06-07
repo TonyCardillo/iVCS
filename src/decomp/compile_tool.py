@@ -246,11 +246,16 @@ def subprocess_error_format(tool: str, exc: subprocess.SubprocessError) -> str:
 
 
 def _winepath(wine: str, unix_path: str) -> str:
+	# wine's first invocation after a reboot pays a cold start (wineserver boot,
+	# MoltenVK init, binary re-verification) that dwarfs winepath's own trivial
+	# work. A tight timeout here fails every compile in a sweep before the
+	# toolchain ever warms, so default generous; tunable via IVCS_WINEPATH_TIMEOUT.
+	timeout = float(os.environ.get("IVCS_WINEPATH_TIMEOUT", "60"))
 	result = subprocess.run(
 		[wine, "winepath", "-w", unix_path],
 		capture_output=True,
 		text=True,
-		timeout=10,
+		timeout=timeout,
 		check=True,
 	)
 	return result.stdout.strip()

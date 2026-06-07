@@ -11,6 +11,7 @@ from functools import partial
 from pathlib import Path
 
 from src.core.workspace import FunctionWorkspace
+from src.decomp import compile_tool
 from src.decomp.compile_tool import (
 	CompileOutput,
 	compile_and_view_assembly,
@@ -449,3 +450,32 @@ class TestCompileErrorFormat:
 		msg = compile_error_format(out)
 		assert "C2065" in msg
 		assert "kerberos" not in msg.lower()
+
+
+class TestWinepathTimeout:
+	"""_winepath's timeout must absorb a cold wine start. The first wine process
+	after a reboot pays wineserver boot + MoltenVK init + binary re-verification,
+	which can dwarf winepath's own work; too tight a timeout there fails every
+	compile in a sweep before the toolchain ever warms. Tunable for slow machines
+	via IVCS_WINEPATH_TIMEOUT."""
+
+	def _capture_run(self, captured):
+		def fake_run(argv, **kwargs):
+			captured.update(kwargs)
+			return subprocess.CompletedProcess(argv, 0, stdout="Z:\\path\n", stderr="")
+
+		return fake_run
+
+	def test_winepath_default_timeout_absorbs_cold_start_example(self, monkeypatch):
+		captured: dict = {}
+		monkeypatch.delenv("IVCS_WINEPATH_TIMEOUT", raising=False)
+		monkeypatch.setattr(compile_tool.subprocess, "run", self._capture_run(captured))
+		assert compile_tool._winepath("wine", "/some/path") == "Z:\\path"
+		assert captured["timeout"] >= 60  # old 10s could not survive a cold wine
+
+	def test_winepath_timeout_is_env_configurable_example(self, monkeypatch):
+		captured: dict = {}
+		monkeypatch.setenv("IVCS_WINEPATH_TIMEOUT", "150")
+		monkeypatch.setattr(compile_tool.subprocess, "run", self._capture_run(captured))
+		compile_tool._winepath("wine", "/some/path")
+		assert captured["timeout"] == 150.0

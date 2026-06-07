@@ -7,6 +7,7 @@ parent of ``src/`` is always the repo root — and derive every bundled-asset pa
 it, so a module's depth never matters again.
 """
 
+import os
 from pathlib import Path
 
 # src/paths.py -> src/ -> <repo root>
@@ -17,3 +18,9 @@ COMPILERS_DIR = REPO_ROOT / "compilers"
 GHIDRA_SCRIPTS_DIR = REPO_ROOT / "ghidra_scripts"
 GHIDRA_HOME = REPO_ROOT / "tools" / "ghidra_12.0.3_PUBLIC"
 RECON_DIR = REPO_ROOT / "recon"
+
+# Generated, regenerable state (analyzed Ghidra projects, …). A user cache dir,
+# not /tmp — the latter is wiped on reboot, forcing a costly re-analysis of the
+# XBE. Honors XDG_CACHE_HOME.
+CACHE_DIR = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "ivcs"
+GHIDRA_PROJECT_DIR = CACHE_DIR / "ghidra-projects"

@@ -71,13 +71,15 @@ will call):
 
 ```bash
 tools/ghidra_12.0.3_PUBLIC/support/analyzeHeadless \
-    /tmp/ghidra-projects halo2 \
-    -import /tmp/halo2_default.xbe \
+    ~/.cache/ivcs/ghidra-projects halo2 \
+    -import /path/to/default.xbe \
     -overwrite
 ```
 
 A clean run prints "Analysis succeeded" near the end and leaves a
-`halo2.gpr` and `halo2.rep/` under `/tmp/ghidra-projects/`.
+`halo2.gpr` and `halo2.rep/` under `~/.cache/ivcs/ghidra-projects/` (the
+default project dir; override with `IVCS_GHIDRA_PROJECT_DIR`). It lives in the
+user cache rather than `/tmp` so a reboot doesn't force a re-analysis.
 
 ## Wrapper
 

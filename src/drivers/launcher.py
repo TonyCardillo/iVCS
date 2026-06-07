@@ -336,18 +336,18 @@ def _prepare_ghidra_warmstart(
 	proceeds without struct context (or without the draft entirely).
 	"""
 	cfg = ghidra_config_from_env(project.xbe_path)
-	if not workspace.ghidra_warmstart.is_file():
-		try:
-			ghidra_project_ensure(cfg)
+	try:
+		# ensure() is idempotent and cheap once bootstrapped — run it even when the
+		# draft is already cached, so the struct dump still has a project to query
+		# after the Ghidra data dir is evicted (e.g. a /tmp wipe on reboot).
+		# Otherwise cached functions silently lose their type context.
+		ghidra_project_ensure(cfg)
+		if not workspace.ghidra_warmstart.is_file():
 			draft = ghidra_decompile_function(fn.va, cfg)
 			workspace.ghidra_warmstart.write_text(draft)
-		except GhidraError as e:
-			print(f"[launcher] Ghidra warm-start failed for {fn.name}: {e}", file=sys.stderr)
-			return "", ()
-	try:
 		header = ghidra_structs_dump(cfg)
 	except GhidraError as e:
-		print(f"[launcher] Ghidra struct dump failed for {fn.name}: {e}", file=sys.stderr)
+		print(f"[launcher] Ghidra warm-start prep failed for {fn.name}: {e}", file=sys.stderr)
 		return "", ()
 	return _select_referenced_structs(header, workspace.ghidra_warmstart.read_text())
 

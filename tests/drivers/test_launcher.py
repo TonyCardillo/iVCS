@@ -636,3 +636,21 @@ class TestLocalRunWarmstartE2E:
 		assert "fn_00430D9B" in workspace.ghidra_warmstart.read_text()
 		assert "FOO" in struct_names
 		assert (rep / "idata" / "00").is_dir()  # rebuilt into a real project
+
+	def test_cached_warmstart_rebootstraps_project_for_structs(self, monkeypatch, tmp_path):
+		# A prior session cached the warm-start draft, but the Ghidra data dir was
+		# then evicted (a /tmp wipe on reboot). Because the draft is on disk, the
+		# old code skipped ensure() and the struct dump died with "not bootstrapped",
+		# silently dropping every cached function's type context. Prep must re-ensure
+		# the project even when the draft is cached — without regenerating the draft.
+		project, fn, workspace, project_dir = self._setup(monkeypatch, tmp_path)
+		cached = "int fn_00430D9B(void) { FOO_00485000.x = 7; return 0; }\n"
+		workspace.ghidra_warmstart.write_text(cached)
+		assert not (project_dir / "halo2_default.gpr").exists()  # project evicted
+
+		struct_decls, struct_names = _prepare_ghidra_warmstart(workspace, project, fn)
+
+		assert workspace.ghidra_warmstart.read_text() == cached  # draft preserved, not rebuilt
+		assert "FOO" in struct_names  # structs harvested after the re-bootstrap
+		assert "FOO" in struct_decls
+		assert (project_dir / "halo2_default.rep" / "idata" / "00").is_dir()

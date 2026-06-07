@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
 
-from src.paths import GHIDRA_HOME, GHIDRA_SCRIPTS_DIR
+from src.paths import GHIDRA_HOME, GHIDRA_PROJECT_DIR, GHIDRA_SCRIPTS_DIR
 
 _GHIDRA_SCRIPTS_DIR = GHIDRA_SCRIPTS_DIR
 _DECOMPILE_SCRIPT = "DecompileOne.java"
@@ -83,8 +83,8 @@ def ghidra_config_from_env(xbe_path: Path) -> GhidraConfig:
 	override the per-host bits.
 
 	Default project name = XBE filename stem, so multiple XBEs each get
-	their own analyzed project under /tmp/ghidra-projects/ instead of
-	sharing one and re-analyzing on every switch.
+	their own analyzed project under the cache dir instead of sharing one and
+	re-analyzing on every switch.
 	"""
 	default_ghidra_home = GHIDRA_HOME
 	home = Path(
@@ -93,7 +93,7 @@ def ghidra_config_from_env(xbe_path: Path) -> GhidraConfig:
 			str(default_ghidra_home),
 		)
 	)
-	project_dir = Path(os.environ.get("IVCS_GHIDRA_PROJECT_DIR", "/tmp/ghidra-projects"))  # noqa: S108
+	project_dir = Path(os.environ.get("IVCS_GHIDRA_PROJECT_DIR", str(GHIDRA_PROJECT_DIR)))
 	project_name = os.environ.get("IVCS_GHIDRA_PROJECT_NAME") or xbe_path.stem
 	return GhidraConfig(
 		ghidra_home=home,
