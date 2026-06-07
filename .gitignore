@@ -76,6 +76,10 @@ build/
 *.rom
 *.iso
 *.dol
+*.xbe
+
+# Files carved out of a disc image by the extractor (default output dir)
+extracted/
 
 # Temporary compilation files
 *.i

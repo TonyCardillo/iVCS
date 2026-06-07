@@ -39,7 +39,12 @@ def view_index() -> str:
 			"to get started.</p>",
 		)
 
-	body = f'<div class="ascii-logo">{LOGO}</div>\n{proj_panel}'
+	tools_panel = panel(
+		"Tools",
+		'<p><a href="/extract">Extract a default.xbe from an Xbox disc image (XISO)</a> '
+		'<span class="muted">— recover a project\'s source binary from its game disc.</span></p>',
+	)
+	body = f'<div class="ascii-logo">{LOGO}</div>\n{proj_panel}\n{tools_panel}'
 	return page("iVCS", body, current_path=None)
 
 

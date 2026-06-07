@@ -8,7 +8,7 @@ import threading
 import time
 import types
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import quote, unquote
 
 import pytest
 from hypothesis import assume, given
@@ -50,7 +50,9 @@ from src.webui.state import (  # noqa: E402
 )
 from src.webui.templates import badge, sweep_bar  # noqa: E402
 from src.webui.views_decomp import _string_hints_html, _symbol_notes_panel  # noqa: E402
+from src.webui.views_extract import handle_extract_run, view_extract  # noqa: E402
 from src.webui.views_index import _discover_projects  # noqa: E402
+from tests.formats._xiso_helpers import xiso_image_build  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -536,6 +538,41 @@ class TestSweepSection:
 		assert active is False
 		assert "last sweep finished" in html
 		assert "/sweep/launch" in html  # can run again
+
+
+class TestExtractView:
+	def test_view_lists_root_files_with_extract_forms(self, tmp_path):
+		iso = tmp_path / "game.iso"
+		iso.write_bytes(xiso_image_build({"default.xbe": b"XBEH", "update.xbe": b"u"}))
+		html_out = view_extract(str(iso))
+		assert "default.xbe" in html_out
+		assert 'action="/extract/run' in html_out
+
+	def test_view_renders_ok_status_banner(self):
+		assert "EXTRACTED" in view_extract("", status="ok:wrote default.xbe (8 bytes)")
+
+	def test_view_renders_error_status_banner(self):
+		assert "boom" in view_extract("", status="err:boom")
+
+	def test_run_handler_extracts_and_redirects_ok(self, tmp_path):
+		iso = tmp_path / "game.iso"
+		iso.write_bytes(xiso_image_build({"default.xbe": b"XBEH" + bytes(2000)}))
+		dest = tmp_path / "out" / "halo.xbe"
+		redirect = handle_extract_run(str(iso), {"file": "default.xbe", "dest": str(dest)})
+		assert "status=ok" in unquote(redirect)
+		assert dest.read_bytes() == b"XBEH" + bytes(2000)
+
+	def test_run_handler_missing_fields_errors_without_writing(self):
+		redirect = handle_extract_run("", {})
+		assert "status=err" in unquote(redirect)
+
+	def test_run_handler_unknown_file_errors(self, tmp_path):
+		iso = tmp_path / "game.iso"
+		iso.write_bytes(xiso_image_build({"default.xbe": b"XBEH"}))
+		dest = tmp_path / "out.xbe"
+		redirect = handle_extract_run(str(iso), {"file": "nope.xbe", "dest": str(dest)})
+		assert "status=err" in unquote(redirect)
+		assert not dest.exists()
 
 
 class TestBadge:

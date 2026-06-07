@@ -25,6 +25,10 @@ from src.webui.views_decomp import (
 	view_decomp_attempt,
 	view_decomp_run,
 )
+from src.webui.views_extract import (
+	handle_extract_run,
+	view_extract,
+)
 from src.webui.views_index import view_index
 from src.webui.views_launch import (
 	_handle_notes_save,
@@ -117,6 +121,9 @@ class Handler(BaseHTTPRequestHandler):
 				verify_launch(path)
 				self._redirect(f"/stats?path={quote(path)}")
 				return
+			if route == "/extract/run":
+				self._redirect(handle_extract_run(q.get("image", ""), form))
+				return
 			self._send(404, view_error(f"unknown POST route: {route}"))
 		except JobsAtCapacity as e:
 			self._send(429, view_error(f"jobs at capacity: {e}"))
@@ -163,6 +170,8 @@ class Handler(BaseHTTPRequestHandler):
 							"order": q.get("order", "asc"),
 						},
 					)
+			elif route == "/extract":
+				html_out = view_extract(q.get("image", ""), status=q.get("status", ""))
 			elif route == "/stats":
 				project_path = q.get("path", "").strip()
 				if not project_path:

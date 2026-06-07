@@ -5,6 +5,7 @@ analysis/drivers); each module here is a thin frontend that parses args, calls
 one feature, and prints. Subcommands register themselves via `add_parser`, so
 adding a command is local to its module.
 
+    python -m src extract    "Halo 2.xiso.iso" --file default.xbe -o game.xbe
     python -m src enumerate game.xbe --name halo2 -o projects/halo2/project.json
     python -m src report    projects/halo2/project.json
     python -m src commit    projects/halo2/project.json [--function NAME]
@@ -19,14 +20,14 @@ from __future__ import annotations
 
 import argparse
 
-from src.cli import batch, index, integrate, libmatch
+from src.cli import batch, extract, index, integrate, libmatch
 from src.cli import enumerate as enumerate_cmd
 
 
 def build_parser() -> argparse.ArgumentParser:
 	parser = argparse.ArgumentParser(prog="python -m src", description=__doc__.splitlines()[0])
 	subparsers = parser.add_subparsers(dest="command", required=True)
-	for module in (enumerate_cmd, integrate, index, libmatch, batch):
+	for module in (extract, enumerate_cmd, integrate, index, libmatch, batch):
 		module.add_parser(subparsers)
 	return parser
 
