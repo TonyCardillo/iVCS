@@ -80,6 +80,10 @@ typedef HANDLE *         PHANDLE;
 typedef LARGE_INTEGER *  PLARGE_INTEGER;
 typedef void *           POBJECT_ATTRIBUTES;
 typedef void *           PIO_STATUS_BLOCK;
+/* Ghidra's function element type: `code *` is a function pointer, so `code`
+   must be a function type for an indirect call `(**(code **)x)()` to compile.
+   `int` return suits both ignored- and consumed-result call sites. */
+typedef int              code();
 """
 
 

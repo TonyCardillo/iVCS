@@ -113,6 +113,15 @@ def test_compose_ctx_h_cdecl_matches_default_stub():
 	assert _compose_ctx_h("fn_X", "_fn_X") == _DEFAULT_CTX_H
 
 
+def test_compose_ctx_h_typedefs_code_as_callable():
+	# Ghidra emits `code *` for function pointers; ctx.h must typedef `code` as a
+	# function type so an indirect call `(**(code **)x)()` compiles.
+	from src.drivers.launcher import _DEFAULT_CTX_H
+
+	assert "code(" in _DEFAULT_CTX_H or "code (" in _DEFAULT_CTX_H
+	assert "typedef" in _DEFAULT_CTX_H
+
+
 def test_compose_ctx_h_stdcall_appends_forward_decl():
 	out = _compose_ctx_h("fn_002D1D94", "_fn_002D1D94@4")
 	assert "int __stdcall fn_002D1D94(int);" in out

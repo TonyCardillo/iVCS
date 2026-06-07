@@ -448,6 +448,30 @@ class TestSubpieceRewrite:
 		assert ghidra_pseudo_c_normalize(src) == src
 
 
+class TestCodeAndConventionNormalize:
+	# Ghidra's `code` is a function type, used as `code *` for function pointers.
+	# Mapping it to `void` (the old behaviour) turned an indirect call
+	# `(**(code **)x)()` into `(**(void **)x)()` — which MSVC can't call (C2100).
+	# Leave `code` intact; ctx.h typedefs it as a callable function type.
+	def test_code_pointer_not_rewritten_to_void(self):
+		out = ghidra_pseudo_c_normalize("code *pcVar1;\n")
+		assert "code *pcVar1;" in out
+		assert "void *pcVar1;" not in out
+
+	def test_indirect_call_through_code_survives(self):
+		src = "(**(code **)(*piVar7 + 0x28))();\n"
+		out = ghidra_pseudo_c_normalize(src)
+		assert "(**(code **)(*piVar7 + 0x28))();" in out
+		assert "void **" not in out
+
+	def test_thiscall_keyword_stripped(self):
+		# MSVC 7.1 in C mode rejects __thiscall on a free-function decl; strip it
+		# so the warm-start compiles (the agent restores the convention if needed).
+		out = ghidra_pseudo_c_normalize("void __thiscall fn_x(int *this)\n{\n}\n")
+		assert "__thiscall" not in out
+		assert "void fn_x(int *this)" in out
+
+
 class TestStructNames:
 	def test_parses_struct_and_union_names_in_order(self):
 		header = (

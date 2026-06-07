@@ -380,7 +380,10 @@ _PSEUDO_C_TYPE_MAP = {
 	"longlong": "__int64",
 	"ulonglong": "ULONGLONG",
 	"bool": "int",  # Ghidra emits C99 bool; MSVC 7.1 /TC is C89
-	"code": "void",  # Ghidra's function-pointer element type
+	# NOTE: `code` is intentionally NOT mapped. It's Ghidra's function element
+	# type, used as `code *` for function pointers; mapping it to `void` turns an
+	# indirect call `(**(code **)x)()` into an uncallable `(**(void **)x)()`
+	# (C2100). ctx.h typedefs `code` as a function type so such calls compile.
 }
 
 _PSEUDO_C_TYPE_PATTERN = re.compile(
@@ -395,6 +398,7 @@ _DAT_PREFIX = r"(?:_?(?:PTR_)?DAT_|PTR_LAB_)"
 _PSEUDO_C_DAT_ADDR_PATTERN = re.compile(r"&\s*" + _DAT_PREFIX + r"([0-9a-fA-F]{8})\b")
 _PSEUDO_C_DAT_PATTERN = re.compile(r"\b" + _DAT_PREFIX + r"([0-9a-fA-F]{8})\b")
 _PSEUDO_C_BOOL_LITERAL_PATTERN = re.compile(r"\b(true|false)\b")
+_PSEUDO_C_THISCALL_PATTERN = re.compile(r"\b__thiscall\b\s*")
 
 
 def _pseudo_c_dat_rewrite(c: str) -> str:
@@ -594,6 +598,9 @@ def ghidra_pseudo_c_normalize(
 	c = _PSEUDO_C_TYPE_PATTERN.sub(lambda m: _PSEUDO_C_TYPE_MAP[m.group(1)], c)
 	c = _PSEUDO_C_FUN_PATTERN.sub(lambda m: f"fn_{m.group(1).upper()}", c)
 	c = c.replace("XAPILIB::", "")  # C++ namespace prefix doesn't parse as C
+	# MSVC 7.1 in C mode rejects __thiscall on a free-function decl; drop it so
+	# the warm-start compiles (the agent restores the convention if it matters).
+	c = _PSEUDO_C_THISCALL_PATTERN.sub("", c)
 	if stdcall_target:
 		c = _pseudo_c_stdcall_target_rewrite(c, stdcall_target)
 	if callee_arities:
