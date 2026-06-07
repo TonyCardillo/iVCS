@@ -358,10 +358,19 @@ def _tail(s: str | None, lines: int = 40) -> str:
 
 _PSEUDO_C_TYPE_MAP = {
 	"undefined8": "__int64",
+	"undefined7": "__int64",
+	"undefined6": "__int64",
+	"undefined5": "__int64",
 	"undefined4": "int",
+	"undefined3": "int",
 	"undefined2": "short",
 	"undefined1": "char",
 	"undefined": "void",
+	# Ghidra's x87 80-bit extended types (universal decompiler output). MSVC has
+	# no 80-bit float and its `long double` is 8 bytes, so `double` both compiles
+	# and is the closest match; the agent refines from there.
+	"float10": "double",
+	"unkbyte10": "double",
 	"byte": "BYTE",
 	"ushort": "USHORT",
 	"uint": "UINT",
@@ -378,8 +387,11 @@ _PSEUDO_C_TYPE_PATTERN = re.compile(
 	r"\b(" + "|".join(re.escape(k) for k in _PSEUDO_C_TYPE_MAP) + r")\b"
 )
 _PSEUDO_C_FUN_PATTERN = re.compile(r"\bFUN_([0-9a-fA-F]{8})\b")
-# Match DAT_, _DAT_ (overlap variant), and PTR_DAT_ (pointer-at-address) globals.
-_DAT_PREFIX = r"_?(?:PTR_)?DAT_"
+# Match DAT_, _DAT_ (overlap variant), PTR_DAT_ (pointer-at-address), and
+# PTR_LAB_ (pointer-at-address holding a code-label pointer) globals. All denote
+# a global at a fixed address, so all rewrite identically to an absolute deref.
+# Bare LAB_ is deliberately excluded — it's a valid local goto target.
+_DAT_PREFIX = r"(?:_?(?:PTR_)?DAT_|PTR_LAB_)"
 _PSEUDO_C_DAT_ADDR_PATTERN = re.compile(r"&\s*" + _DAT_PREFIX + r"([0-9a-fA-F]{8})\b")
 _PSEUDO_C_DAT_PATTERN = re.compile(r"\b" + _DAT_PREFIX + r"([0-9a-fA-F]{8})\b")
 _PSEUDO_C_BOOL_LITERAL_PATTERN = re.compile(r"\b(true|false)\b")
@@ -399,6 +411,67 @@ def _pseudo_c_dat_rewrite(c: str) -> str:
 	c = _PSEUDO_C_DAT_ADDR_PATTERN.sub(lambda m: f"((int *)0x{m.group(1)})", c)
 	c = _PSEUDO_C_DAT_PATTERN.sub(lambda m: f"(*(int *)0x{m.group(1)})", c)
 	return c
+
+
+_SUBPIECE_PATTERN = re.compile(r"\._(\d+)_(\d+)_")
+_SUBPIECE_TYPE_BY_SIZE = {1: "char", 2: "short", 4: "int", 8: "__int64"}
+
+
+def _subpiece_operand_start(c: str, dot: int) -> int:
+	"""Index where the postfix operand ending just before `dot` begins.
+
+	Scans left over an identifier / member chain (`a.b`, `a->b`), balanced
+	`(...)`/`[...]` groups, so the whole accessed value is captured — not just its
+	rightmost token."""
+	i = dot
+	while i > 0:
+		ch = c[i - 1]
+		if ch in ")]":
+			open_ch = "(" if ch == ")" else "["
+			depth, j = 1, i - 2
+			while j >= 0 and depth:
+				if c[j] == ch:
+					depth += 1
+				elif c[j] == open_ch:
+					depth -= 1
+				j -= 1
+			i = j + 1
+		elif ch.isalnum() or ch == "_":
+			j = i - 1
+			while j >= 0 and (c[j].isalnum() or c[j] == "_"):
+				j -= 1
+			i = j + 1
+		elif ch == ".":
+			i -= 1
+		elif ch == ">" and i >= 2 and c[i - 2] == "-":
+			i -= 2
+		else:
+			break
+	return i
+
+
+def _pseudo_c_subpiece_rewrite(c: str) -> str:
+	"""Rewrite Ghidra's `EXPR._<offset>_<size>_` sub-range accesses to a sized,
+	offset deref: `(*(T *)((char *)&(EXPR) + offset))`.
+
+	Ghidra emits these to read part of a wider value; MSVC parses `._0_1_` as a
+	member access on a non-struct (C2224). Size picks the element type (1→char,
+	2→short, 4→int, 8→__int64; odd sizes fall back to int). Safe by construction:
+	a draft containing a subpiece never compiles as-is, so a rewrite can't regress
+	a working baseline."""
+	out: list[str] = []
+	last = 0
+	for m in _SUBPIECE_PATTERN.finditer(c):
+		start = _subpiece_operand_start(c, m.start())
+		operand = c[start : m.start()]
+		if start < last or not operand.strip():
+			continue  # overlaps a prior rewrite or has no operand to anchor — skip
+		typ = _SUBPIECE_TYPE_BY_SIZE.get(int(m.group(2)), "int")
+		out.append(c[last:start])
+		out.append(f"(*({typ} *)((char *)&({operand}) + {int(m.group(1))}))")
+		last = m.end()
+	out.append(c[last:])
+	return "".join(out)
 
 
 def _pseudo_c_struct_instance_rewrite(c: str, struct_names: tuple[str, ...]) -> str:
@@ -527,6 +600,7 @@ def ghidra_pseudo_c_normalize(
 		c = _pseudo_c_pad_stdcall_calls(c, callee_arities)
 	c = _pseudo_c_struct_instance_rewrite(c, struct_names)
 	c = _pseudo_c_dat_rewrite(c)
+	c = _pseudo_c_subpiece_rewrite(c)
 	c = _PSEUDO_C_BOOL_LITERAL_PATTERN.sub(lambda m: "1" if m.group(1) == "true" else "0", c)
 	return c
 

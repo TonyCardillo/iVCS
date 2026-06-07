@@ -377,6 +377,77 @@ void FUN_002d0cf5(int param_1, undefined4 param_2)
 		assert "fn_002D0979" in out
 
 
+class TestExtendedGhidraTypes:
+	# x87 80-bit and odd-sized Ghidra types are universal decompiler output (not
+	# binary-specific). Left untranslated they're undeclared types, so even the
+	# function signature fails to parse (C2061). MSVC has no 80-bit float; double
+	# lets the warm-start compile and the agent refines from there.
+	def test_float10_return_type_becomes_double(self):
+		out = ghidra_pseudo_c_normalize("float10 fn_x(double param_1)\n{\n  return 0;\n}\n")
+		assert "double fn_x(double param_1)" in out
+		assert "float10" not in out
+
+	def test_unkbyte10_becomes_double(self):
+		out = ghidra_pseudo_c_normalize("unkbyte10 fn_x(double p)\n{\n}\n")
+		assert "double fn_x(double p)" in out
+		assert "unkbyte10" not in out
+
+	def test_x87_register_var_decl_compiles(self):
+		out = ghidra_pseudo_c_normalize("  float10 in_ST0;\n")
+		assert "double in_ST0;" in out
+
+	def test_odd_sized_undefined_types_mapped(self):
+		out = ghidra_pseudo_c_normalize("undefined3 a; undefined5 b; undefined6 c; undefined7 d;")
+		assert "undefined" not in out
+		assert "int a;" in out  # 3 bytes -> int
+		assert "__int64 b;" in out and "__int64 c;" in out and "__int64 d;" in out
+
+	def test_word_boundary_keeps_lookalike_identifiers(self):
+		# A variable literally named `float10x` must not be clipped.
+		src = "int float10x = 0;"
+		assert ghidra_pseudo_c_normalize(src) == src
+
+
+class TestPtrLabRewrite:
+	# Ghidra emits PTR_LAB_<addr> for a global (at a fixed address) whose value is
+	# a code-label pointer — structurally identical to PTR_DAT_. Xbox images load
+	# at a fixed base, so it's an absolute reference; rewrite like DAT_.
+	def test_address_of_ptr_lab_becomes_absolute_cast(self):
+		out = ghidra_pseudo_c_normalize("*param_1 = &PTR_LAB_0041661c;")
+		assert out == "*param_1 = ((int *)0x0041661c);"
+
+	def test_bare_ptr_lab_becomes_absolute_deref(self):
+		out = ghidra_pseudo_c_normalize("x = PTR_LAB_0041661c;")
+		assert out == "x = (*(int *)0x0041661c);"
+
+	def test_bare_lab_goto_target_left_untouched(self):
+		# A plain LAB_ (no PTR_ prefix) is a valid local goto label — must not move.
+		src = "goto LAB_0041661c;"
+		assert ghidra_pseudo_c_normalize(src) == src
+
+
+class TestSubpieceRewrite:
+	# Ghidra's `EXPR._<offset>_<size>_` accesses a sub-range of a value; MSVC reads
+	# it as a struct member access on a non-struct (C2224). Rewrite to a sized,
+	# offset absolute deref. Safe by construction: any draft containing a subpiece
+	# fails to compile today, so a rewrite can only help.
+	def test_byte_subpiece_on_deref(self):
+		out = ghidra_pseudo_c_normalize("(*(int *)0x004f93b8)._0_1_ = 0;")
+		assert out == "(*(char *)((char *)&((*(int *)0x004f93b8)) + 0)) = 0;"
+
+	def test_offset_and_size_select_type(self):
+		out = ghidra_pseudo_c_normalize("x = foo._4_4_;")
+		assert out == "x = (*(int *)((char *)&(foo) + 4));"
+
+	def test_short_subpiece(self):
+		out = ghidra_pseudo_c_normalize("foo._2_2_ = 1;")
+		assert out == "(*(short *)((char *)&(foo) + 2)) = 1;"
+
+	def test_non_subpiece_member_access_untouched(self):
+		src = "header.CertificateHeader = 1;"
+		assert ghidra_pseudo_c_normalize(src) == src
+
+
 class TestStructNames:
 	def test_parses_struct_and_union_names_in_order(self):
 		header = (
