@@ -122,6 +122,48 @@ def test_compose_ctx_h_typedefs_code_as_callable():
 	assert "typedef" in _DEFAULT_CTX_H
 
 
+def test_default_ctx_h_declares_pcode_intrinsics():
+	# Ghidra emits CONCAT/SUB/ZEXT/SEXT/CARRY pseudo-ops and odd-width int types;
+	# the prelude must define them so warm-start drafts that use them compile.
+	from src.drivers.launcher import _DEFAULT_CTX_H
+
+	assert "CONCAT31" in _DEFAULT_CTX_H
+	assert "ZEXT" in _DEFAULT_CTX_H and "SEXT" in _DEFAULT_CTX_H and "CARRY" in _DEFAULT_CTX_H
+	assert "int3" in _DEFAULT_CTX_H
+
+
+def test_sweep_regenerates_stale_ctx_h():
+	# A re-sweep must refresh ctx.h so prelude improvements (new typedefs, p-code
+	# intrinsics) reach functions an earlier sweep already prepared with a stale
+	# prelude. The sweep is a baseline pass over untouched functions, so passing
+	# reset_ctx_h=True clobbers nothing hand-tuned.
+	from types import SimpleNamespace
+
+	import src.drivers.launcher as L
+
+	captured = {}
+
+	def fake_prepare(project, fn, **kwargs):
+		captured.update(kwargs)
+		return SimpleNamespace(root=Path("/x"), function_name="_fn_X"), "asm"
+
+	original = L.prepare_decomp_workspace
+	L.prepare_decomp_workspace = fake_prepare
+	original_run = L.ghidra_only_run
+	L.ghidra_only_run = lambda **k: SimpleNamespace(
+		best_match_percent=0.0, termination_reason="ghidra_only"
+	)
+	try:
+		L.ghidra_sweep_attempt_one(
+			project=None, fn=FunctionEntry(name="fn_X", va=0x1000, size=16), parsed=None
+		)
+	finally:
+		L.prepare_decomp_workspace = original
+		L.ghidra_only_run = original_run
+
+	assert captured.get("reset_ctx_h") is True
+
+
 def test_compose_ctx_h_stdcall_appends_forward_decl():
 	out = _compose_ctx_h("fn_002D1D94", "_fn_002D1D94@4")
 	assert "int __stdcall fn_002D1D94(int);" in out

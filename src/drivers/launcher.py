@@ -84,6 +84,45 @@ typedef void *           PIO_STATUS_BLOCK;
    must be a function type for an indirect call `(**(code **)x)()` to compile.
    `int` return suits both ignored- and consumed-result call sites. */
 typedef int              code();
+/* --- Ghidra p-code intrinsics (universal decompiler output) ----------------
+   Odd-width integer types and the CONCAT/SUB/ZEXT/SEXT/CARRY pseudo-ops Ghidra
+   emits for sub-register and multi-word arithmetic. Harmless when unused; they
+   let a warm-start draft compile so the agent inherits a working baseline. */
+typedef int              int3;
+typedef unsigned int     uint3;
+typedef __int64          int5;
+typedef __int64          int6;
+typedef __int64          int7;
+typedef unsigned __int64 uint5;
+typedef unsigned __int64 uint6;
+typedef unsigned __int64 uint7;
+#define CONCAT11(h,l) \
+((unsigned short)(((unsigned int)(unsigned char)(h) << 8) | (unsigned char)(l)))
+#define CONCAT13(h,l) (((unsigned int)(unsigned char)(h) << 24) | ((unsigned int)(l) & 0xffffff))
+#define CONCAT22(h,l) (((unsigned int)(unsigned short)(h) << 16) | (unsigned short)(l))
+#define CONCAT31(h,l) (((unsigned int)(h) << 8) | (unsigned char)(l))
+#define CONCAT44(h,l) (((unsigned __int64)(unsigned int)(h) << 32) | (unsigned int)(l))
+#define SUB41(x,n)    ((unsigned char)((unsigned int)(x) >> ((n) * 8)))
+#define SUB42(x,n)    ((unsigned short)((unsigned int)(x) >> ((n) * 8)))
+#define SUB81(x,n)    ((unsigned char)((unsigned __int64)(x) >> ((n) * 8)))
+#define SUB84(x,n)    ((unsigned int)((unsigned __int64)(x) >> ((n) * 8)))
+#define ZEXT12(x)     ((unsigned short)(unsigned char)(x))
+#define ZEXT14(x)     ((unsigned int)(unsigned char)(x))
+#define ZEXT18(x)     ((unsigned __int64)(unsigned char)(x))
+#define ZEXT24(x)     ((unsigned int)(unsigned short)(x))
+#define ZEXT28(x)     ((unsigned __int64)(unsigned short)(x))
+#define ZEXT48(x)     ((unsigned __int64)(unsigned int)(x))
+#define SEXT14(x)     ((int)(signed char)(x))
+#define SEXT18(x)     ((__int64)(signed char)(x))
+#define SEXT24(x)     ((int)(short)(x))
+#define SEXT28(x)     ((__int64)(short)(x))
+#define SEXT48(x)     ((__int64)(int)(x))
+#define CARRY1(a,b) \
+((unsigned char)((unsigned char)(a) + (unsigned char)(b)) < (unsigned char)(a))
+#define CARRY2(a,b) \
+((unsigned short)((unsigned short)(a) + (unsigned short)(b)) < (unsigned short)(a))
+#define CARRY4(a,b) \
+((unsigned int)((unsigned int)(a) + (unsigned int)(b)) < (unsigned int)(a))
 """
 
 
@@ -274,6 +313,12 @@ def ghidra_sweep_attempt_one(
 	Runs synchronously (the sweep's worker thread drives the queue) and returns a
 	classified SweepOutcome. Compile/diff are injected for testability; they bind
 	to Wine + objdiff by default.
+
+	`reset_ctx_h=True`: the sweep is a baseline pass over *untouched* functions, so
+	regenerating ctx.h costs no hand-tuned work and is required for prelude
+	improvements (new typedefs, the p-code intrinsics) to reach functions that were
+	prepared by an earlier sweep — a cached ctx.h would otherwise pin them to the
+	old prelude and miss every later fix.
 	"""
 	workspace, _target_asm = prepare_decomp_workspace(
 		project,
@@ -281,6 +326,7 @@ def ghidra_sweep_attempt_one(
 		parsed=parsed,
 		label_for=label_for,
 		use_ghidra_warmstart=True,
+		reset_ctx_h=True,
 	)
 	result = ghidra_only_run(workspace=workspace, compile_fn=compile_fn, diff_fn=diff_fn)
 	return sweep_outcome_classify(fn.va, fn.name, result)
