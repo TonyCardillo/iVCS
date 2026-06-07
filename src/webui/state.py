@@ -91,6 +91,7 @@ class SweepState:
 	done: int = 0
 	matched: int = 0
 	partial: int = 0
+	no_match: int = 0  # compiled and diffed, but scored 0%
 	failed: int = 0
 	current: str | None = None
 	started_at: float = 0.0

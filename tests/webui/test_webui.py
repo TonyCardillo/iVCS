@@ -507,9 +507,10 @@ class TestSweepSection:
 				project_path=path,
 				project_name="c",
 				total=10,
-				done=4,
+				done=8,
 				matched=2,
 				partial=1,
+				no_match=4,
 				failed=1,
 				current="fn_00012200",
 			)
@@ -517,8 +518,9 @@ class TestSweepSection:
 		html, active = _sweep_section(path, _stats(untouched=6))
 		assert active is True
 		assert "SWEEPING" in html
-		assert "4/10" in html
+		assert "8/10" in html
 		assert "2 matched" in html
+		assert "4 no-match" in html  # the bucket that makes the counts sum to done
 		assert 'action="/sweep/stop' in html
 		assert "fn_00012200" in html
 
@@ -532,11 +534,15 @@ class TestSweepSection:
 				state="done",
 				done=10,
 				matched=3,
+				partial=1,
+				no_match=5,
+				failed=1,
 			)
 		)
 		html, active = _sweep_section(path, _stats(untouched=7))
 		assert active is False
 		assert "last sweep finished" in html
+		assert "5 no-match" in html
 		assert "/sweep/launch" in html  # can run again
 
 

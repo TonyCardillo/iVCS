@@ -91,7 +91,7 @@ def _sweep_section(project_path_str: str, stats: ProjectStats) -> tuple[str, boo
 			f'{badge("pending", "SWEEPING")}'
 			f'<span class="sweep-counts">{sweep.done}/{sweep.total} · '
 			f'<span class="green">{sweep.matched} matched</span> · '
-			f"{sweep.partial} partial · {sweep.failed} failed</span>"
+			f"{sweep.partial} partial · {sweep.no_match} no-match · {sweep.failed} failed</span>"
 			f"{current}"
 			f'<form class="inline sweep-stop" method="post" action="/sweep/stop?path={path_q}">'
 			'<button type="submit">stop</button></form>'
@@ -113,7 +113,7 @@ def _sweep_section(project_path_str: str, stats: ProjectStats) -> tuple[str, boo
 				f'<p class="muted tight" style="margin-top:10px;">last sweep {verb}: '
 				f"{sweep.done}/{sweep.total} done · "
 				f'<span class="green">{sweep.matched} matched</span> · '
-				f"{sweep.partial} partial · {sweep.failed} failed</p>"
+				f"{sweep.partial} partial · {sweep.no_match} no-match · {sweep.failed} failed</p>"
 			)
 
 	if untouched == 0:

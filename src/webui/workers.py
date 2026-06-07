@@ -157,6 +157,8 @@ def sweep_launch(project_path_str: str) -> SweepState:
 			state.matched += 1
 		elif outcome.state == "partial":
 			state.partial += 1
+		elif outcome.state == "no_match":
+			state.no_match += 1
 		elif outcome.state == "failed":
 			state.failed += 1
 
